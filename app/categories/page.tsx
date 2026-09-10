@@ -1,0 +1,15 @@
+'use client';
+
+import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowRight, Search, ShoppingBasket } from 'lucide-react';
+import { addToPickupCart } from '@/lib/pickupCart';
+
+export default function CategoriesPage() {
+  const [categories, setCategories] = useState<any[]>([]);
+  const [query, setQuery] = useState('');
+  const [added, setAdded] = useState('');
+  useEffect(() => { const initial = new URLSearchParams(window.location.search).get('q') || ''; setQuery(initial); fetch('/api/waste-categories').then((r) => r.json()).then((d) => setCategories(d.success ? d.data : [])).catch(() => {}); }, []);
+  const results = useMemo(() => categories.filter((c) => `${c.name} ${c.description}`.toLowerCase().includes(query.toLowerCase())), [categories, query]);
+  return <main className="mx-auto max-w-6xl px-4 py-9 sm:px-6"><p className="text-xs font-black tracking-[.16em] text-emerald-700">PICKUP CATALOGUE</p><h1 className="mt-1 text-3xl font-black tracking-tight text-slate-950">What can we pick up?</h1><p className="mt-2 text-sm text-slate-500">Search a category, add it to your Pickup Cart, then complete the existing booking flow.</p><label className="relative mt-6 block max-w-xl"><Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search paper, plastic, metal, e-waste..." className="h-12 w-full rounded-2xl border border-slate-200 bg-white pl-12 pr-4 text-sm font-semibold outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100" /></label>{added && <p className="mt-4 text-sm font-bold text-emerald-700">{added}</p>}<section className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{results.map((category, index) => <article key={category.id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="text-3xl">{['📄','♻️','🔩','💻','🍾','🛋️'][index % 6]}</div><h2 className="mt-3 text-lg font-black text-slate-950">{category.name}</h2><p className="mt-1 min-h-10 text-sm text-slate-500">{category.description}</p><p className="mt-3 text-sm font-black text-emerald-700">₹{category.pricePerKg}/kg · {category.type === 'RECYCLABLE_BUY' ? 'We pay you' : 'Service charge'}</p><div className="mt-5 flex gap-2"><button onClick={() => { addToPickupCart(category.id); setAdded(`${category.name} added to Pickup Cart`); }} className="inline-flex flex-1 items-center justify-center gap-1 rounded-xl bg-slate-950 px-3 py-2.5 text-xs font-black text-white"><ShoppingBasket className="h-4 w-4" />Add</button><Link href={`/book?category=${encodeURIComponent(category.id)}`} className="inline-flex items-center justify-center rounded-xl border border-emerald-200 px-3 py-2.5 text-xs font-black text-emerald-700">Book <ArrowRight className="ml-1 h-3.5 w-3.5" /></Link></div></article>)}</section>{results.length === 0 && <p className="mt-10 text-sm font-bold text-slate-500">No matching waste category yet. Try a broader search.</p>}</main>;
+}
