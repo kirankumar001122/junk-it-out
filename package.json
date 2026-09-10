@@ -9,6 +9,7 @@
     "start": "next start",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
+    "db:seed:categories": "npx tsx prisma/seed-categories.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "prisma": {
@@ -19,6 +20,7 @@
   "license": "ISC",
   "dependencies": {
     "@prisma/client": "5.22.0",
+    "@vercel/blob": "^2.8.0",
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
     "lucide-react": "^1.41.0",

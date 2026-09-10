@@ -19,6 +19,7 @@ import {
   Camera,
 } from 'lucide-react';
 import InteractiveMap from '@/components/InteractiveMap';
+import { getSecurePhotoUrl } from '@/lib/utils/photoUrl';
 
 export default function OrderTrackingPage() {
   const params = useParams();
@@ -537,15 +538,18 @@ export default function OrderTrackingPage() {
                 Customer Waste Condition Photos ({parsedPhotos.length})
               </h4>
               <div className="flex flex-wrap items-center gap-3">
-                {parsedPhotos.map((url: string, idx: number) => (
-                  <a key={idx} href={url} target="_blank" rel="noopener noreferrer" className="block group">
-                    <img
-                      src={url}
-                      alt={`Waste Photo ${idx + 1}`}
-                      className="w-20 h-20 object-cover rounded-xl border border-slate-200 shadow-sm group-hover:scale-105 transition-transform"
-                    />
-                  </a>
-                ))}
+                {parsedPhotos.map((url: string, idx: number) => {
+                  const displayUrl = getSecurePhotoUrl(url);
+                  return (
+                    <a key={idx} href={displayUrl} target="_blank" rel="noopener noreferrer" className="block group">
+                      <img
+                        src={displayUrl}
+                        alt={`Waste Photo ${idx + 1}`}
+                        className="w-20 h-20 object-cover rounded-xl border border-slate-200 shadow-sm group-hover:scale-105 transition-transform"
+                      />
+                    </a>
+                  );
+                })}
               </div>
             </div>
           );
@@ -560,7 +564,7 @@ export default function OrderTrackingPage() {
             </h4>
             <div className="flex items-center gap-4">
               <img
-                src={order.weightRecords[0].scalePhotoUrl}
+                src={getSecurePhotoUrl(order.weightRecords[0].scalePhotoUrl)}
                 alt="Weighing Scale Proof"
                 className="w-24 h-24 rounded-xl object-cover border border-slate-300 shadow-sm"
               />
