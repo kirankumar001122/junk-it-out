@@ -221,6 +221,7 @@ export default function OrderTrackingPage() {
         currency: createData.data.currency,
         name: createData.data.name,
         description: createData.data.description,
+        image: typeof window !== 'undefined' ? `${window.location.origin}/logo.png` : '/logo.png',
         order_id: createData.data.gatewayOrderId,
         handler: async (response: any) => {
           const verifyResponse = await fetch('/api/payments/verify', {

@@ -672,6 +672,7 @@ function loadRazorpayScript(): Promise<boolean> {
         currency: razorpayConfig.currency || 'INR',
         name: 'Junk It Out',
         description: razorpayConfig.description || `Pickup Order #${orderData.orderNumber}`,
+        image: typeof window !== 'undefined' ? `${window.location.origin}/logo.png` : '/logo.png',
         order_id: razorpayConfig.gatewayOrderId,
         handler: async function (response: any) {
           setLoading(true);
