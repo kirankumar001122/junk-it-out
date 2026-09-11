@@ -48,7 +48,7 @@ export default function AgentDashboardPage() {
       setAuthError(null);
 
       const profileRes = await fetch('/api/auth/me');
-      const profileData = await profileRes.json();
+      const profileData = await profileRes.json().catch(() => ({ success: false }));
 
       if (!profileData.success || !profileData.data?.user || profileData.data.user.role !== 'AGENT') {
         setAgent(null);
@@ -60,6 +60,15 @@ export default function AgentDashboardPage() {
 
       const agentUser = profileData.data.user;
       const agentProfile = agentUser.agent || null;
+
+      if (!agentProfile || !agentProfile.id) {
+        setAgent(null);
+        setOrders([]);
+        setActiveOrder(null);
+        setLoading(false);
+        return;
+      }
+
       setAgent({
         ...agentProfile,
         name: agentUser.name,
@@ -69,9 +78,9 @@ export default function AgentDashboardPage() {
       setIsOnline((agentProfile?.status || 'AVAILABLE') !== 'OFFLINE');
 
       const res = await fetch('/api/orders');
-      const data = await res.json();
+      const data = await res.json().catch(() => ({ success: false }));
       if (data.success) {
-        const agentOrders = (data.data || []).filter((o: any) => o.agentId === agentProfile?.id);
+        const agentOrders = (data.data || []).filter((o: any) => o.agentId === agentProfile.id);
         setOrders(agentOrders);
 
         const assigned = agentOrders.find(
@@ -101,28 +110,30 @@ export default function AgentDashboardPage() {
 
   useEffect(() => {
     fetchAgentData();
+  }, []);
+
+  useEffect(() => {
+    if (!activeOrder?.id || !isOnline || !agent?.id) return;
 
     const locationInterval = setInterval(() => {
-      if (activeOrder && isOnline && agent?.id) {
-        const simulatedLat = (activeOrder.address?.lat || 12.9077) + (Math.random() - 0.5) * 0.005;
-        const simulatedLng = (activeOrder.address?.lng || 77.5854) + (Math.random() - 0.5) * 0.005;
+      const simulatedLat = (activeOrder.address?.lat || 12.9077) + (Math.random() - 0.5) * 0.005;
+      const simulatedLng = (activeOrder.address?.lng || 77.5854) + (Math.random() - 0.5) * 0.005;
 
-        fetch('/api/agent/location', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            agentId: agent.id,
-            orderId: activeOrder.id,
-            lat: simulatedLat,
-            lng: simulatedLng,
-            speed: 22.4,
-          }),
-        }).catch(() => {});
-      }
+      fetch('/api/agent/location', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentId: agent.id,
+          orderId: activeOrder.id,
+          lat: simulatedLat,
+          lng: simulatedLng,
+          speed: 22.4,
+        }),
+      }).catch(() => {});
     }, 8000);
 
     return () => clearInterval(locationInterval);
-  }, [activeOrder, isOnline, agent?.id]);
+  }, [activeOrder?.id, isOnline, agent?.id]);
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();

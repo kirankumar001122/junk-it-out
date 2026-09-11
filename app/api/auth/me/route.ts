@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
       return errorResponse('UNAUTHORIZED', 'Authentication required.', 401);
     }
 
-    const user = await db.user.findUnique({
+    let user = await db.user.findUnique({
       where: { id: authUser.userId },
       include: {
         customer: true,
@@ -22,6 +22,23 @@ export async function GET(req: NextRequest) {
 
     if (!user) {
       return errorResponse('USER_NOT_FOUND', 'User profile not found.', 444);
+    }
+
+    // Auto-heal missing Agent record if role is AGENT
+    if (user.role === 'AGENT' && !user.agent) {
+      const createdAgent = await db.agent.create({
+        data: {
+          userId: user.id,
+          vehicleType: 'Piaggio Ape Auto Loader (KA-05-JK-1024)',
+          vehicleNumber: 'KA-05-JK-1024',
+          status: 'AVAILABLE',
+          serviceAreas: 'JP Nagar, Jayanagar, Koramangala, Electronic City',
+        },
+      });
+      user = {
+        ...user,
+        agent: createdAgent,
+      };
     }
 
     return successResponse({
