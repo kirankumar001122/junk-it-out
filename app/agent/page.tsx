@@ -169,7 +169,7 @@ export default function AgentDashboardPage() {
       if (res.ok && data.success) {
         fetchAgentData();
       } else {
-        setLoginError(data.message || 'Agent authentication failed.');
+        setLoginError(data.error?.message || data.message || 'Agent authentication failed.');
       }
     } catch {
       setLoginError('Network error verifying agent OTP.');
