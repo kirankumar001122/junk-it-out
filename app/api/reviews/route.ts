@@ -4,9 +4,32 @@ import { getAuthUser } from '@/lib/auth/middleware';
 
 export async function GET(req: NextRequest) {
   try {
+    const { searchParams } = new URL(req.url);
+    const isPublic = searchParams.get('public') === 'true';
     const authUser = await getAuthUser(req);
-    if (!authUser) {
-      return NextResponse.json({ success: false, message: 'Authentication required.' }, { status: 401 });
+
+    // If public request or unauthenticated visitor, return public genuine reviews
+    if (isPublic || !authUser) {
+      const reviews = await db.review.findMany({
+        take: 20,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          rating: true,
+          comment: true,
+          createdAt: true,
+          customer: {
+            select: {
+              user: {
+                select: {
+                  name: true,
+                },
+              },
+            },
+          },
+        },
+      });
+      return NextResponse.json({ success: true, data: reviews });
     }
 
     let whereClause: any = {};
