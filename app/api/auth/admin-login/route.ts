@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
           data: {
             phone: `+91${rawDigits}`,
             email: 'darshan@junkitout.in',
-            name: 'Darshan',
+            name: 'Darshan Tejomaya M',
             role: 'SUPER_ADMIN',
             admin: {
               create: {
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
           include: { admin: true, customer: true, agent: true },
         });
       } else {
-        if (user.role !== 'SUPER_ADMIN' || user.name !== 'Darshan' || !user.admin) {
+        if (user.role !== 'SUPER_ADMIN' || user.name !== 'Darshan Tejomaya M' || !user.admin) {
           let adminRecord = user.admin;
           if (!adminRecord) {
             adminRecord = await db.admin.create({
@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
           user = await db.user.update({
             where: { id: user.id },
             data: {
-              name: 'Darshan',
+              name: 'Darshan Tejomaya M',
               role: 'SUPER_ADMIN',
             },
             include: { admin: true, customer: true, agent: true },

@@ -52,7 +52,7 @@ export default function AdminHeader() {
             <User className="w-4 h-4" />
           </div>
           <div className="text-left">
-            <span className="block text-xs font-extrabold text-white leading-none">Super Admin</span>
+            <span className="block text-xs font-extrabold text-white leading-none">DARSHAN TEJOMAYA M</span>
             <span className="text-[10px] text-emerald-400 font-semibold">Operations Lead</span>
           </div>
         </div>
