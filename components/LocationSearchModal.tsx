@@ -13,6 +13,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { BENGALURU_ZONES } from '@/lib/geofence';
+import { loadGoogleMaps } from '@/components/InteractiveMap';
 
 type Props = {
   open: boolean;
@@ -65,20 +66,20 @@ export default function LocationSearchModal({
     setPredictions([]);
     setServiceError(null);
 
-    const checkGoogleMaps = () => {
-      if (window.google?.maps?.places) {
+    loadGoogleMaps()
+      .then((maps) => {
         setMapsReady(true);
-        if (!autocompleteServiceRef.current) {
-          autocompleteServiceRef.current = new window.google.maps.places.AutocompleteService();
+        if (maps?.places && !autocompleteServiceRef.current) {
+          autocompleteServiceRef.current = new maps.places.AutocompleteService();
         }
-        if (!geocoderRef.current) {
-          geocoderRef.current = new window.google.maps.Geocoder();
+        if (maps && !geocoderRef.current) {
+          geocoderRef.current = new maps.Geocoder();
         }
-      } else {
-        setTimeout(checkGoogleMaps, 300);
-      }
-    };
-    checkGoogleMaps();
+      })
+      .catch((err) => {
+        console.warn('Google Maps Places Autocomplete setup notice:', err.message);
+        setMapsReady(false);
+      });
   }, [open]);
 
   // Check serviceability via backend API

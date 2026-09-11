@@ -15,6 +15,10 @@ import {
   Power,
   ShieldCheck,
   AlertCircle,
+  Smartphone,
+  Lock,
+  ArrowRight,
+  LogOut,
 } from 'lucide-react';
 
 export default function AgentDashboardPage() {
@@ -24,6 +28,13 @@ export default function AgentDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+
+  // Agent OTP Login State
+  const [loginPhone, setLoginPhone] = useState('');
+  const [loginOtp, setLoginOtp] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   // Weighing Modal State
   const [showWeighModal, setShowWeighModal] = useState(false);
@@ -40,10 +51,10 @@ export default function AgentDashboardPage() {
       const profileData = await profileRes.json();
 
       if (!profileData.success || !profileData.data?.user || profileData.data.user.role !== 'AGENT') {
-        setAuthError('Agent authentication is required to view assigned pickups.');
         setAgent(null);
         setOrders([]);
         setActiveOrder(null);
+        setLoading(false);
         return;
       }
 
@@ -113,6 +124,73 @@ export default function AgentDashboardPage() {
     return () => clearInterval(locationInterval);
   }, [activeOrder, isOnline, agent?.id]);
 
+  const handleSendOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginPhone || loginPhone.trim().length < 10) {
+      setLoginError('Please enter a valid 10-digit agent mobile number.');
+      return;
+    }
+    setLoginLoading(true);
+    setLoginError(null);
+    try {
+      const res = await fetch('/api/auth/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: loginPhone }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setOtpSent(true);
+      } else {
+        setLoginError(data.message || 'Failed to send OTP to agent phone.');
+      }
+    } catch {
+      setLoginError('Network error sending OTP.');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginOtp || loginOtp.trim().length < 4) {
+      setLoginError('Please enter the OTP code received.');
+      return;
+    }
+    setLoginLoading(true);
+    setLoginError(null);
+    try {
+      const res = await fetch('/api/auth/agent-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: loginPhone, code: loginOtp }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        fetchAgentData();
+      } else {
+        setLoginError(data.message || 'Agent authentication failed.');
+      }
+    } catch {
+      setLoginError('Network error verifying agent OTP.');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      setAgent(null);
+      setOrders([]);
+      setActiveOrder(null);
+      setOtpSent(false);
+      setLoginOtp('');
+    } catch (e) {
+      console.error('Agent logout error:', e);
+    }
+  };
+
   const handleCallEndpoint = async (action: 'accept' | 'start' | 'arrive') => {
     if (!activeOrder) return;
     try {
@@ -132,7 +210,6 @@ export default function AgentDashboardPage() {
   const handleSubmitWeighingAndComplete = async () => {
     if (!activeOrder) return;
     try {
-      // 1. Submit Weighing Data
       const weighRes = await fetch(`/api/orders/${activeOrder.id}/weigh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -148,7 +225,6 @@ export default function AgentDashboardPage() {
         return;
       }
 
-      // 2. Submit Complete Order
       const completeRes = await fetch(`/api/orders/${activeOrder.id}/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -167,9 +243,105 @@ export default function AgentDashboardPage() {
 
   if (loading) {
     return (
-      <div className="max-w-md mx-auto p-6 text-center pt-20">
-        <RefreshCw className="w-8 h-8 text-emerald-600 animate-spin mx-auto mb-3" />
-        <p className="text-sm font-semibold text-slate-600">Loading Agent Portal...</p>
+      <div className="max-w-md mx-auto p-6 text-center pt-24 space-y-3">
+        <RefreshCw className="w-8 h-8 text-emerald-500 animate-spin mx-auto" />
+        <p className="text-sm font-semibold text-slate-400">Loading Agent Portal...</p>
+      </div>
+    );
+  }
+
+  // AGENT LOGIN FLOW (If unauthenticated or not an AGENT)
+  if (!agent) {
+    return (
+      <div className="max-w-md mx-auto min-h-screen bg-slate-950 text-white p-4 flex flex-col justify-center">
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl animate-scale-in">
+          <div className="text-center space-y-2">
+            <div className="w-14 h-14 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-2xl grid place-items-center mx-auto">
+              <Truck className="w-7 h-7" />
+            </div>
+            <h1 className="text-xl font-black text-white">Agent Partner Portal</h1>
+            <p className="text-xs text-slate-400">
+              Sign in with your registered agent mobile number to manage doorstep pickup dispatch.
+            </p>
+          </div>
+
+          {loginError && (
+            <div className="p-3 bg-rose-950/60 border border-rose-800/80 text-rose-300 rounded-2xl text-xs font-bold flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>{loginError}</span>
+            </div>
+          )}
+
+          {!otpSent ? (
+            <form onSubmit={handleSendOtp} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-400 uppercase">Agent Mobile Number</label>
+                <div className="relative">
+                  <Smartphone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                  <input
+                    type="tel"
+                    required
+                    value={loginPhone}
+                    onChange={(e) => setLoginPhone(e.target.value)}
+                    placeholder="+91 98765 43210"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-3.5 pl-10 pr-4 text-sm font-bold text-white outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loginLoading}
+                className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs py-4 rounded-2xl uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
+              >
+                {loginLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'SEND AGENT LOGIN OTP'}
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleVerifyOtp} className="space-y-4">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-400 uppercase">Enter Verification OTP</label>
+                  <button
+                    type="button"
+                    onClick={() => setOtpSent(false)}
+                    className="text-[11px] text-emerald-400 font-bold hover:underline"
+                  >
+                    Change Phone
+                  </button>
+                </div>
+                <div className="relative">
+                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    value={loginOtp}
+                    onChange={(e) => setLoginOtp(e.target.value)}
+                    placeholder="Enter 6-digit OTP"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-3.5 pl-10 pr-4 text-sm font-bold text-emerald-400 outline-none focus:border-emerald-500 tracking-widest"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loginLoading}
+                className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs py-4 rounded-2xl uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
+              >
+                {loginLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'VERIFY & ACCESS PORTAL'}
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </form>
+          )}
+
+          <div className="pt-2 text-center border-t border-slate-800/80">
+            <p className="text-[11px] text-slate-500">
+              Only authorized Junk It Out logistics personnel are permitted to sign in here.
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -196,17 +368,27 @@ export default function AgentDashboardPage() {
           </div>
         </div>
 
-        <button
-          onClick={() => setIsOnline(!isOnline)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-extrabold border transition-all ${
-            isOnline
-              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-              : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
-          }`}
-        >
-          <Power className="w-3.5 h-3.5" />
-          {isOnline ? 'ONLINE' : 'OFFLINE'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsOnline(!isOnline)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-extrabold border transition-all ${
+              isOnline
+                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+            }`}
+          >
+            <Power className="w-3.5 h-3.5" />
+            {isOnline ? 'ONLINE' : 'OFFLINE'}
+          </button>
+
+          <button
+            onClick={handleLogout}
+            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl transition-colors"
+            title="Log Out"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* TODAY'S METRICS SUMMARY */}
@@ -334,7 +516,7 @@ export default function AgentDashboardPage() {
         <div className="p-8 text-center text-slate-400 space-y-3">
           <Truck className="w-12 h-12 text-slate-600 mx-auto" />
           <h3 className="font-bold text-white text-base">No Active Pickup Assigned</h3>
-          <p className="text-xs text-slate-400">You are on duty in South Bengaluru. New orders will appear here automatically.</p>
+          <p className="text-xs text-slate-400">You are on duty in Bengaluru. New orders will appear here automatically.</p>
         </div>
       )}
 

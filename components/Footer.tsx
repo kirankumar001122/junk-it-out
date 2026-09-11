@@ -46,13 +46,14 @@ export default function Footer() {
             <h3 className="text-white font-semibold text-sm mb-4 uppercase tracking-wider">Quick Links</h3>
             <ul className="space-y-2.5 text-sm">
               <li><Link href="/book" className="hover:text-emerald-400 transition-colors">Book a Pickup</Link></li>
-              <li><Link href="/about" className="hover:text-emerald-400 transition-colors">About Us</Link></li>
-              <li><Link href="/services" className="hover:text-emerald-400 transition-colors">Our Services</Link></li>
+              <li><Link href="/pricing" className="hover:text-emerald-400 transition-colors">Price List / Rates</Link></li>
+              <li><Link href="/categories" className="hover:text-emerald-400 transition-colors">Waste Categories</Link></li>
               <li><Link href="/service-areas" className="hover:text-emerald-400 transition-colors">Service Areas</Link></li>
-              <li><Link href="/categories" className="hover:text-emerald-400 transition-colors">Waste Rates / Pricing</Link></li>
+              <li><Link href="/faq" className="hover:text-emerald-400 transition-colors">FAQ</Link></li>
+              <li><Link href="/about" className="hover:text-emerald-400 transition-colors">About Us</Link></li>
               <li><Link href="/contact" className="hover:text-emerald-400 transition-colors">Contact Us</Link></li>
               <li><Link href="/agent" className="hover:text-emerald-400 transition-colors">Pickup Agent Portal</Link></li>
-              <li><Link href="/admin" className="hover:text-emerald-400 transition-colors">Admin Operations Portal</Link></li>
+              <li><Link href="/admin" className="hover:text-emerald-400 transition-colors">Admin Portal</Link></li>
             </ul>
           </div>
 
@@ -98,6 +99,8 @@ export default function Footer() {
           <p>© 2026 Junk It Out Technologies Pvt. Ltd. All rights reserved.</p>
           <div className="flex items-center gap-6">
             <Link href="/privacy-policy" className="hover:text-slate-300">Privacy Policy</Link>
+            <Link href="/terms" className="hover:text-slate-300">Terms & Conditions</Link>
+            <Link href="/faq" className="hover:text-slate-300">FAQ</Link>
             <Link href="/accepted-waste" className="hover:text-slate-300">Waste Policy</Link>
           </div>
         </div>

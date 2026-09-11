@@ -5,10 +5,36 @@ import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 
 export async function GET(req: NextRequest) {
   try {
-    const categories = await db.wasteCategory.findMany({
+    let categories = await db.wasteCategory.findMany({
       where: { active: true },
       orderBy: { name: 'asc' },
     });
+
+    if (categories.length === 0) {
+      const defaultCategories = [
+        { name: 'Plastic Waste', description: 'Bottles, containers, polythene, packaging materials, hard plastics', icon: 'Recycle', type: 'RECYCLABLE_BUY', pricePerKg: 18.0 },
+        { name: 'Paper & Cardboard', description: 'Carton boxes, newspapers, magazines, office paper, shredded paper', icon: 'FileText', type: 'RECYCLABLE_BUY', pricePerKg: 14.0 },
+        { name: 'Scrap Metal', description: 'Iron, steel, aluminium cans, copper wire, brass fittings, tin', icon: 'Hammer', type: 'RECYCLABLE_BUY', pricePerKg: 32.0 },
+        { name: 'E-Waste', description: 'Keyboards, chargers, old phones, motherboards, small appliances', icon: 'Monitor', type: 'RECYCLABLE_BUY', pricePerKg: 45.0 },
+        { name: 'Household Dry Waste', description: 'Clean dry packaging, fabric scraps, wooden pieces, rubber items', icon: 'Trash2', type: 'RECYCLABLE_BUY', pricePerKg: 8.0 },
+        { name: 'Glass & Bottles', description: 'Intact glass bottles, glass jars, non-broken glass scrap', icon: 'Wine', type: 'RECYCLABLE_BUY', pricePerKg: 4.0 },
+        { name: 'Old Furniture & Heavy Scrap', description: 'Chairs, tables, beds, metal frames, heavy bulky junk', icon: 'Armchair', type: 'WASTE_CHARGE', pricePerKg: 15.0 },
+        { name: 'Appliances (Fridge/AC/Washing Machine)', description: 'Refrigerators, AC units, washing machines, microwaves', icon: 'Tv', type: 'RECYCLABLE_BUY', pricePerKg: 25.0 },
+      ];
+
+      for (const cat of defaultCategories) {
+        await db.wasteCategory.upsert({
+          where: { name: cat.name },
+          update: { pricePerKg: cat.pricePerKg, type: cat.type, description: cat.description },
+          create: cat,
+        });
+      }
+
+      categories = await db.wasteCategory.findMany({
+        where: { active: true },
+        orderBy: { name: 'asc' },
+      });
+    }
 
     return successResponse(categories);
   } catch (err: any) {

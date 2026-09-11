@@ -16,21 +16,30 @@ import {
   Filter,
   Camera,
   Layers,
+  Smartphone,
+  ShieldCheck,
 } from 'lucide-react';
+import CustomerOtpLogin from '@/components/CustomerOtpLogin';
 
 export default function MyPickupsPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'ALL' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED'>('ALL');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [unauthenticated, setUnauthenticated] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
 
   const fetchOrders = async () => {
     setLoading(true);
     setErrorMsg(null);
+    setUnauthenticated(false);
     try {
       const res = await fetch('/api/orders');
       const data = await res.json();
-      if (data.success) {
+      if (res.status === 401 || !data.success && data.message?.includes('Authentication required')) {
+        setUnauthenticated(true);
+        setOrders([]);
+      } else if (data.success) {
         setOrders(data.data || []);
       } else {
         setErrorMsg(data.message || 'Failed to load your pickup history.');
@@ -46,6 +55,36 @@ export default function MyPickupsPage() {
   useEffect(() => {
     fetchOrders();
   }, []);
+
+  if (unauthenticated && !loading) {
+    return (
+      <div className="max-w-xl mx-auto px-4 py-16 space-y-6">
+        <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm text-center space-y-5 animate-scale-in">
+          <div className="w-16 h-16 bg-emerald-100 text-emerald-700 rounded-3xl grid place-items-center mx-auto">
+            <Smartphone className="w-8 h-8" />
+          </div>
+          <div className="space-y-1">
+            <h1 className="text-xl font-black text-slate-900">Sign in to View Your Pickups</h1>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+              Log in with your mobile OTP to view your active doorstep pickups, order status, and digital scrap receipts.
+            </p>
+          </div>
+          <button
+            onClick={() => setLoginOpen(true)}
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-3.5 rounded-2xl shadow-md uppercase tracking-wider transition-transform hover:scale-[1.01]"
+          >
+            LOGIN WITH MOBILE OTP
+          </button>
+        </div>
+
+        <CustomerOtpLogin
+          open={loginOpen}
+          onClose={() => setLoginOpen(false)}
+          onAuthenticated={() => fetchOrders()}
+        />
+      </div>
+    );
+  }
 
   // Filter Counts
   const activeOrders = orders.filter(
@@ -303,6 +342,12 @@ export default function MyPickupsPage() {
           })}
         </div>
       )}
+
+      <CustomerOtpLogin
+        open={loginOpen}
+        onClose={() => setLoginOpen(false)}
+        onAuthenticated={() => fetchOrders()}
+      />
     </div>
   );
 }
