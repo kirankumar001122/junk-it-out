@@ -22,24 +22,87 @@ export async function POST(req: NextRequest) {
       return errorResponse('INVALID_OTP', 'OTP code is required.', 400);
     }
 
+    // 1. Verify OTP with Fast2SMS provider
     const otpVerification = await verifyOtp(normalized, body.code, getClientIp(req));
     if (!otpVerification.valid) {
-      return errorResponse('OTP_VERIFICATION_FAILED', 'The OTP could not be verified. Please request a new code and try again.', otpVerification.status === 'rate_limited' ? 429 : 400);
+      return errorResponse(
+        'OTP_VERIFICATION_FAILED',
+        'The OTP could not be verified. Please request a new code and try again.',
+        otpVerification.status === 'rate_limited' ? 429 : 400
+      );
     }
 
-    const user = await db.user.findUnique({
-      where: { phone: normalized },
+    // 2. Lookup & Provision Authorized Admin Account (Darshan - 8884176048)
+    const rawDigits = normalized.replace(/^\+91/, '').replace(/\D/g, '');
+    const isAuthorizedAdminNumber = rawDigits === '8884176048';
+    const phoneVariants = Array.from(
+      new Set([normalized, rawDigits, `+91${rawDigits}`, `0${rawDigits}`])
+    );
+
+    let user = await db.user.findFirst({
+      where: { phone: { in: phoneVariants } },
       include: { admin: true, customer: true, agent: true },
     });
+
+    if (isAuthorizedAdminNumber) {
+      if (!user) {
+        user = await db.user.create({
+          data: {
+            phone: `+91${rawDigits}`,
+            email: 'darshan@junkitout.in',
+            name: 'Darshan',
+            role: 'SUPER_ADMIN',
+            admin: {
+              create: {
+                department: 'Operations & Management',
+                accessLevel: 'SUPER_ADMIN',
+              },
+            },
+          },
+          include: { admin: true, customer: true, agent: true },
+        });
+      } else {
+        if (user.role !== 'SUPER_ADMIN' || user.name !== 'Darshan' || !user.admin) {
+          let adminRecord = user.admin;
+          if (!adminRecord) {
+            adminRecord = await db.admin.create({
+              data: {
+                userId: user.id,
+                department: 'Operations & Management',
+                accessLevel: 'SUPER_ADMIN',
+              },
+            });
+          }
+          user = await db.user.update({
+            where: { id: user.id },
+            data: {
+              name: 'Darshan',
+              role: 'SUPER_ADMIN',
+            },
+            include: { admin: true, customer: true, agent: true },
+          });
+        }
+      }
+
+      // Ensure NO other user retains ADMIN or SUPER_ADMIN access
+      await db.user.updateMany({
+        where: {
+          role: { in: ['ADMIN', 'SUPER_ADMIN'] },
+          phone: { notIn: ['+918884176048', '8884176048', '08884176048'] },
+        },
+        data: { role: 'CUSTOMER' },
+      });
+    }
 
     if (!user || !user.admin || !['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
       return errorResponse(
         'FORBIDDEN',
-        'Admin access required. This portal is restricted to authorized operations staff.',
+        'Admin access required. This portal is strictly restricted to authorized admin Darshan (8884176048).',
         403
       );
     }
 
+    // 3. Issue Signed JWT Token
     const token = signToken({
       userId: user.id,
       phone: user.phone,

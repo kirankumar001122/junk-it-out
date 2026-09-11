@@ -37,29 +37,77 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Lookup Agent User in Database (with phone format resilience)
+    // 2. Lookup & Provision Agent User (Authorized Agent: 9353276638)
     const rawDigits = normalized.replace(/^\+91/, '').replace(/\D/g, '');
+    const isAuthorizedAgentNumber = rawDigits === '9353276638';
     const phoneVariants = Array.from(
       new Set([normalized, rawDigits, `+91${rawDigits}`, `0${rawDigits}`])
     );
 
-    const user = await db.user.findFirst({
+    let user = await db.user.findFirst({
       where: { phone: { in: phoneVariants } },
       include: { agent: true },
     });
 
-    if (!user) {
-      return errorResponse(
-        'NOT_FOUND',
-        `No registered agent account found for ${normalized}. Please contact operations to register as a field agent.`,
-        404
-      );
+    if (isAuthorizedAgentNumber) {
+      if (!user) {
+        // Create official agent user
+        user = await db.user.create({
+          data: {
+            phone: `+91${rawDigits}`,
+            email: 'agent@junkitout.in',
+            name: 'Junk It Out Agent',
+            role: 'AGENT',
+            agent: {
+              create: {
+                vehicleType: 'Piaggio Ape Auto Loader (KA-05-JK-1024)',
+                vehicleNumber: 'KA-05-JK-1024',
+                status: 'AVAILABLE',
+                serviceAreas: 'JP Nagar, Jayanagar, Koramangala, Electronic City',
+              },
+            },
+          },
+          include: { agent: true },
+        });
+      } else {
+        // Ensure user has AGENT role & active agent profile
+        if (user.role !== 'AGENT' || !user.agent) {
+          let agentRecord = user.agent;
+          if (!agentRecord) {
+            agentRecord = await db.agent.create({
+              data: {
+                userId: user.id,
+                vehicleType: 'Piaggio Ape Auto Loader (KA-05-JK-1024)',
+                vehicleNumber: 'KA-05-JK-1024',
+                status: 'AVAILABLE',
+                serviceAreas: 'JP Nagar, Jayanagar, Koramangala, Electronic City',
+              },
+            });
+          }
+          user = await db.user.update({
+            where: { id: user.id },
+            data: { role: 'AGENT' },
+            include: { agent: true },
+          });
+        }
+      }
+
+      // Reassign any active unassigned/legacy agent orders to this agent
+      if (user?.agent?.id) {
+        await db.order.updateMany({
+          where: {
+            status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WEIGHING'] },
+            agentId: null,
+          },
+          data: { agentId: user.agent.id, status: 'AGENT_ASSIGNED' },
+        });
+      }
     }
 
-    if (user.role !== 'AGENT' || !user.agent) {
+    if (!user || user.role !== 'AGENT' || !user.agent) {
       return errorResponse(
         'FORBIDDEN',
-        `Account ${normalized} is registered as ${user.role}. Agent Portal access is restricted to authorized field agents.`,
+        `No registered agent account found for ${normalized}. Agent Portal access is restricted to authorized field agent (9353276638).`,
         403
       );
     }

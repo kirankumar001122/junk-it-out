@@ -5,14 +5,14 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('Seeding Junk It Out database...');
 
-  // 1. Create Admin User
+  // 1. Create Admin User (Darshan - 8884176048)
   const adminUser = await prisma.user.upsert({
-    where: { email: 'admin@junkitout.in' },
-    update: {},
+    where: { phone: '+918884176048' },
+    update: { name: 'Darshan', role: 'SUPER_ADMIN' },
     create: {
-      phone: '+919876543210',
-      email: 'admin@junkitout.in',
-      name: 'Darshan V (Operations Head)',
+      phone: '+918884176048',
+      email: 'darshan@junkitout.in',
+      name: 'Darshan',
       role: 'SUPER_ADMIN',
       admin: {
         create: {
@@ -23,14 +23,14 @@ async function main() {
     },
   });
 
-  // 2. Create Agent Users
+  // 2. Create Official Field Agent User (9353276638)
   const agentUser1 = await prisma.user.upsert({
-    where: { email: 'agent.ramesh@junkitout.in' },
-    update: {},
+    where: { phone: '+919353276638' },
+    update: { role: 'AGENT' },
     create: {
-      phone: '+919876543211',
-      email: 'agent.ramesh@junkitout.in',
-      name: 'Ramesh Kumar',
+      phone: '+919353276638',
+      email: 'agent@junkitout.in',
+      name: 'Junk It Out Field Agent',
       role: 'AGENT',
       agent: {
         create: {
@@ -40,30 +40,7 @@ async function main() {
           currentLat: 12.9081,
           currentLng: 77.5901, // JP Nagar 7th Phase
           rating: 4.9,
-          serviceAreas: 'JP Nagar, Jayanagar, Bannerghatta Road, Arekere',
-        },
-      },
-    },
-    include: { agent: true },
-  });
-
-  const agentUser2 = await prisma.user.upsert({
-    where: { email: 'agent.suresh@junkitout.in' },
-    update: {},
-    create: {
-      phone: '+919876543212',
-      email: 'agent.suresh@junkitout.in',
-      name: 'Suresh Patel',
-      role: 'AGENT',
-      agent: {
-        create: {
-          vehicleType: 'Tata Ace Gold (KA-51-AB-8820)',
-          vehicleNumber: 'KA-51-AB-8820',
-          status: 'AVAILABLE',
-          currentLat: 12.8452,
-          currentLng: 77.6602, // Electronic City Phase 1
-          rating: 4.8,
-          serviceAreas: 'Electronic City, Kudlu Gate, Singasandra, Begur',
+          serviceAreas: 'JP Nagar, Jayanagar, Bannerghatta Road, Koramangala',
         },
       },
     },
@@ -419,7 +396,7 @@ async function main() {
       statusHistory: {
         create: [
           { oldStatus: null, newStatus: 'BOOKING_RECEIVED', notes: 'Order placed by customer' },
-          { oldStatus: 'BOOKING_RECEIVED', newStatus: 'AGENT_ASSIGNED', notes: 'Assigned to agent Ramesh Kumar' },
+          { oldStatus: 'BOOKING_RECEIVED', newStatus: 'AGENT_ASSIGNED', notes: 'Assigned to Junk It Out Field Agent' },
           { oldStatus: 'AGENT_ASSIGNED', newStatus: 'AGENT_ON_WAY', notes: 'Agent started journey to JP Nagar 7th Phase' },
         ],
       },
@@ -436,7 +413,7 @@ async function main() {
           userId: customerUser.id,
           type: 'WHATSAPP',
           recipient: customerUser.phone,
-          content: 'Your Junk It Out pickup JIO-20260907-000124 is confirmed! Agent Ramesh Kumar (Piaggio Auto KA-05-JK-1024) is on the way. ETA: 18 mins.',
+          content: 'Your Junk It Out pickup JIO-20260907-000124 is confirmed! Field Agent (Piaggio Auto KA-05-JK-1024) is on the way. ETA: 18 mins.',
           status: 'SENT',
         },
       },
