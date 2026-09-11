@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import CustomerOtpLogin from '@/components/CustomerOtpLogin';
 import LocationSearchModal from '@/components/LocationSearchModal';
-import InteractiveMap from '@/components/InteractiveMap';
+import InteractiveMap, { loadGoogleMaps } from '@/components/InteractiveMap';
 import { BENGALURU_ZONES } from '@/lib/geofence';
 import { readPickupCart } from '@/lib/pickupCart';
 
@@ -246,19 +246,16 @@ export default function BookingPage() {
 
   // Initialize Google Maps Places & Geocoder Services for Map Search Input
   useEffect(() => {
-    const checkGoogleMaps = () => {
-      if (window.google?.maps?.places) {
-        if (!autocompleteServiceRef.current) {
-          autocompleteServiceRef.current = new window.google.maps.places.AutocompleteService();
+    loadGoogleMaps()
+      .then((maps) => {
+        if (maps?.places && !autocompleteServiceRef.current) {
+          autocompleteServiceRef.current = new maps.places.AutocompleteService();
         }
-        if (!geocoderRef.current) {
-          geocoderRef.current = new window.google.maps.Geocoder();
+        if (maps && !geocoderRef.current) {
+          geocoderRef.current = new maps.Geocoder();
         }
-      } else {
-        setTimeout(checkGoogleMaps, 300);
-      }
-    };
-    checkGoogleMaps();
+      })
+      .catch(() => {});
   }, []);
 
   const handleMapSearchInputChange = (val: string) => {
