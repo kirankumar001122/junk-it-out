@@ -80,11 +80,11 @@ export default function Footer() {
             <div className="space-y-3 text-sm text-slate-400">
               <div className="flex items-start gap-2.5">
                 <MapPin className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                <span>Munnekolala, Bengaluru, Karnataka 560037</span>
+                <span>Munnekollala, Bengaluru, Karnataka 560037</span>
               </div>
               <div className="flex items-center gap-2.5">
                 <Phone className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>+91 95918 83174 / +91 76762 72709</span>
+                <span>+91 7676272709 / +91 9591883174</span>
               </div>
               <div className="flex items-center gap-2.5">
                 <Mail className="w-4 h-4 text-emerald-400 shrink-0" />

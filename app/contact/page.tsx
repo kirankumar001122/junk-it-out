@@ -47,7 +47,7 @@ export default function ContactPage() {
               </span>
               <h2 className="text-3xl font-black text-slate-900 tracking-tight">Support & Hub Details</h2>
               <p className="text-slate-600 text-sm leading-relaxed">
-                Our main operational hub is located in South Bengaluru for rapid agent dispatch.
+                Our main operational hub is located in Bengaluru for rapid agent dispatch.
               </p>
             </div>
 
@@ -57,9 +57,9 @@ export default function ContactPage() {
                   <MapPin className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-slate-900 text-base">South Bengaluru Hub</h3>
+                  <h3 className="font-extrabold text-slate-900 text-base">Bengaluru Operational Hub</h3>
                   <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                    JP Nagar 7th Phase, Bannerghatta Main Road, Bengaluru, Karnataka 560078
+                    Munnekollala, Bengaluru, Karnataka 560037
                   </p>
                 </div>
               </div>
@@ -70,9 +70,8 @@ export default function ContactPage() {
                 </div>
                 <div>
                   <h3 className="font-extrabold text-slate-900 text-base">Phone Helplines</h3>
-                  <p className="text-xs text-slate-600 mt-1 leading-relaxed font-medium">
-                    +91 95918 83174 <br />
-                    +91 76762 72709
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed font-bold">
+                    +91 7676272709 / +91 9591883174
                   </p>
                 </div>
               </div>
@@ -83,9 +82,8 @@ export default function ContactPage() {
                 </div>
                 <div>
                   <h3 className="font-extrabold text-slate-900 text-base">Support Email</h3>
-                  <p className="text-xs text-slate-600 mt-1">
-                    info@junkitout.in <br />
-                    corporate@junkitout.in
+                  <p className="text-xs text-slate-600 mt-1 font-bold">
+                    info@junkitout.in
                   </p>
                 </div>
               </div>
