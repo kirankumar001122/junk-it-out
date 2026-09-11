@@ -8,7 +8,7 @@ export default function AdminSettingsPage() {
     companyName: 'Junk It Out Technologies Private Limited',
     dpiitNumber: 'DIPP265455',
     sector: 'Green Technology / Waste Management',
-    supportPhone: '+91 91897 45120',
+    supportPhone: '+91 95918 83174 / +91 76762 72709',
     supportEmail: 'support@junkitout.in',
     dispatchSlaMinutes: 30,
     razorpayKeyId: 'rzp_live_JunkItOut2026',

@@ -70,9 +70,9 @@ export default function ContactPage() {
                 </div>
                 <div>
                   <h3 className="font-extrabold text-slate-900 text-base">Phone Helplines</h3>
-                  <p className="text-xs text-slate-600 mt-1">
-                    +91 91897 45120 <br />
-                    +91 80 4920 1024
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed font-medium">
+                    +91 95918 83174 <br />
+                    +91 76762 72709
                   </p>
                 </div>
               </div>
