@@ -17,6 +17,12 @@ export function hasTrustedOrigin(request: NextRequest): boolean {
   if (!origin) return true;
   const host = request.headers.get('host');
   if (!host) return false;
+
+  try {
+    const originUrl = new URL(origin);
+    if (originUrl.host.toLowerCase() === host.toLowerCase()) return true;
+  } catch {}
+
   const protocol = request.headers.get('x-forwarded-proto') || (process.env.NODE_ENV === 'production' ? 'https' : 'http');
   return origin === `${protocol}://${host}`;
 }

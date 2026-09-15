@@ -8,10 +8,13 @@ export class CustomerRoleConflictError extends Error {
 }
 
 export async function findOrCreateUserCustomer(phone: string, name = 'Customer', email?: string) {
-  console.log('[CUSTOMER_SERVICE] Finding/creating user for phone:', phone, 'with name:', name);
+  const rawDigits = phone.replace(/^\+91/, '').replace(/\D/g, '');
+  const phoneVariants = Array.from(new Set([phone, rawDigits, `+91${rawDigits}`, `0${rawDigits}`]));
+
+  console.log('[CUSTOMER_SERVICE] Finding/creating user for phone:', phone, 'variants:', phoneVariants, 'with name:', name);
   
-  let user = await db.user.findUnique({
-    where: { phone },
+  let user = await db.user.findFirst({
+    where: { phone: { in: phoneVariants } },
     include: { customer: true, agent: true, admin: true },
   });
 

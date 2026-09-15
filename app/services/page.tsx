@@ -141,7 +141,7 @@ export default function ServicesPage() {
         <div className="bg-slate-900 rounded-3xl p-8 sm:p-12 text-center text-white space-y-6 shadow-xl">
           <h2 className="text-3xl font-black">Need a Custom Waste Disposal Quote?</h2>
           <p className="text-slate-300 text-sm max-w-xl mx-auto">
-            Our agent fleet operates 7 days a week across South Bengaluru. Contact us or schedule your pickup online.
+            Our agent fleet operates 7 days a week across  Bengaluru city. Contact us or schedule your pickup online.
           </p>
           <Link
             href="/book"

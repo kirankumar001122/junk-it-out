@@ -56,8 +56,8 @@ export function validateCreateOrderInput(body: any): { valid: boolean; error?: s
     }
   }
 
-  if (!Array.isArray(body.photos) || body.photos.length === 0) {
-    return { valid: false, error: 'At least one waste photo is required to place a pickup booking.' };
+  if (body.photos !== undefined && body.photos !== null && !Array.isArray(body.photos)) {
+    return { valid: false, error: 'Photos must be an array of image URLs.' };
   }
 
   if (body.pickupType === 'SCHEDULED' && (!body.scheduledSlot || typeof body.scheduledSlot !== 'string')) {

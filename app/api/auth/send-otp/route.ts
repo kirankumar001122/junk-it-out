@@ -14,9 +14,10 @@ export async function POST(req: NextRequest) {
     const { valid, normalized, error } = validatePhone(body.phone);
 
     if (!valid) {
-      return errorResponse('INVALID_PHONE', error || 'Invalid phone number.', 400);
+      return errorResponse('INVALID_PHONE', error || 'Invalid phone number format.', 400);
     }
 
+    // 1. Send OTP via Fast2SMS provider
     const result = await sendOtp(normalized, getClientIp(req));
     if (!result.success) {
       if (result.status === 'cooldown') {
@@ -35,22 +36,42 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const existingUser = await db.user.findUnique({
-      where: { phone: normalized },
-      select: { id: true, name: true, role: true },
-    });
+    // 2. Safe post-send customer lookup (failures here must not block a successfully sent OTP)
+    let isCustomer = false;
+    let existingName: string | null = null;
 
-    const isCustomer = existingUser?.role === 'CUSTOMER';
-    const hasRealName = isCustomer && existingUser?.name && existingUser.name !== 'Customer' && existingUser.name !== 'Valued Customer' && existingUser.name !== 'Valued Member';
+    try {
+      const rawDigits = normalized.replace(/^\+91/, '').replace(/\D/g, '');
+      const phoneVariants = Array.from(new Set([normalized, rawDigits, `+91${rawDigits}`]));
+
+      const existingUser = await db.user.findFirst({
+        where: { phone: { in: phoneVariants } },
+        select: { id: true, name: true, role: true },
+      });
+
+      if (existingUser?.role === 'CUSTOMER') {
+        isCustomer = true;
+        const hasRealName =
+          existingUser.name &&
+          existingUser.name !== 'Customer' &&
+          existingUser.name !== 'Valued Customer' &&
+          existingUser.name !== 'Valued Member';
+        if (hasRealName) {
+          existingName = existingUser.name;
+        }
+      }
+    } catch (dbErr: any) {
+      console.warn('[SEND_OTP_DB_LOOKUP_WARNING] Non-fatal DB lookup warning:', dbErr.message);
+    }
 
     return successResponse({
       message: 'If this number can receive SMS, an OTP will arrive shortly.',
       cooldownSeconds: result.cooldownSeconds,
       isExisting: isCustomer,
-      existingName: hasRealName ? existingUser.name : null,
+      existingName,
     });
   } catch (err: any) {
-    console.error('Send OTP error:', err);
+    console.error('[SEND_OTP_FATAL_ERROR]', err?.message || err);
     return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to send OTP.', 500);
   }
 }

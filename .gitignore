@@ -9,4 +9,6 @@ npm-debug.log*
 .vercel
 .env*
 scratch/
+*.tsbuildinfo
+
 

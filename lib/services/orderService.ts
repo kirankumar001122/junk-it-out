@@ -34,6 +34,7 @@ export async function createOrder(
     couponCode?: string | null;
     photos?: string[];
     notes?: string;
+    financialDirection?: 'CUSTOMER_PAYS' | 'JUNKITOUT_PAYS';
   },
   idempotencyKey?: string | null,
   authUser?: { userId: string; customerId?: string | null } | null
@@ -117,9 +118,18 @@ export async function createOrder(
   });
 
   const discountAmount = input.couponCode === 'WELCOME50' ? 50.0 : 0.0;
-  const netAmount = totalRecyclable - (totalWasteCharge + basePickupCharge - discountAmount);
-  const financialDirection = netAmount >= 0 ? 'JUNKITOUT_PAYS' : 'CUSTOMER_PAYS';
-  const finalAmount = Math.abs(netAmount);
+  let financialDirection: 'CUSTOMER_PAYS' | 'JUNKITOUT_PAYS';
+  let finalAmount: number;
+
+  if (input.financialDirection === 'JUNKITOUT_PAYS') {
+    const netAmount = totalRecyclable - (totalWasteCharge + basePickupCharge - discountAmount);
+    financialDirection = netAmount >= 0 ? 'JUNKITOUT_PAYS' : 'CUSTOMER_PAYS';
+    finalAmount = Math.max(1, Math.abs(netAmount));
+  } else {
+    financialDirection = 'CUSTOMER_PAYS';
+    const rawPayable = totalWasteCharge + basePickupCharge - discountAmount;
+    finalAmount = Math.max(1, Math.round(rawPayable));
+  }
 
   const orderNumber = generateOrderNumber();
 

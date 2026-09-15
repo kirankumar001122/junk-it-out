@@ -18,7 +18,10 @@ export const metadata = {
     default: 'Junk It Out — Doorstep Waste Pickup in 20-30 Minutes | Bengaluru',
     template: '%s | Junk It Out',
   },
-  description: 'Fast, reliable 20-30 minute doorstep scrap & waste pickup across Bengaluru. Digital scale weighing, upfront rates, and instant cash payouts for recyclables.',
+  description: 'Fast, reliable 20-30 minute doorstep scrap & waste pickup across Bengaluru. Digital scale weighing, upfront rates, and instant payouts for recyclables.',
+  alternates: {
+    canonical: 'https://junkitout.in',
+  },
   icons: {
     icon: '/logo.png',
     shortcut: '/logo.png',
@@ -26,7 +29,7 @@ export const metadata = {
   },
   openGraph: {
     title: 'Junk It Out — Doorstep Waste Pickup in 20-30 Minutes | Bengaluru',
-    description: 'Fast, reliable 20-30 minute doorstep scrap & waste pickup across Bengaluru. Digital scale weighing, upfront rates, and instant cash payouts for recyclables.',
+    description: 'Fast, reliable 20-30 minute doorstep scrap & waste pickup across Bengaluru. Digital scale weighing, upfront rates, and instant payouts for recyclables.',
     url: 'https://junkitout.in',
     siteName: 'Junk It Out',
     images: [{ url: '/logo.png', width: 512, height: 512, alt: 'Junk It Out Logo' }],

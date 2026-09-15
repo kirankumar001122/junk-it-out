@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { BENGALURU_ZONES } from '@/lib/geofence';
 import { loadGoogleMaps } from '@/components/InteractiveMap';
+import { setSelectedLocation } from '@/lib/selectedLocation';
 
 type Props = {
   open: boolean;
@@ -162,7 +163,7 @@ export default function LocationSearchModal({
 
         const check = await checkServiceability(targetLat, targetLng);
         if (check.serviceable) {
-          onSelectLocation({
+          const locData = {
             address: formattedAddress,
             area: areaName,
             lat: targetLat,
@@ -172,7 +173,9 @@ export default function LocationSearchModal({
             pincode: postalCode,
             serviceable: true,
             zoneName: check.zoneName,
-          });
+          };
+          setSelectedLocation(locData);
+          onSelectLocation(locData);
           onClose();
         } else {
           setServiceError(check.message || "We're not serving this location yet. Please select a location within Bengaluru.");
@@ -212,7 +215,7 @@ export default function LocationSearchModal({
 
               const check = await checkServiceability(userLat, userLng);
               if (check.serviceable) {
-                onSelectLocation({
+                const locData = {
                   address: formattedAddress,
                   area: areaName,
                   lat: userLat,
@@ -222,7 +225,9 @@ export default function LocationSearchModal({
                   pincode: postalCode,
                   serviceable: true,
                   zoneName: check.zoneName,
-                });
+                };
+                setSelectedLocation(locData);
+                onSelectLocation(locData);
                 onClose();
               } else {
                 setServiceError("We're not serving this location yet. Please select a location within Bengaluru.");
@@ -230,13 +235,15 @@ export default function LocationSearchModal({
             } else {
               const check = await checkServiceability(userLat, userLng);
               if (check.serviceable) {
-                onSelectLocation({
+                const locData = {
                   address: `Near (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`,
                   area: 'Bengaluru',
                   lat: userLat,
                   lng: userLng,
                   serviceable: true,
-                });
+                };
+                setSelectedLocation(locData);
+                onSelectLocation(locData);
                 onClose();
               } else {
                 setServiceError("We're not serving this location yet. Please select a location within Bengaluru.");
@@ -247,13 +254,15 @@ export default function LocationSearchModal({
           setLoadingGeolocate(false);
           const check = await checkServiceability(userLat, userLng);
           if (check.serviceable) {
-            onSelectLocation({
+            const locData = {
               address: `GPS (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`,
               area: 'Bengaluru',
               lat: userLat,
               lng: userLng,
               serviceable: true,
-            });
+            };
+            setSelectedLocation(locData);
+            onSelectLocation(locData);
             onClose();
           } else {
             setServiceError("We're not serving this location yet. Please select a location within Bengaluru.");
@@ -280,7 +289,7 @@ export default function LocationSearchModal({
     setLoadingPlaceSelect(false);
 
     if (check.serviceable) {
-      onSelectLocation({
+      const locData = {
         address: `${hub.name}, Bengaluru - ${hub.pincode}`,
         area: hub.name,
         lat: hub.lat,
@@ -289,7 +298,9 @@ export default function LocationSearchModal({
         pincode: hub.pincode,
         serviceable: true,
         zoneName: check.zoneName,
-      });
+      };
+      setSelectedLocation(locData);
+      onSelectLocation(locData);
       onClose();
     } else {
       setServiceError("We're not serving this location yet. Please select a location within Bengaluru.");

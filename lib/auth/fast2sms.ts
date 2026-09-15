@@ -44,8 +44,18 @@ async function post(url: string, payload: Record<string, string>) {
       status_code: data.status_code,
       message: data.message || data.error || data.detail,
     });
-    const ok = response.ok && data.return === true;
-    return { ok, errorDetails: data.message || data.error || `HTTP ${response.status}` };
+    const isReturnTrue = data.return === true || String(data.return).toLowerCase() === 'true';
+    const isStatusCodeOk = data.status_code === 200;
+    const isMessageSuccess = Array.isArray(data.message)
+      ? data.message.some((m: any) => String(m).toLowerCase().includes('success') || String(m).toLowerCase().includes('sent'))
+      : typeof data.message === 'string' && (data.message.toLowerCase().includes('success') || data.message.toLowerCase().includes('sent'));
+    const isRequestIdPresent = Boolean((data as any).request_id);
+
+    const ok = response.ok && (isReturnTrue || isStatusCodeOk || isMessageSuccess || isRequestIdPresent);
+    const rawMsg = data.message || data.error || data.detail;
+    const errorDetails = Array.isArray(rawMsg) ? rawMsg.join(', ') : typeof rawMsg === 'object' ? JSON.stringify(rawMsg) : String(rawMsg || `HTTP ${response.status}`);
+
+    return { ok, errorDetails };
   } catch (err: any) {
     console.error('[FAST2SMS_FETCH_ERROR]', { url, error: err.message, name: err.name });
     return { ok: false, errorDetails: err.message };
@@ -61,5 +71,6 @@ export async function sendFast2SmsOtp(mobile: string) {
 }
 
 export async function verifyFast2SmsOtp(mobile: string, otp: string) {
-  return post(VERIFY_URL, { mobile: mobile.trim(), otp: otp.trim() });
+  const { otpId } = config();
+  return post(VERIFY_URL, { mobile: mobile.trim(), otp: otp.trim(), otp_id: otpId });
 }

@@ -56,12 +56,11 @@ export default function CustomerOtpLogin({ open, onClose, onAuthenticated }: Pro
       if (data.data?.isExisting && data.data?.existingName) {
         // Returning customer with registered name stored in DB
         setName(data.data.existingName);
-      } else if (!data.data?.isExisting && (!name || name.trim().length < 2)) {
-        setError('Please enter your full name for registration.');
-        setLoading(false);
-        return;
+      } else if (!name || name.trim().length < 2) {
+        setName('Customer');
       }
 
+      setError('');
       setStep('code');
       setCooldown(Number(data.data?.cooldownSeconds) || 30);
     } catch (err: any) {

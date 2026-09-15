@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useState } from 'react';
 import { CircleUserRound, MapPin, Search, ShoppingBasket } from 'lucide-react';
 import { pickupCartEvent, readPickupCart } from '@/lib/pickupCart';
+import { getSelectedLocation, LOCATION_CHANGE_EVENT, setSelectedLocation } from '@/lib/selectedLocation';
 import PickupCartDrawer from '@/components/PickupCartDrawer';
 import LocationSearchModal from '@/components/LocationSearchModal';
 
@@ -13,11 +14,25 @@ export default function Navbar() {
   const router = useRouter();
   const [query, setQuery] = useState('');
   const [locationOpen, setLocationOpen] = useState(false);
-  const [location, setLocation] = useState('Whitefield, Bengaluru');
+  const [location, setLocation] = useState<string>('Select location');
   const [cartCount, setCartCount] = useState(0);
   const [cartOpen, setCartOpen] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
+
+  useEffect(() => {
+    const refreshLoc = () => {
+      const loc = getSelectedLocation();
+      if (loc?.area) {
+        setLocation(loc.area);
+      } else {
+        setLocation('Select location');
+      }
+    };
+    refreshLoc();
+    window.addEventListener(LOCATION_CHANGE_EVENT, refreshLoc);
+    return () => window.removeEventListener(LOCATION_CHANGE_EVENT, refreshLoc);
+  }, []);
 
   useEffect(() => {
     const refresh = () => setCartCount(readPickupCart().length);
@@ -134,6 +149,7 @@ export default function Navbar() {
         onClose={() => setLocationOpen(false)}
         currentArea={location}
         onSelectLocation={(data) => {
+          setSelectedLocation(data);
           setLocation(data.area);
         }}
       />
