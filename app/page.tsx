@@ -19,8 +19,10 @@ import {
   Sofa,
   Box,
   CheckCircle2,
+  Plus,
+  Minus,
 } from 'lucide-react';
-import { addToPickupCart } from '@/lib/pickupCart';
+import { addToPickupCart, readPickupCart, updatePickupCartQuantity, removeFromPickupCart, pickupCartEvent, PickupCartItem } from '@/lib/pickupCart';
 import CustomerReviews from '@/components/CustomerReviews';
 
 const categoryIcons = [FileText, Package, Recycle, Box, Cpu, Wine, Sofa, Sparkles];
@@ -29,6 +31,7 @@ export default function HomePage() {
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState('');
+  const [cartItems, setCartItems] = useState<PickupCartItem[]>([]);
 
   useEffect(() => {
     fetch('/api/waste-categories')
@@ -38,11 +41,18 @@ export default function HomePage() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    const refresh = () => setCartItems(readPickupCart());
+    refresh();
+    window.addEventListener(pickupCartEvent, refresh);
+    return () => window.removeEventListener(pickupCartEvent, refresh);
+  }, []);
+
   const featured = useMemo(() => categories.slice(0, 10), [categories]);
 
   const addCategory = (category: any) => {
     addToPickupCart(category.id);
-    setNotice(`${category.name} added to your Pickup Cart`);
+    setNotice(`${category.name} added to your Pickup Cart (1 kg)`);
     window.setTimeout(() => setNotice(''), 2200);
   };
 
@@ -172,6 +182,9 @@ export default function HomePage() {
                 ))
               : featured.map((category, index) => {
                   const IconComp = categoryIcons[index % categoryIcons.length];
+                  const cartItem = cartItems.find((i) => i.categoryId === category.id);
+                  const quantity = cartItem ? cartItem.quantity : 0;
+
                   return (
                     <article
                       key={category.id}
@@ -189,12 +202,38 @@ export default function HomePage() {
                         </p>
                       </Link>
 
-                      <button
-                        onClick={() => addCategory(category)}
-                        className="mt-3 w-full rounded-lg bg-slate-900 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-600 active:scale-95 cursor-pointer"
-                      >
-                        + Add to Cart
-                      </button>
+                      {quantity === 0 ? (
+                        <button
+                          onClick={() => addCategory(category)}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-1 rounded-lg bg-slate-900 py-1.5 text-xs font-bold text-white transition-colors hover:bg-emerald-600 active:scale-95 cursor-pointer"
+                        >
+                          <Plus className="h-3.5 w-3.5" /> ADD
+                        </button>
+                      ) : (
+                        <div className="mt-3 flex items-center justify-between rounded-lg border border-emerald-300 bg-emerald-50/80 px-1 py-0.5">
+                          <button
+                            onClick={() => {
+                              if (quantity <= 1) {
+                                removeFromPickupCart(category.id);
+                              } else {
+                                updatePickupCartQuantity(category.id, quantity - 1);
+                              }
+                            }}
+                            className="grid h-6 w-6 place-items-center rounded-md bg-white text-slate-700 shadow-xs hover:bg-slate-100 transition-colors cursor-pointer"
+                            aria-label="Decrease quantity"
+                          >
+                            <Minus className="h-3 w-3" />
+                          </button>
+                          <span className="text-xs font-extrabold text-emerald-950 px-1">{quantity} kg</span>
+                          <button
+                            onClick={() => updatePickupCartQuantity(category.id, quantity + 1)}
+                            className="grid h-6 w-6 place-items-center rounded-md bg-emerald-600 text-white shadow-xs hover:bg-emerald-700 transition-colors cursor-pointer"
+                            aria-label="Increase quantity"
+                          >
+                            <Plus className="h-3 w-3" />
+                          </button>
+                        </div>
+                      )}
                     </article>
                   );
                 })}

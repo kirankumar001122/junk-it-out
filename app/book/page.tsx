@@ -19,6 +19,8 @@ import {
   Sparkles,
   ShieldCheck,
   CreditCard,
+  Plus,
+  Minus,
 } from 'lucide-react';
 import CustomerOtpLogin from '@/components/CustomerOtpLogin';
 import LocationSearchModal from '@/components/LocationSearchModal';
@@ -204,12 +206,12 @@ export default function BookingPage() {
           if (cartItems.length > 0) {
             const validItems = cartItems
               .filter((item) => data.data.some((c: any) => c.id === item.categoryId))
-              .map((item) => ({ categoryId: item.categoryId, estimatedWeight: Math.max(1, item.quantity || 5) }));
+              .map((item) => ({ categoryId: item.categoryId, estimatedWeight: Math.max(1, item.quantity || 1) }));
             if (validItems.length > 0) setSelectedItems(validItems);
           } else if (selectedCategory) {
-            setSelectedItems([{ categoryId: selectedCategory.id, estimatedWeight: 5 }]);
+            setSelectedItems([{ categoryId: selectedCategory.id, estimatedWeight: 1 }]);
           } else if (defaultServiceCategory) {
-            setSelectedItems([{ categoryId: defaultServiceCategory.id, estimatedWeight: 5 }]);
+            setSelectedItems([{ categoryId: defaultServiceCategory.id, estimatedWeight: 1 }]);
           }
         }
       })
@@ -266,8 +268,21 @@ export default function BookingPage() {
       if (selectedItems.length === 1) return; // Maintain at least 1 selected category
       setSelectedItems(selectedItems.filter((i) => i.categoryId !== catId));
     } else {
-      setSelectedItems([...selectedItems, { categoryId: catId, estimatedWeight: 5 }]);
+      setSelectedItems([...selectedItems, { categoryId: catId, estimatedWeight: 1 }]);
     }
+  };
+
+  const updateItemWeight = (catId: string, weight: number) => {
+    if (weight <= 0) {
+      if (selectedItems.length > 1) {
+        setSelectedItems(selectedItems.filter((i) => i.categoryId !== catId));
+      }
+      return;
+    }
+    const safeWeight = Math.max(1, Math.min(500, Math.round(weight)));
+    setSelectedItems(
+      selectedItems.map((i) => (i.categoryId === catId ? { ...i, estimatedWeight: safeWeight } : i))
+    );
   };
 
   const calculateEstimate = () => {
@@ -655,13 +670,14 @@ export default function BookingPage() {
           {/* Simple Clean Category Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {categories.map((cat) => {
-              const isSelected = selectedItems.some((i) => i.categoryId === cat.id);
+              const selectedItem = selectedItems.find((i) => i.categoryId === cat.id);
+              const isSelected = Boolean(selectedItem);
+              const quantity = selectedItem ? selectedItem.estimatedWeight : 0;
 
               return (
                 <div
                   key={cat.id}
-                  onClick={() => toggleCategory(cat.id)}
-                  className={`group relative flex items-center justify-between p-3.5 rounded-xl border cursor-pointer transition-all ${
+                  className={`group relative flex items-center justify-between p-3.5 rounded-xl border transition-all ${
                     isSelected
                       ? 'border-emerald-500 bg-emerald-50/60 shadow-sm ring-1 ring-emerald-500/30'
                       : 'border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50/80'
@@ -678,25 +694,42 @@ export default function BookingPage() {
                     <div className="min-w-0">
                       <span className="block text-xs font-bold text-slate-900 truncate">{cat.name}</span>
                       <span className="block text-[11px] text-slate-500 truncate mt-0.5 font-normal">
-                        {cat.description || 'Doorstep collection'}
+                        ₹{cat.pricePerKg}/kg · {cat.description || 'Doorstep collection'}
                       </span>
                     </div>
                   </div>
 
-                  {/* Clean Selection Indicator */}
+                  {/* Quantity Stepper Control */}
                   <div className="shrink-0 flex items-center gap-2">
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100/80 text-emerald-800 border border-emerald-200/80">
-                      ₹{cat.pricePerKg}/kg
-                    </span>
-                    <span
-                      className={`grid h-5 w-5 place-items-center rounded-full border transition-all ${
-                        isSelected
-                          ? 'border-emerald-600 bg-emerald-600 text-white'
-                          : 'border-slate-300 bg-white text-transparent'
-                      }`}
-                    >
-                      <Check className="h-3 w-3 stroke-[3]" />
-                    </span>
+                    {!isSelected ? (
+                      <button
+                        type="button"
+                        onClick={() => toggleCategory(cat.id)}
+                        className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-600 transition-colors cursor-pointer"
+                      >
+                        <Plus className="h-3.5 w-3.5" /> ADD
+                      </button>
+                    ) : (
+                      <div className="flex items-center rounded-lg border border-emerald-300 bg-white px-1 py-0.5 shadow-xs">
+                        <button
+                          type="button"
+                          onClick={() => updateItemWeight(cat.id, quantity - 1)}
+                          className="grid h-7 w-7 place-items-center rounded-md text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                          aria-label="Decrease weight"
+                        >
+                          <Minus className="h-3.5 w-3.5" />
+                        </button>
+                        <span className="text-xs font-extrabold text-emerald-950 px-2">{quantity} kg</span>
+                        <button
+                          type="button"
+                          onClick={() => updateItemWeight(cat.id, quantity + 1)}
+                          className="grid h-7 w-7 place-items-center rounded-md bg-emerald-600 text-white hover:bg-emerald-700 transition-colors cursor-pointer"
+                          aria-label="Increase weight"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               );

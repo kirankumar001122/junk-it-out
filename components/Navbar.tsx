@@ -31,7 +31,11 @@ export default function Navbar() {
     };
     refreshLoc();
     window.addEventListener(LOCATION_CHANGE_EVENT, refreshLoc);
-    return () => window.removeEventListener(LOCATION_CHANGE_EVENT, refreshLoc);
+    window.addEventListener('storage', refreshLoc);
+    return () => {
+      window.removeEventListener(LOCATION_CHANGE_EVENT, refreshLoc);
+      window.removeEventListener('storage', refreshLoc);
+    };
   }, []);
 
   useEffect(() => {
@@ -96,13 +100,14 @@ export default function Navbar() {
         {/* Location selector trigger */}
         <button
           onClick={() => setLocationOpen(true)}
-          className="hidden min-w-0 items-center gap-2 rounded-xl bg-slate-50/80 px-3 py-1.5 text-left border border-slate-200/90 hover:bg-slate-100/90 hover:border-slate-300 transition-all md:flex group cursor-pointer"
+          className="flex min-w-0 items-center gap-1.5 sm:gap-2 rounded-xl bg-slate-50/80 px-2 sm:px-3 py-1.5 text-left border border-slate-200/90 hover:bg-slate-100/90 hover:border-slate-300 transition-all group cursor-pointer shrink-0 max-w-[140px] sm:max-w-none"
           aria-label="Change pickup location"
+          title={`Pickup Location: ${location}`}
         >
           <MapPin className="h-4 w-4 shrink-0 text-emerald-600 transition-transform group-hover:scale-110" />
-          <span className="min-w-0">
-            <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 leading-tight">Pickup Location</span>
-            <span className="block max-w-36 truncate text-xs font-bold text-slate-900 leading-tight">{location}</span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[9px] sm:text-[10px] font-semibold uppercase tracking-wider text-slate-500 leading-tight">Picking Up From</span>
+            <span className="block max-w-[90px] sm:max-w-44 truncate text-xs font-bold text-slate-900 leading-tight">{location}</span>
           </span>
         </button>
 
@@ -112,18 +117,10 @@ export default function Navbar() {
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search waste categories (paper, metal, e-waste...)"
+            placeholder="Search waste categories..."
             className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-10 pr-3 text-xs sm:text-sm font-medium text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20"
           />
         </form>
-
-        <button
-          onClick={() => setLocationOpen(true)}
-          className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-emerald-100 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors md:hidden"
-          aria-label="Choose location"
-        >
-          <MapPin className="h-4.5 w-4.5" />
-        </button>
 
         <Link href="/customer/profile" className="hidden items-center gap-2 rounded-xl border border-transparent px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors sm:flex">
           <CircleUserRound className="h-4.5 w-4.5 text-slate-600" />

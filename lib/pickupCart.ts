@@ -17,16 +17,19 @@ export function addToPickupCart(categoryId: string) {
   const items = readPickupCart();
   const existing = items.find((item) => item.categoryId === categoryId);
   const next = existing
-    ? items.map((item) => item.categoryId === categoryId ? { ...item, quantity: Math.min(500, item.quantity + 1) } : item)
-    : [...items, { categoryId, quantity: 5 }];
+    ? items.map((item) => (item.categoryId === categoryId ? { ...item, quantity: Math.min(500, item.quantity + 1) } : item))
+    : [...items, { categoryId, quantity: 1 }];
   window.sessionStorage.setItem(CART_KEY, JSON.stringify(next));
   window.dispatchEvent(new Event(CART_EVENT));
   return next;
 }
 
 export function updatePickupCartQuantity(categoryId: string, quantity: number) {
+  if (quantity <= 0) {
+    return removeFromPickupCart(categoryId);
+  }
   const safeQuantity = Math.max(1, Math.min(500, Math.round(Number(quantity) || 1)));
-  const next = readPickupCart().map((item) => item.categoryId === categoryId ? { ...item, quantity: safeQuantity } : item);
+  const next = readPickupCart().map((item) => (item.categoryId === categoryId ? { ...item, quantity: safeQuantity } : item));
   window.sessionStorage.setItem(CART_KEY, JSON.stringify(next));
   window.dispatchEvent(new Event(CART_EVENT));
   return next;
