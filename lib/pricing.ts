@@ -30,7 +30,7 @@ export interface CalculationResult {
 
 export function calculateOrderValuation(
   itemsInput: CalculationItemInput[],
-  basePickupCharge: number = 49.0,
+  basePickupCharge: number = 69.0,
   couponDiscount: number = 0.0
 ): CalculationResult {
   let totalWasteItemsValue = 0;

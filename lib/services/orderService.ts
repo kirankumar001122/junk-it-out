@@ -95,7 +95,7 @@ export async function createOrder(
   });
 
   let totalWasteItemsValue = 0;
-  const basePickupCharge = geofence.zone?.basePickupCharge ?? 49.0;
+  const basePickupCharge = geofence.zone?.basePickupCharge ?? 69.0;
 
   const orderItemsData = input.items.map((item) => {
     const cat = dbCategories.find((c) => c.id === item.categoryId);

@@ -287,7 +287,7 @@ export default function BookingPage() {
 
   const calculateEstimate = () => {
     let totalWasteItemsValue = 0;
-    const baseCharge = geofenceResult?.zone?.basePickupCharge || 49.0;
+    const baseCharge = geofenceResult?.zone?.basePickupCharge || 69.0;
 
     selectedItems.forEach((item) => {
       const cat = categories.find((c) => c.id === item.categoryId);
