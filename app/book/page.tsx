@@ -343,12 +343,10 @@ export default function BookingPage() {
     });
   }
 
-  // Preload Razorpay checkout SDK as soon as customer reaches summary & payment step
+  // Preload Razorpay checkout SDK as soon as booking page mounts to ensure zero-delay checkout opening
   useEffect(() => {
-    if (step === 3) {
-      loadRazorpayScript().catch(() => {});
-    }
-  }, [step]);
+    loadRazorpayScript().catch(() => {});
+  }, []);
 
   // Master Customer Booking & Razorpay Payment Handler
   const handleConfirmOrder = async () => {

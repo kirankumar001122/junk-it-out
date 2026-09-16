@@ -41,6 +41,10 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        <link rel="preconnect" href="https://checkout.razorpay.com" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://checkout.razorpay.com" />
+      </head>
       <body className="min-h-screen flex flex-col antialiased bg-slate-50 text-slate-900">
         <Navbar />
         <main className="flex-1 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-0">{children}</main>
