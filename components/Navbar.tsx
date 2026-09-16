@@ -87,12 +87,12 @@ export default function Navbar() {
 
   return (
     <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/90 backdrop-blur-md transition-all">
-      <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6">
-        <Link href="/" className="flex shrink-0 items-center gap-2.5 transition-opacity hover:opacity-90" aria-label="Junk It Out home">
-          <span className="relative grid h-10 w-10 place-items-center rounded-xl bg-white border border-slate-200 shadow-sm overflow-hidden shrink-0">
+      <div className="mx-auto flex max-w-7xl items-center gap-2 sm:gap-3 px-3 sm:px-6 py-2.5">
+        <Link href="/" className="flex shrink-0 items-center gap-2 transition-opacity hover:opacity-90" aria-label="Junk It Out home">
+          <span className="relative grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl bg-white border border-slate-200 shadow-sm overflow-hidden shrink-0">
             <img src="/logo.png" alt="Junk It Out Logo" className="h-full w-full object-contain p-1" />
           </span>
-          <span className="hidden text-lg font-bold tracking-tight text-slate-900 sm:block">
+          <span className="hidden text-base sm:text-lg font-bold tracking-tight text-slate-900 md:block">
             JUNK IT <span className="text-emerald-600 font-extrabold">OUT</span>
           </span>
         </Link>
@@ -100,14 +100,14 @@ export default function Navbar() {
         {/* Location selector trigger */}
         <button
           onClick={() => setLocationOpen(true)}
-          className="flex min-w-0 items-center gap-1.5 sm:gap-2 rounded-xl bg-slate-50/80 px-2 sm:px-3 py-1.5 text-left border border-slate-200/90 hover:bg-slate-100/90 hover:border-slate-300 transition-all group cursor-pointer shrink-0 max-w-[140px] sm:max-w-none"
+          className="flex shrink-0 items-center gap-1.5 sm:gap-2 rounded-xl bg-slate-50/90 px-2.5 sm:px-3 py-1.5 text-left border border-slate-200/90 hover:bg-slate-100 hover:border-slate-300 transition-all group cursor-pointer max-w-[145px] sm:max-w-[200px] md:max-w-[240px]"
           aria-label="Change pickup location"
           title={`Pickup Location: ${location}`}
         >
           <MapPin className="h-4 w-4 shrink-0 text-emerald-600 transition-transform group-hover:scale-110" />
-          <span className="min-w-0 flex-1">
+          <span className="min-w-0 flex-1 overflow-hidden">
             <span className="block text-[9px] sm:text-[10px] font-semibold uppercase tracking-wider text-slate-500 leading-tight">Picking Up From</span>
-            <span className="block max-w-[90px] sm:max-w-44 truncate text-xs font-bold text-slate-900 leading-tight">{location}</span>
+            <span className="block truncate text-xs font-bold text-slate-900 leading-tight">{location}</span>
           </span>
         </button>
 
