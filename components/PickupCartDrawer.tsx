@@ -561,20 +561,20 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
                     <strong className="text-white">{totalWeight} kg</strong>
                   </div>
                   <div className="flex justify-between text-slate-300">
-                    <span>Estimated waste value</span>
+                    <span>Pickup Value</span>
                     <strong className="text-emerald-300">₹{valuation.totalRecyclableValue.toFixed(2)}</strong>
                   </div>
                   <div className="flex justify-between text-slate-300">
-                    <span>Pickup service charge</span>
-                    <strong className="text-white">₹{(valuation.totalWasteCharge + valuation.basePickupCharge).toFixed(2)}</strong>
+                    <span>Pickup Service Charge</span>
+                    <strong className="text-white">₹{valuation.basePickupCharge.toFixed(2)}</strong>
                   </div>
                   <div className="border-t border-white/10 pt-2 text-sm font-black flex justify-between">
-                    <span>Amount payable</span>
+                    <span>Total Amount Payable</span>
                     <span className="text-emerald-300">₹{valuation.netAmount.toFixed(2)}</span>
                   </div>
                 </div>
                 <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
-                  Final amount may be updated after pickup verification and weighing.
+                  Secure payment via Razorpay. Doorstep collection scheduled after booking.
                 </p>
               </section>
             </>

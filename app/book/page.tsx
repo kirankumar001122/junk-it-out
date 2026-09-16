@@ -286,27 +286,22 @@ export default function BookingPage() {
   };
 
   const calculateEstimate = () => {
-    let totalWasteCharge = 0;
-    let totalRecyclableValue = 0;
+    let totalWasteItemsValue = 0;
     const baseCharge = geofenceResult?.zone?.basePickupCharge || 49.0;
 
     selectedItems.forEach((item) => {
       const cat = categories.find((c) => c.id === item.categoryId);
       if (cat) {
-        if (cat.type === 'WASTE_CHARGE') {
-          totalWasteCharge += item.estimatedWeight * cat.pricePerKg;
-        } else {
-          totalRecyclableValue += item.estimatedWeight * cat.pricePerKg;
-        }
+        totalWasteItemsValue += item.estimatedWeight * cat.pricePerKg;
       }
     });
 
     const discount = appliedCoupon === 'WELCOME50' ? 50 : 0;
-    const netPayable = Math.max(1, baseCharge + totalWasteCharge - discount);
+    const rawPayable = totalWasteItemsValue + baseCharge - discount;
+    const netPayable = Math.max(1, Math.round(rawPayable * 100) / 100);
 
     return {
-      totalRecyclableValue,
-      totalWasteCharge,
+      totalWasteItemsValue: Math.round(totalWasteItemsValue * 100) / 100,
       baseCharge,
       discount,
       netAmount: netPayable,
@@ -1088,20 +1083,12 @@ export default function BookingPage() {
           {/* FINANCIAL SUMMARY BOX */}
           <div className="bg-slate-900 text-white p-4 sm:p-5 rounded-xl space-y-2.5 shadow-sm border border-slate-800">
             <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800 pb-2">
-              Payment Details
+              Payment Summary
             </h3>
-            {estimate.totalRecyclableValue > 0 && (
-              <div className="flex items-center justify-between text-xs text-slate-300">
-                <span>Estimated Waste Value:</span>
-                <span className="text-emerald-300 font-semibold">₹{estimate.totalRecyclableValue.toFixed(2)}</span>
-              </div>
-            )}
-            {estimate.totalWasteCharge > 0 && (
-              <div className="flex items-center justify-between text-xs text-slate-300">
-                <span>Heavy Waste Service Charge:</span>
-                <span>₹{estimate.totalWasteCharge.toFixed(2)}</span>
-              </div>
-            )}
+            <div className="flex items-center justify-between text-xs text-slate-300">
+              <span>Pickup Value:</span>
+              <span className="text-emerald-300 font-semibold">₹{estimate.totalWasteItemsValue.toFixed(2)}</span>
+            </div>
             <div className="flex items-center justify-between text-xs text-slate-300">
               <span>Pickup Service Charge:</span>
               <span>₹{estimate.baseCharge.toFixed(2)}</span>
@@ -1113,7 +1100,7 @@ export default function BookingPage() {
               </div>
             )}
             <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between text-sm font-bold">
-              <span>Amount Payable:</span>
+              <span>Total Amount Payable:</span>
               <span className="text-lg text-emerald-400 font-extrabold">₹{estimate.netAmount.toFixed(2)}</span>
             </div>
           </div>

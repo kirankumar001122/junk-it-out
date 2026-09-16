@@ -617,22 +617,16 @@ export default function OrderTrackingPage() {
         {/* Totals & Financial Direction */}
         <div className="bg-slate-900 text-white p-5 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
-            <span className="text-xs text-slate-400 uppercase font-semibold">Payment Status & Direction</span>
+            <span className="text-xs text-slate-400 uppercase font-semibold">Payment Status & Total Amount</span>
             <h4 className="text-xl font-black text-emerald-400 mt-0.5">
-              {order.financialDirection === 'JUNKITOUT_PAYS'
-                ? `Estimated Scrap Value ₹${order.finalAmount.toFixed(2)}`
-                : `Service Charge ₹${order.finalAmount.toFixed(2)}`}
+              Total Payable ₹{(order.finalAmount || 0).toFixed(2)}
             </h4>
             <p className="text-xs text-slate-300 mt-1">
               {order.paymentStatus === 'CAPTURED'
                 ? 'Payment Paid'
                 : order.paymentStatus === 'FAILED'
                 ? 'Payment Failed'
-                : order.financialDirection === 'CUSTOMER_PAYS'
-                ? 'Payment Required'
-                : order.paymentStatus === 'SETTLEMENT_PENDING'
-                ? 'Settlement Pending'
-                : 'Junk It Out Pays You After Weighing'}
+                : 'Payment Required'}
             </p>
           </div>
 

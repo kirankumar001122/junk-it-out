@@ -320,12 +320,9 @@ export default function MyPickupsPage() {
                 {/* CARD FOOTER */}
                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
                   <div>
-                    <span className="text-[11px] text-slate-400 block font-medium">Estimated Net Value</span>
+                    <span className="text-[11px] text-slate-400 block font-medium">Total Booking Amount</span>
                     <span className="text-base font-black text-emerald-600">
-                      ₹{(o.finalAmount || o.estimatedTotal || 0).toFixed(2)}{' '}
-                      <span className="text-[10px] text-slate-500 font-normal">
-                        ({o.financialDirection === 'JUNKITOUT_PAYS' ? 'Estimated Scrap Value' : 'Service Charge'})
-                      </span>
+                      ₹{(o.finalAmount || o.estimatedTotal || 0).toFixed(2)}
                     </span>
                   </div>
 

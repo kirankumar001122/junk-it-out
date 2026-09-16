@@ -94,20 +94,14 @@ export async function createOrder(
     where: { id: { in: categoryIds } },
   });
 
-  let totalRecyclable = 0;
-  let totalWasteCharge = 0;
+  let totalWasteItemsValue = 0;
   const basePickupCharge = geofence.zone?.basePickupCharge ?? 49.0;
 
   const orderItemsData = input.items.map((item) => {
     const cat = dbCategories.find((c) => c.id === item.categoryId);
     const ratePerKg = cat ? cat.pricePerKg : 20.0;
     const subtotal = item.estimatedWeight * ratePerKg;
-
-    if (cat?.type === 'WASTE_CHARGE') {
-      totalWasteCharge += subtotal;
-    } else {
-      totalRecyclable += subtotal;
-    }
+    totalWasteItemsValue += subtotal;
 
     return {
       categoryId: item.categoryId,
@@ -126,7 +120,7 @@ export async function createOrder(
       if (coupon.discountType === 'FLAT') {
         discountAmount = coupon.discountValue;
       } else if (coupon.discountType === 'PERCENTAGE') {
-        discountAmount = (basePickupCharge + totalWasteCharge) * (coupon.discountValue / 100);
+        discountAmount = (basePickupCharge + totalWasteItemsValue) * (coupon.discountValue / 100);
         if (coupon.maxDiscount) {
           discountAmount = Math.min(discountAmount, coupon.maxDiscount);
         }
@@ -136,18 +130,9 @@ export async function createOrder(
     }
   }
 
-  let financialDirection: 'CUSTOMER_PAYS' | 'JUNKITOUT_PAYS';
-  let finalAmount: number;
-
-  if (input.financialDirection === 'JUNKITOUT_PAYS') {
-    const netAmount = totalRecyclable - (totalWasteCharge + basePickupCharge - discountAmount);
-    financialDirection = netAmount >= 0 ? 'JUNKITOUT_PAYS' : 'CUSTOMER_PAYS';
-    finalAmount = Math.max(1, Math.abs(netAmount));
-  } else {
-    financialDirection = 'CUSTOMER_PAYS';
-    const rawPayable = totalWasteCharge + basePickupCharge - discountAmount;
-    finalAmount = Math.max(1, Math.round(rawPayable));
-  }
+  const financialDirection: 'CUSTOMER_PAYS' = 'CUSTOMER_PAYS';
+  const rawPayable = totalWasteItemsValue + basePickupCharge - discountAmount;
+  const finalAmount = Math.max(1, Math.round(rawPayable));
 
   const orderNumber = generateOrderNumber();
 
@@ -162,7 +147,7 @@ export async function createOrder(
         scheduledSlot: input.scheduledSlot || null,
         status: 'BOOKING_RECEIVED',
         financialDirection,
-        estimatedTotal: totalRecyclable,
+        estimatedTotal: totalWasteItemsValue,
         pickupCharge: basePickupCharge,
         discountAmount,
         finalAmount,
