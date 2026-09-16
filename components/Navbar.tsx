@@ -21,19 +21,24 @@ export default function Navbar() {
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
-    const refreshLoc = () => {
+    const refreshLoc = (e?: Event) => {
+      const customDetail = (e as CustomEvent)?.detail;
+      if (customDetail?.area || customDetail?.address) {
+        setLocation(customDetail.area || customDetail.address);
+        return;
+      }
       const loc = getSelectedLocation();
-      if (loc?.area) {
-        setLocation(loc.area);
+      if (loc?.area || loc?.address) {
+        setLocation(loc.area || loc.address);
       } else {
         setLocation('Select location');
       }
     };
     refreshLoc();
-    window.addEventListener(LOCATION_CHANGE_EVENT, refreshLoc);
+    window.addEventListener(LOCATION_CHANGE_EVENT, refreshLoc as EventListener);
     window.addEventListener('storage', refreshLoc);
     return () => {
-      window.removeEventListener(LOCATION_CHANGE_EVENT, refreshLoc);
+      window.removeEventListener(LOCATION_CHANGE_EVENT, refreshLoc as EventListener);
       window.removeEventListener('storage', refreshLoc);
     };
   }, []);
@@ -100,7 +105,7 @@ export default function Navbar() {
         {/* Location selector trigger */}
         <button
           onClick={() => setLocationOpen(true)}
-          className="flex shrink-0 items-center gap-1.5 sm:gap-2 rounded-xl bg-slate-50/90 px-2.5 sm:px-3 py-1.5 text-left border border-slate-200/90 hover:bg-slate-100 hover:border-slate-300 transition-all group cursor-pointer max-w-[145px] sm:max-w-[200px] md:max-w-[240px]"
+          className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2 rounded-xl bg-slate-50/90 px-2 sm:px-3 py-1.5 text-left border border-slate-200/90 hover:bg-slate-100 hover:border-slate-300 transition-all group cursor-pointer max-w-[135px] sm:max-w-[200px] md:max-w-[240px]"
           aria-label="Change pickup location"
           title={`Pickup Location: ${location}`}
         >
@@ -118,7 +123,7 @@ export default function Navbar() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search waste categories..."
-            className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-10 pr-3 text-xs sm:text-sm font-medium text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20"
+            className="h-10 w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50/70 pl-10 pr-3 text-xs sm:text-sm font-medium text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20"
           />
         </form>
 

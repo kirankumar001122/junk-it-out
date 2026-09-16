@@ -20,10 +20,22 @@ export function getSelectedLocation(): SelectedLocationData | null {
     const raw = window.localStorage.getItem(LOCATION_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed.lat === 'number' && typeof parsed.lng === 'number' && parsed.area) {
-      return parsed;
-    }
-    return null;
+    if (!parsed || typeof parsed !== 'object') return null;
+
+    const areaName = parsed.area || parsed.address || parsed.name;
+    if (!areaName || typeof areaName !== 'string') return null;
+
+    const lat = Number(parsed.lat);
+    const lng = Number(parsed.lng);
+
+    return {
+      ...parsed,
+      address: parsed.address || areaName,
+      area: areaName.trim(),
+      lat: !isNaN(lat) ? lat : 12.9716,
+      lng: !isNaN(lng) ? lng : 77.5946,
+      serviceable: parsed.serviceable ?? true,
+    };
   } catch {
     return null;
   }
