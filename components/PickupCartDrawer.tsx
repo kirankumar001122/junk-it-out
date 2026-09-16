@@ -561,20 +561,20 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
                     <strong className="text-white">{totalWeight} kg</strong>
                   </div>
                   <div className="flex justify-between text-slate-300">
-                    <span>Estimated recyclable value</span>
+                    <span>Estimated waste value</span>
                     <strong className="text-emerald-300">₹{valuation.totalRecyclableValue.toFixed(2)}</strong>
                   </div>
                   <div className="flex justify-between text-slate-300">
-                    <span>Service charge estimate</span>
+                    <span>Pickup service charge</span>
                     <strong className="text-white">₹{(valuation.totalWasteCharge + valuation.basePickupCharge).toFixed(2)}</strong>
                   </div>
                   <div className="border-t border-white/10 pt-2 text-sm font-black flex justify-between">
-                    <span>{valuation.financialDirection === 'JUNKITOUT_PAYS' ? 'Estimated value to you' : 'Estimated amount payable'}</span>
+                    <span>Amount payable</span>
                     <span className="text-emerald-300">₹{valuation.netAmount.toFixed(2)}</span>
                   </div>
                 </div>
                 <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
-                  Final value is calculated after agent verification and weighing. Booking pricing remains server-authoritative.
+                  Final amount may be updated after pickup verification and weighing.
                 </p>
               </section>
             </>

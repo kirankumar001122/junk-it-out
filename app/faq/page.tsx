@@ -51,35 +51,35 @@ const FAQ_ITEMS = [
 
 export default function FAQPage() {
   return (
-    <div className="max-w-4xl mx-auto px-4 py-12 space-y-10">
+    <div className="max-w-4xl mx-auto px-4 py-10 space-y-8 min-h-[85vh]">
       {/* HEADER */}
-      <div className="text-center max-w-2xl mx-auto space-y-3">
-        <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200">
+      <div className="text-center max-w-2xl mx-auto space-y-2">
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200/80">
           <HelpCircle className="w-3.5 h-3.5" />
           Help & Support Center
         </span>
-        <h1 className="text-3xl sm:text-4xl font-black text-slate-950 tracking-tight">
+        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
           Frequently Asked Questions
         </h1>
-        <p className="text-slate-600 text-sm sm:text-base leading-relaxed">
+        <p className="text-slate-600 text-xs sm:text-sm leading-relaxed">
           Everything you need to know about doorstep waste pickups, scrap pricing, weighing, and instant payouts in Bengaluru.
         </p>
       </div>
 
       {/* FAQ LIST */}
-      <div className="space-y-4">
+      <div className="space-y-3">
         {FAQ_ITEMS.map((item, idx) => (
           <details
             key={idx}
-            className="group bg-white rounded-3xl p-6 border border-slate-200 shadow-sm transition-all open:border-emerald-300 open:shadow-md"
+            className="group bg-white rounded-xl p-4 sm:p-5 border border-slate-200/90 shadow-sm transition-all open:border-emerald-300 open:shadow-md"
           >
-            <summary className="flex items-center justify-between font-black text-base text-slate-900 cursor-pointer list-none select-none">
+            <summary className="flex items-center justify-between font-bold text-xs sm:text-sm text-slate-900 cursor-pointer list-none select-none">
               <span>{item.q}</span>
-              <span className="w-8 h-8 rounded-xl bg-slate-100 text-slate-600 group-open:bg-emerald-100 group-open:text-emerald-700 flex items-center justify-center shrink-0 transition-transform group-open:rotate-180">
-                <ChevronDown className="w-4 h-4" />
+              <span className="w-7 h-7 rounded-lg bg-slate-100 text-slate-600 group-open:bg-emerald-50 group-open:text-emerald-700 flex items-center justify-center shrink-0 transition-transform group-open:rotate-180">
+                <ChevronDown className="w-3.5 h-3.5" />
               </span>
             </summary>
-            <p className="text-xs sm:text-sm text-slate-600 mt-4 leading-relaxed font-medium pt-3 border-t border-slate-100">
+            <p className="text-xs text-slate-600 mt-3 leading-relaxed font-normal pt-3 border-t border-slate-100">
               {item.a}
             </p>
           </details>
@@ -87,24 +87,24 @@ export default function FAQPage() {
       </div>
 
       {/* CONTACT BANNER */}
-      <div className="bg-slate-900 text-white rounded-3xl p-8 text-center space-y-4 shadow-xl">
-        <h2 className="text-2xl font-black">Still have questions?</h2>
+      <div className="bg-slate-900 text-white rounded-2xl p-6 text-center space-y-3 shadow-md border border-slate-800">
+        <h2 className="text-xl font-bold">Still have questions?</h2>
         <p className="text-xs text-slate-300 max-w-md mx-auto">
           Our Bengaluru customer support team is available 8:00 AM – 8:00 PM daily.
         </p>
-        <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+        <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
           <Link
             href="/contact"
-            className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs px-6 py-3 rounded-2xl inline-flex items-center gap-2 uppercase tracking-wider shadow-lg transition-transform hover:scale-105"
+            className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl inline-flex items-center gap-2 transition-colors"
           >
-            <MessageSquare className="w-4 h-4" />
+            <MessageSquare className="w-3.5 h-3.5" />
             Contact Customer Care
           </Link>
           <Link
             href="/pricing"
-            className="bg-slate-800 hover:bg-slate-700 text-white font-black text-xs px-6 py-3 rounded-2xl inline-flex items-center gap-2 uppercase tracking-wider border border-slate-700 transition-colors"
+            className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl inline-flex items-center gap-2 border border-slate-700 transition-colors"
           >
-            View Price List <ArrowRight className="w-4 h-4" />
+            View Price List <ArrowRight className="w-3.5 h-3.5" />
           </Link>
         </div>
       </div>

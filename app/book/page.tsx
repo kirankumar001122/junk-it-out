@@ -134,6 +134,7 @@ export default function BookingPage() {
         serviceable: stored.serviceable,
         zone: stored.zoneName ? { name: stored.zoneName } : undefined,
       });
+      await runGeofenceCheck(stored.lat, stored.lng);
       return;
     }
 
@@ -269,15 +270,19 @@ export default function BookingPage() {
     }
   };
 
-  // Calculate customer payable amount for booking flow
   const calculateEstimate = () => {
     let totalWasteCharge = 0;
+    let totalRecyclableValue = 0;
     const baseCharge = geofenceResult?.zone?.basePickupCharge || 49.0;
 
     selectedItems.forEach((item) => {
       const cat = categories.find((c) => c.id === item.categoryId);
-      if (cat && cat.type === 'WASTE_CHARGE') {
-        totalWasteCharge += item.estimatedWeight * cat.pricePerKg;
+      if (cat) {
+        if (cat.type === 'WASTE_CHARGE') {
+          totalWasteCharge += item.estimatedWeight * cat.pricePerKg;
+        } else {
+          totalRecyclableValue += item.estimatedWeight * cat.pricePerKg;
+        }
       }
     });
 
@@ -285,6 +290,7 @@ export default function BookingPage() {
     const netPayable = Math.max(1, baseCharge + totalWasteCharge - discount);
 
     return {
+      totalRecyclableValue,
       totalWasteCharge,
       baseCharge,
       discount,
@@ -478,84 +484,84 @@ export default function BookingPage() {
   if (successOrder) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-10">
-        <div className="bg-white rounded-3xl p-8 sm:p-10 shadow-2xl border border-emerald-100 text-center space-y-6 animate-scale-in">
-          <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
-            <CheckCircle2 className="w-12 h-12 stroke-[2.5]" />
+        <div className="bg-white rounded-2xl p-6 sm:p-10 shadow-xl border border-slate-200 text-center space-y-6 animate-scale-in">
+          <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto border border-emerald-100">
+            <CheckCircle2 className="w-9 h-9 stroke-[2.2]" />
           </div>
 
-          <div className="space-y-2">
-            <span className="text-xs font-black text-emerald-700 bg-emerald-50 px-3.5 py-1.5 rounded-full uppercase tracking-wider">
-              ✓ Payment Verified & Booking Confirmed!
+          <div className="space-y-1.5">
+            <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full uppercase tracking-wider border border-emerald-200/80">
+              Payment Verified & Booking Confirmed
             </span>
-            <h1 className="text-3xl font-black text-slate-900 tracking-tight mt-1">Booking Confirmed</h1>
-            <p className="text-xs font-mono font-extrabold text-slate-500">Order ID: #{successOrder.orderNumber}</p>
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight mt-1">Booking Confirmed!</h1>
+            <p className="text-xs font-mono font-bold text-slate-500">Order ID: #{successOrder.orderNumber}</p>
           </div>
 
-          <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 text-left text-xs space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
-              <span className="text-slate-500 font-semibold">Booking Status:</span>
-              <span className="font-extrabold text-emerald-700 bg-emerald-100 px-2.5 py-1 rounded-full uppercase text-[10px]">
+          <div className="bg-slate-50 p-4 sm:p-5 rounded-xl border border-slate-200 text-left text-xs space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-200/80 pb-2.5">
+              <span className="text-slate-500 font-medium">Booking Status:</span>
+              <span className="font-bold text-emerald-700 bg-emerald-100/80 px-2.5 py-0.5 rounded-md uppercase text-[10px]">
                 {successOrder.status.replace(/_/g, ' ')}
               </span>
             </div>
 
             <div className="flex items-start justify-between">
-              <span className="text-slate-500 font-semibold shrink-0">Pickup Address:</span>
+              <span className="text-slate-500 font-medium shrink-0">Pickup Address:</span>
               <span className="font-bold text-slate-900 text-right max-w-[240px]">
                 {fullAddress || `${area}, Bengaluru`}
               </span>
             </div>
 
             <div className="flex items-center justify-between">
-              <span className="text-slate-500 font-semibold">Pickup Schedule:</span>
+              <span className="text-slate-500 font-medium">Pickup Schedule:</span>
               <span className="font-bold text-emerald-700">
                 {pickupType === 'ASAP' ? '⚡ 20–30 Mins Doorstep Pickup' : formattedScheduledSlot}
               </span>
             </div>
 
-            <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+            <div className="flex items-center justify-between pt-2 border-t border-slate-200/80">
               <span className="text-slate-600 font-bold">Amount Paid:</span>
-              <span className="font-black text-emerald-600 text-base">
+              <span className="font-extrabold text-emerald-700 text-sm">
                 ₹{Number(successOrder.finalAmount || estimate.netAmount).toFixed(2)}
               </span>
             </div>
 
             <div className="flex items-center justify-between">
               <span className="text-slate-600 font-bold">Payment Status:</span>
-              <span className="font-extrabold text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-full">
+              <span className="font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md text-[11px]">
                 ✓ Verified via Razorpay
               </span>
             </div>
           </div>
 
-          <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-3.5 rounded-2xl text-xs text-left font-medium">
+          <div className="bg-emerald-50/80 border border-emerald-200/80 text-emerald-900 p-3.5 rounded-xl text-xs text-left font-medium">
             <p className="font-bold text-emerald-800 mb-0.5">🚀 What Happens Next?</p>
             <p>
               Your payment is verified. Our nearest agent is assigned and will arrive at your doorstep for pickup.
             </p>
           </div>
 
-          <div className="pt-2 flex flex-col sm:flex-row gap-3">
+          <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
             <Link
               href={`/orders/${successOrder.id}`}
-              className="hover-lift w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 uppercase tracking-wider"
+              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-3 rounded-xl shadow-sm flex items-center justify-center gap-2 uppercase tracking-wider transition-all"
             >
-              <Truck className="w-4 h-4" />
-              TRACK PICKUP LIVE
+              <Truck className="w-4 h-4 text-emerald-400" />
+              Track Pickup Live
             </Link>
 
             <Link
               href="/customer/orders"
-              className="hover-lift w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs py-4 rounded-2xl flex items-center justify-center gap-2 border border-slate-200 uppercase tracking-wider"
+              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs py-3 rounded-xl flex items-center justify-center gap-2 border border-slate-200 uppercase tracking-wider transition-all"
             >
-              MY PICKUPS
+              My Pickups
             </Link>
 
             <Link
               href="/"
-              className="hover-lift w-full bg-slate-50 hover:bg-slate-100 text-slate-600 font-bold text-xs py-4 rounded-2xl flex items-center justify-center gap-2 border border-slate-200 uppercase tracking-wider"
+              className="w-full bg-white hover:bg-slate-50 text-slate-600 font-bold text-xs py-3 rounded-xl flex items-center justify-center gap-2 border border-slate-200 uppercase tracking-wider transition-all"
             >
-              BACK TO HOME
+              Back to Home
             </Link>
           </div>
         </div>
@@ -569,12 +575,12 @@ export default function BookingPage() {
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-3 py-1 rounded-full uppercase tracking-wide">
-              On-Demand Doorstep Pickup
+            <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full uppercase tracking-wider border border-emerald-200/80">
+              Doorstep Pickup Booking
             </span>
-            <h1 className="text-2xl font-black text-slate-950 tracking-tight mt-1">Book Waste Pickup</h1>
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight mt-1">Book Waste Pickup</h1>
           </div>
-          <span className="text-xs font-extrabold text-emerald-800 bg-emerald-100 px-3.5 py-1.5 rounded-full">
+          <span className="text-xs font-bold text-slate-700 bg-slate-100 px-3 py-1 rounded-lg border border-slate-200">
             Step {step} of 3
           </span>
         </div>
@@ -587,15 +593,15 @@ export default function BookingPage() {
             { id: 3, title: 'Summary & Payment' },
           ].map((st) => (
             <div key={st.id} className="space-y-1">
-              <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+              <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
                 <div
                   className="h-full bg-emerald-600 transition-all duration-300 ease-out"
                   style={{ width: step > st.id ? '100%' : step === st.id ? '100%' : '0%' }}
                 />
               </div>
               <span
-                className={`text-[11px] block font-bold truncate ${
-                  step === st.id ? 'text-emerald-700 font-extrabold' : 'text-slate-500'
+                className={`text-[11px] block truncate font-medium ${
+                  step === st.id ? 'text-emerald-700 font-bold' : 'text-slate-500'
                 }`}
               >
                 {step > st.id ? '✓ ' : `${st.id}. `}
@@ -607,24 +613,24 @@ export default function BookingPage() {
       </div>
 
       {errorMsg && (
-        <div className="mb-6 p-4 bg-rose-50 border border-rose-200 text-rose-900 rounded-2xl text-xs font-bold flex items-center gap-2.5 animate-scale-in">
-          <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+        <div className="mb-6 p-3.5 bg-rose-50 border border-rose-200 text-rose-900 rounded-xl text-xs font-medium flex items-center gap-2.5 animate-scale-in">
+          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
           <span>{errorMsg}</span>
         </div>
       )}
 
       {/* STEP 1: CATEGORY SELECTION ("What are we picking up?") */}
       {step === 1 && (
-        <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-6 animate-scale-in">
+        <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-slate-200 space-y-6 animate-scale-in">
           <div>
-            <h2 className="text-xl font-black text-slate-950 tracking-tight">What are we picking up?</h2>
-            <p className="text-xs text-slate-500 font-semibold mt-1">
-              Select the category that best fits the items you want to dispose of.
+            <h2 className="text-lg font-bold text-slate-900 tracking-tight">What materials are you disposing?</h2>
+            <p className="text-xs text-slate-500 font-medium mt-0.5">
+              Select one or more waste categories to schedule for doorstep collection.
             </p>
           </div>
 
           {/* Simple Clean Category Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {categories.map((cat) => {
               const isSelected = selectedItems.some((i) => i.categoryId === cat.id);
 
@@ -632,23 +638,23 @@ export default function BookingPage() {
                 <div
                   key={cat.id}
                   onClick={() => toggleCategory(cat.id)}
-                  className={`group relative flex items-center justify-between p-4 rounded-2xl border cursor-pointer transition-all ${
+                  className={`group relative flex items-center justify-between p-3.5 rounded-xl border cursor-pointer transition-all ${
                     isSelected
-                      ? 'border-emerald-600 bg-emerald-50/70 shadow-sm ring-2 ring-emerald-500/20'
+                      ? 'border-emerald-500 bg-emerald-50/60 shadow-sm ring-1 ring-emerald-500/30'
                       : 'border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50/80'
                   }`}
                 >
-                  <div className="flex items-center gap-3.5 min-w-0 pr-2">
+                  <div className="flex items-center gap-3 min-w-0 pr-2">
                     <span
-                      className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl font-bold transition-colors ${
+                      className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg text-xs font-bold transition-colors ${
                         isSelected ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 group-hover:bg-emerald-100 group-hover:text-emerald-700'
                       }`}
                     >
-                      <Sparkles className="h-5 w-5" />
+                      <Sparkles className="h-4 w-4" />
                     </span>
                     <div className="min-w-0">
-                      <span className="block text-sm font-black text-slate-900 truncate">{cat.name}</span>
-                      <span className="block text-xs text-slate-500 truncate mt-0.5 font-medium">
+                      <span className="block text-xs font-bold text-slate-900 truncate">{cat.name}</span>
+                      <span className="block text-[11px] text-slate-500 truncate mt-0.5 font-normal">
                         {cat.description || 'Doorstep collection'}
                       </span>
                     </div>
@@ -656,17 +662,17 @@ export default function BookingPage() {
 
                   {/* Clean Selection Indicator */}
                   <div className="shrink-0 flex items-center gap-2">
-                    <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-900 border border-emerald-200">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100/80 text-emerald-800 border border-emerald-200/80">
                       ₹{cat.pricePerKg}/kg
                     </span>
                     <span
-                      className={`grid h-6 w-6 place-items-center rounded-full border transition-all ${
+                      className={`grid h-5 w-5 place-items-center rounded-full border transition-all ${
                         isSelected
-                          ? 'border-emerald-600 bg-emerald-600 text-white shadow-xs'
+                          ? 'border-emerald-600 bg-emerald-600 text-white'
                           : 'border-slate-300 bg-white text-transparent'
                       }`}
                     >
-                      <Check className="h-3.5 w-3.5 stroke-[3]" />
+                      <Check className="h-3 w-3 stroke-[3]" />
                     </span>
                   </div>
                 </div>
@@ -681,10 +687,10 @@ export default function BookingPage() {
                 setErrorMsg('');
                 setStep(2);
               }}
-              className="hover-lift w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-extrabold text-sm px-8 py-4 rounded-2xl shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all"
+              className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white font-bold text-xs px-6 py-3 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
             >
-              CONTINUE TO LOCATION & TIME
-              <ArrowRight className="w-4 h-4" />
+              Continue to Location & Time
+              <ArrowRight className="w-4 h-4 text-emerald-400" />
             </button>
           </div>
         </div>
@@ -692,69 +698,69 @@ export default function BookingPage() {
 
       {/* STEP 2: PICKUP LOCATION & SCHEDULE */}
       {step === 2 && (
-        <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-6 animate-scale-in">
+        <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-slate-200 space-y-6 animate-scale-in">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
             <div>
-              <h2 className="text-xl font-black text-slate-950 tracking-tight">Pickup Location & Schedule</h2>
-              <p className="text-xs text-slate-500 font-semibold mt-1">Verify your pickup address and choose timing</p>
+              <h2 className="text-lg font-bold text-slate-900 tracking-tight">Pickup Location & Schedule</h2>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">Verify your pickup address and choose timing</p>
             </div>
             <button
               type="button"
               onClick={() => setStep(1)}
-              className="text-xs text-slate-500 hover:text-slate-900 flex items-center gap-1 font-extrabold cursor-pointer"
+              className="text-xs text-slate-500 hover:text-slate-900 flex items-center gap-1 font-semibold cursor-pointer"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="w-3.5 h-3.5" />
               Back
             </button>
           </div>
 
           {/* PICKUP LOCATION DISPLAY / SELECTOR */}
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             <div className="flex items-center justify-between">
-              <label className="block text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                 Pickup Address:
               </label>
               <button
                 type="button"
                 onClick={() => setLocationSearchModalOpen(true)}
-                className="text-xs font-extrabold text-emerald-700 hover:underline bg-emerald-50 px-3 py-1 rounded-lg border border-emerald-200 shadow-xs cursor-pointer"
+                className="text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/80 cursor-pointer"
               >
                 {area ? 'Change Location' : 'Select Location'}
               </button>
             </div>
 
             {area && geofenceResult?.serviceable ? (
-              <div className="bg-emerald-50/50 border border-emerald-200 p-4 rounded-2xl space-y-2">
+              <div className="bg-emerald-50/50 border border-emerald-200/80 p-3.5 rounded-xl space-y-1.5">
                 <div className="flex items-center gap-2">
-                  <MapPin className="h-5 w-5 text-emerald-600 shrink-0" />
-                  <span className="text-base font-black text-slate-950">{area}</span>
+                  <MapPin className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span className="text-sm font-bold text-slate-900">{area}</span>
                 </div>
-                <p className="text-xs font-semibold text-slate-600 pl-7 leading-relaxed">
+                <p className="text-xs font-medium text-slate-600 pl-6 leading-relaxed">
                   {fullAddress || `${area}, Bengaluru`}
                 </p>
-                <div className="mt-2 pt-2 border-t border-emerald-200/60 flex items-center gap-2 text-xs font-bold text-emerald-800">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                  <span>✓ Active Doorstep Service Zone in Bengaluru</span>
+                <div className="mt-1 pt-1.5 border-t border-emerald-200/60 flex items-center gap-1.5 text-xs font-semibold text-emerald-800">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                  <span>Verified Service Zone in Bengaluru</span>
                 </div>
               </div>
             ) : (
-              <div className="bg-amber-50 border-2 border-dashed border-amber-300 p-5 rounded-2xl text-center space-y-3">
+              <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl text-center space-y-3">
                 <div className="flex justify-center text-amber-600">
-                  <MapPin className="h-8 w-8 animate-bounce" />
+                  <MapPin className="h-6 w-6" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-amber-950">No Pickup Location Selected</h3>
-                  <p className="text-xs text-amber-800 font-semibold mt-0.5">
+                  <h3 className="text-xs font-bold text-amber-950">No Pickup Location Selected</h3>
+                  <p className="text-[11px] text-amber-800 font-medium mt-0.5">
                     Please select your doorstep pickup area in Bengaluru before proceeding.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setLocationSearchModalOpen(true)}
-                  className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold px-6 py-3 rounded-xl shadow-md cursor-pointer transition-all inline-flex items-center gap-2"
+                  className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-4 py-2.5 rounded-lg shadow-xs cursor-pointer transition-all inline-flex items-center gap-2"
                 >
-                  <Search className="h-4 w-4" />
-                  SELECT PICKUP LOCATION
+                  <Search className="h-3.5 w-3.5" />
+                  Select Pickup Location
                 </button>
               </div>
             )}
@@ -763,11 +769,11 @@ export default function BookingPage() {
           {/* GOOGLE MAP DISPLAY FOR PICKUP LOCATION */}
           <div className="space-y-2 pt-1">
             <div className="flex items-center justify-between">
-              <label className="block text-xs font-extrabold text-slate-800 uppercase tracking-wider">
-                Pickup Location Pin on Map:
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Map Pin Location:
               </label>
-              <span className="text-[11px] font-extrabold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-200">
-                📍 {lat.toFixed(4)}, {lng.toFixed(4)}
+              <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                {lat.toFixed(4)}, {lng.toFixed(4)}
               </span>
             </div>
             <InteractiveMap
@@ -798,77 +804,77 @@ export default function BookingPage() {
                 };
                 setSelectedLocation(locData);
               }}
-              className="h-64 sm:h-72 w-full rounded-2xl overflow-hidden shadow-sm border border-slate-200"
+              className="h-56 sm:h-64 w-full rounded-xl overflow-hidden shadow-xs border border-slate-200"
             />
-            <p className="text-[11px] text-slate-500 font-semibold flex items-center gap-1">
+            <p className="text-[10px] text-slate-500 font-medium flex items-center gap-1">
               📍 Drag marker or tap anywhere on map to fine-tune your doorstep pickup pin
             </p>
           </div>
 
           {/* DISPATCH MODE SELECTOR (ASAP vs SCHEDULED) */}
           <div className="space-y-3 pt-2 border-t border-slate-100">
-            <label className="block text-xs font-extrabold text-slate-800 uppercase tracking-wider">Pickup Speed & Timing:</label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Pickup Speed & Timing:</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div
                 onClick={() => setPickupType('ASAP')}
-                className={`p-4 rounded-2xl border cursor-pointer transition-all ${
+                className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
                   pickupType === 'ASAP'
-                    ? 'border-emerald-600 bg-emerald-50/70 shadow-sm ring-2 ring-emerald-500/20'
+                    ? 'border-emerald-500 bg-emerald-50/60 shadow-sm ring-1 ring-emerald-500/30'
                     : 'border-slate-200 hover:border-slate-300 bg-white'
                 }`}
               >
                 <div className="flex items-center gap-2 mb-1">
-                  <Clock className="w-5 h-5 text-emerald-600" />
-                  <span className="font-extrabold text-slate-950 text-sm">⚡ ASAP (20–30 Mins)</span>
+                  <Clock className="w-4 h-4 text-emerald-600" />
+                  <span className="font-bold text-slate-900 text-xs">ASAP Pickup (20–30 Mins)</span>
                 </div>
-                <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                <p className="text-[11px] text-slate-600 leading-relaxed font-normal">
                   Nearest available agent assigned immediately for doorstep collection.
                 </p>
               </div>
 
               <div
                 onClick={() => setPickupType('SCHEDULED')}
-                className={`p-4 rounded-2xl border cursor-pointer transition-all ${
+                className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
                   pickupType === 'SCHEDULED'
-                    ? 'border-emerald-600 bg-emerald-50/70 shadow-sm ring-2 ring-emerald-500/20'
+                    ? 'border-emerald-500 bg-emerald-50/60 shadow-sm ring-1 ring-emerald-500/30'
                     : 'border-slate-200 hover:border-slate-300 bg-white'
                 }`}
               >
                 <div className="flex items-center gap-2 mb-1">
-                  <Calendar className="w-5 h-5 text-indigo-600" />
-                  <span className="font-extrabold text-slate-950 text-sm">📅 Schedule for Later</span>
+                  <Calendar className="w-4 h-4 text-indigo-600" />
+                  <span className="font-bold text-slate-900 text-xs">Schedule for Later</span>
                 </div>
-                <p className="text-xs text-slate-600 leading-relaxed font-medium">Select a specific date and 1-hour window for pickup.</p>
+                <p className="text-[11px] text-slate-600 leading-relaxed font-normal">Select a specific date and 1-hour window for pickup.</p>
               </div>
             </div>
           </div>
 
           {/* SCHEDULED DATE & SLOT SELECTOR */}
           {pickupType === 'SCHEDULED' && (
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-4 animate-scale-in">
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-3.5 animate-scale-in">
               <div>
-                <label className="block text-xs font-extrabold text-slate-800 mb-2">1. Select Pickup Date:</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">1. Select Pickup Date:</label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {availableDates.map((d, idx) => (
                     <button
                       key={idx}
                       type="button"
                       onClick={() => setSelectedDateIdx(idx)}
-                      className={`p-3 rounded-xl border text-center transition-all ${
+                      className={`p-2.5 rounded-lg border text-center transition-all cursor-pointer ${
                         selectedDateIdx === idx
-                          ? 'bg-emerald-600 text-white border-emerald-600 font-extrabold shadow-xs'
-                          : 'bg-white text-slate-800 border-slate-200 font-bold hover:bg-slate-100'
+                          ? 'bg-slate-900 text-white border-slate-900 font-bold'
+                          : 'bg-white text-slate-800 border-slate-200 font-medium hover:bg-slate-100'
                       }`}
                     >
                       <span className="block text-xs">{d.dayLabel}</span>
-                      <span className="block text-[11px] opacity-80 mt-0.5">{d.dateStr}</span>
+                      <span className="block text-[10px] opacity-80 mt-0.5">{d.dateStr}</span>
                     </button>
                   ))}
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-extrabold text-slate-800 mb-2">2. Select 1-Hour Time Slot:</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">2. Select Time Slot:</label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                   {TIME_SLOTS.map((slot) => {
                     const isPast = curDateObj.isToday && slot.startHour <= currentHour;
@@ -880,19 +886,19 @@ export default function BookingPage() {
                         type="button"
                         disabled={isPast}
                         onClick={() => setSelectedSlotId(slot.id)}
-                        className={`p-3 rounded-xl border text-left text-xs font-bold transition-all flex items-center justify-between ${
+                        className={`p-2.5 rounded-lg border text-left text-xs font-medium transition-all flex items-center justify-between cursor-pointer ${
                           isPast
                             ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed line-through'
                             : isSelected
-                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                            ? 'bg-emerald-600 text-white border-emerald-600 font-bold'
                             : 'bg-white text-slate-800 border-slate-200 hover:border-emerald-400'
                         }`}
                       >
                         <span>{slot.label}</span>
                         {isPast ? (
-                          <span className="text-[10px] text-rose-500 font-semibold no-underline">Expired</span>
+                          <span className="text-[10px] text-rose-500 font-normal no-underline">Expired</span>
                         ) : isSelected ? (
-                          <span className="text-[10px] bg-emerald-700 text-white px-2 py-0.5 rounded">Selected</span>
+                          <span className="text-[10px] bg-emerald-700 text-white px-1.5 py-0.5 rounded">Selected</span>
                         ) : null}
                       </button>
                     );
@@ -903,23 +909,23 @@ export default function BookingPage() {
           )}
 
           {/* PICKUP INSTRUCTIONS */}
-          <div className="space-y-1.5 pt-2 border-t border-slate-100">
-            <label className="block text-xs font-extrabold text-slate-800">
+          <div className="space-y-1 pt-2 border-t border-slate-100">
+            <label className="block text-xs font-bold text-slate-700">
               Pickup Instructions for Agent (Optional):
             </label>
             <input
               type="text"
               value={instructions}
               onChange={(e) => setInstructions(e.target.value)}
-              placeholder="e.g. Ring main gate bell, call on arrival, park near building B"
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-semibold outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-100"
+              placeholder="e.g. Ring main gate bell, call on arrival..."
+              className="w-full bg-slate-50/70 border border-slate-200 rounded-xl p-2.5 text-xs font-medium outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 placeholder:text-slate-400"
             />
           </div>
 
           <div className="flex items-center justify-between pt-4 border-t border-slate-100">
             <button
               onClick={() => setStep(1)}
-              className="text-slate-600 font-extrabold text-sm px-4 py-2 hover:bg-slate-100 rounded-xl cursor-pointer"
+              className="text-slate-600 font-bold text-xs px-3 py-2 hover:bg-slate-100 rounded-lg cursor-pointer"
             >
               Back
             </button>
@@ -933,10 +939,10 @@ export default function BookingPage() {
                 setErrorMsg('');
                 setStep(3);
               }}
-              className="hover-lift bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-extrabold text-sm px-6 py-3.5 rounded-2xl shadow-md flex items-center gap-2 cursor-pointer transition-all"
+              className="bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white font-bold text-xs px-6 py-3 rounded-xl shadow-sm flex items-center gap-2 cursor-pointer transition-all active:scale-95"
             >
-              VIEW SUMMARY & PAY
-              <ArrowRight className="w-4 h-4" />
+              View Summary & Pay
+              <ArrowRight className="w-4 h-4 text-emerald-400" />
             </button>
           </div>
         </div>
@@ -944,62 +950,62 @@ export default function BookingPage() {
 
       {/* STEP 3: BOOKING SUMMARY & PAYMENT VERIFICATION */}
       {step === 3 && (
-        <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-6 animate-scale-in">
+        <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-slate-200 space-y-6 animate-scale-in">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
             <div>
-              <h2 className="text-xl font-black text-slate-950 tracking-tight">Booking Summary</h2>
-              <p className="text-xs text-slate-500 font-semibold mt-1">Review your details and pay to confirm pickup</p>
+              <h2 className="text-lg font-bold text-slate-900 tracking-tight">Booking Summary</h2>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">Review details and complete payment to confirm pickup</p>
             </div>
             <button
               onClick={() => setStep(2)}
-              className="text-xs text-slate-500 hover:text-slate-900 flex items-center gap-1 font-extrabold cursor-pointer"
+              className="text-xs text-slate-500 hover:text-slate-900 flex items-center gap-1 font-semibold cursor-pointer"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="w-3.5 h-3.5" />
               Edit Details
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* PICKUP LOCATION & SCHEDULE SUMMARY */}
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
-              <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider">Pickup Location & Schedule</h3>
-              <div className="flex items-start gap-2.5">
-                <MapPin className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+            <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-200/80 space-y-2.5">
+              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Pickup & Schedule</h3>
+              <div className="flex items-start gap-2">
+                <MapPin className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-extrabold text-sm text-slate-900">{area}</p>
-                  <p className="text-xs text-slate-600 font-medium leading-relaxed">{fullAddress || `${area}, Bengaluru`}</p>
-                  <p className="text-[11px] text-slate-500 mt-1 font-semibold">Contact: {name || 'Customer'} ({phone || 'Logged In'})</p>
+                  <p className="font-bold text-xs text-slate-900">{area}</p>
+                  <p className="text-[11px] text-slate-600 font-medium leading-relaxed">{fullAddress || `${area}, Bengaluru`}</p>
+                  <p className="text-[10px] text-slate-500 mt-1">Contact: {name || 'Customer'} ({phone || 'Logged In'})</p>
                 </div>
               </div>
 
-              <div className="pt-2 border-t border-slate-200 flex items-center justify-between text-xs font-semibold">
-                <span className="text-slate-600">Pickup Schedule:</span>
-                <span className="text-emerald-700 font-extrabold bg-emerald-100 px-2.5 py-0.5 rounded-full">
+              <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-xs">
+                <span className="text-slate-500 font-medium">Schedule:</span>
+                <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200/60 text-[11px]">
                   {pickupType === 'ASAP' ? '⚡ 20–30 Mins ASAP' : formattedScheduledSlot}
                 </span>
               </div>
 
               {instructions && (
-                <div className="pt-2 border-t border-slate-200 text-xs">
-                  <span className="text-slate-500 block font-semibold">Instructions:</span>
-                  <span className="text-slate-800 font-medium italic">"{instructions}"</span>
+                <div className="pt-2 border-t border-slate-200/80 text-xs">
+                  <span className="text-slate-500 block text-[11px] font-medium">Instructions:</span>
+                  <span className="text-slate-800 font-normal italic">"{instructions}"</span>
                 </div>
               )}
             </div>
 
             {/* SELECTED WASTE CATEGORIES SUMMARY */}
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
-              <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider">Selected Waste Items</h3>
-              <div className="space-y-2 text-xs">
+            <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-200/80 space-y-2.5">
+              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Selected Waste Items</h3>
+              <div className="space-y-1.5 text-xs">
                 {selectedItems.map((item) => {
                   const cat = categories.find((c) => c.id === item.categoryId);
                   return (
-                    <div key={item.categoryId} className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-slate-200">
+                    <div key={item.categoryId} className="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-200/80">
                       <div>
-                        <span className="font-extrabold text-slate-900 block">{cat?.name}</span>
-                        <span className="text-[11px] text-slate-500 font-medium">Rate: ₹{cat?.pricePerKg}/kg</span>
+                        <span className="font-bold text-slate-900 text-xs block">{cat?.name}</span>
+                        <span className="text-[10px] text-slate-500 font-medium">Rate: ₹{cat?.pricePerKg}/kg</span>
                       </div>
-                      <span className="font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                      <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-[11px]">
                         {item.estimatedWeight} kg (Est)
                       </span>
                     </div>
@@ -1010,24 +1016,30 @@ export default function BookingPage() {
           </div>
 
           {/* PROMO COUPON BANNER */}
-          <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-200 flex items-center justify-between gap-3">
+          <div className="bg-emerald-50/60 p-3.5 rounded-xl border border-emerald-200/80 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <Ticket className="w-5 h-5 text-emerald-600" />
+              <Ticket className="w-4 h-4 text-emerald-600 shrink-0" />
               <div>
-                <span className="font-extrabold text-xs text-slate-900 block">Promo Coupon Applied</span>
-                <span className="text-[11px] text-emerald-700 font-semibold">WELCOME50 — ₹50 discount on pickup fee</span>
+                <span className="font-bold text-xs text-slate-900 block">Promo Coupon Applied</span>
+                <span className="text-[11px] text-emerald-700 font-medium">WELCOME50 — ₹50 discount on pickup fee</span>
               </div>
             </div>
-            <span className="text-xs font-black bg-emerald-600 text-white px-3 py-1 rounded-lg">
+            <span className="text-[10px] font-bold bg-emerald-600 text-white px-2.5 py-1 rounded-md">
               APPLIED
             </span>
           </div>
 
           {/* FINANCIAL SUMMARY BOX */}
-          <div className="bg-slate-950 text-white p-5 rounded-2xl space-y-3 shadow-lg">
-            <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 border-b border-slate-800 pb-2">
-              Payment Summary
+          <div className="bg-slate-900 text-white p-4 sm:p-5 rounded-xl space-y-2.5 shadow-sm border border-slate-800">
+            <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800 pb-2">
+              Payment Details
             </h3>
+            {estimate.totalRecyclableValue > 0 && (
+              <div className="flex items-center justify-between text-xs text-slate-300">
+                <span>Estimated Waste Value:</span>
+                <span className="text-emerald-300 font-semibold">₹{estimate.totalRecyclableValue.toFixed(2)}</span>
+              </div>
+            )}
             {estimate.totalWasteCharge > 0 && (
               <div className="flex items-center justify-between text-xs text-slate-300">
                 <span>Heavy Waste Service Charge:</span>
@@ -1035,58 +1047,58 @@ export default function BookingPage() {
               </div>
             )}
             <div className="flex items-center justify-between text-xs text-slate-300">
-              <span>Doorstep Pickup Charge:</span>
+              <span>Pickup Service Charge:</span>
               <span>₹{estimate.baseCharge.toFixed(2)}</span>
             </div>
             {estimate.discount > 0 && (
-              <div className="flex items-center justify-between text-xs text-emerald-400">
+              <div className="flex items-center justify-between text-xs text-emerald-400 font-medium">
                 <span>Coupon Discount (WELCOME50):</span>
                 <span>- ₹{estimate.discount.toFixed(2)}</span>
               </div>
             )}
-            <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-base font-black">
-              <span>Total Customer Amount to Pay:</span>
-              <span className="text-xl text-emerald-400">₹{estimate.netAmount.toFixed(2)}</span>
+            <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between text-sm font-bold">
+              <span>Amount Payable:</span>
+              <span className="text-lg text-emerald-400 font-extrabold">₹{estimate.netAmount.toFixed(2)}</span>
             </div>
           </div>
 
-          <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 flex items-center justify-between text-xs font-semibold">
-            <span className="text-slate-600 font-bold">Payment Method:</span>
-            <span className="font-extrabold text-slate-900 flex items-center gap-1.5">
+          <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
+            <span className="text-slate-600 font-medium">Payment Method:</span>
+            <span className="font-bold text-slate-900 flex items-center gap-1.5">
               <CreditCard className="w-4 h-4 text-emerald-600" />
-              Razorpay Standard Checkout (UPI / Cards / NetBanking)
+              Razorpay Checkout (UPI / Cards / NetBanking)
             </span>
           </div>
 
           {/* ACTION BUTTONS */}
           <div className="flex flex-col gap-2 pt-2">
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center justify-between gap-3">
               <button
                 onClick={() => setStep(2)}
-                className="text-slate-600 font-extrabold text-sm px-4 py-2 hover:bg-slate-100 rounded-xl shrink-0 cursor-pointer"
+                className="text-slate-600 font-bold text-xs px-3 py-2 hover:bg-slate-100 rounded-lg shrink-0 cursor-pointer"
               >
                 Back
               </button>
               <button
                 disabled={loading}
                 onClick={handleConfirmOrder}
-                className="hover-lift w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-400 text-white font-black text-base py-4 rounded-2xl shadow-xl flex items-center justify-center gap-2 cursor-pointer transition-all"
+                className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-300 text-slate-950 font-bold text-sm py-3.5 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
               >
                 {loading ? (
                   <>
-                    <Clock className="w-5 h-5 animate-spin" />
-                    OPENING RAZORPAY CHECKOUT...
+                    <Clock className="w-4 h-4 animate-spin text-slate-950" />
+                    Opening Razorpay Checkout...
                   </>
                 ) : (
                   <>
-                    PAY ₹{estimate.netAmount.toFixed(2)} & CONFIRM PICKUP
-                    <ArrowRight className="w-5 h-5" />
+                    Pay ₹{estimate.netAmount.toFixed(2)} & Confirm Pickup
+                    <ArrowRight className="w-4 h-4" />
                   </>
                 )}
               </button>
             </div>
 
-            <p className="text-[11px] text-center text-slate-500 font-semibold mt-1">
+            <p className="text-[10px] text-center text-slate-500 font-medium mt-1">
               🔒 Secure payment powered by Razorpay. Booking confirmed only after verified successful payment.
             </p>
           </div>

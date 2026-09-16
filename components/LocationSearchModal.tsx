@@ -323,34 +323,34 @@ export default function LocationSearchModal({
         aria-label="Close modal"
       />
 
-      {/* ZEPTO-STYLE LOCATION SEARCH CONTAINER */}
-      <div className="animate-scale-in relative flex max-h-[92dvh] h-[92dvh] sm:h-auto w-full max-w-lg flex-col rounded-t-3xl sm:rounded-3xl bg-white shadow-2xl overflow-hidden">
+      {/* LOCATION SEARCH CONTAINER */}
+      <div className="animate-scale-in relative flex max-h-[90dvh] h-[90dvh] sm:h-auto w-full max-w-lg flex-col rounded-t-2xl sm:rounded-2xl bg-white shadow-xl overflow-hidden border border-slate-200">
         {/* HEADER */}
         <header className="flex shrink-0 items-center justify-between border-b border-slate-100 px-5 py-4 bg-white">
           <div>
-            <h2 className="text-base font-black text-slate-950">Select delivery location</h2>
-            <p className="text-xs text-slate-500 font-semibold mt-0.5">Choose your doorstep pickup area in Bengaluru</p>
+            <h2 className="text-sm font-bold text-slate-900">Select pickup location</h2>
+            <p className="text-xs text-slate-500 font-medium mt-0.5">Choose your doorstep pickup area in Bengaluru</p>
           </div>
           <button
             onClick={onClose}
-            className="grid h-9 w-9 place-items-center rounded-xl text-slate-500 hover:bg-slate-100 transition-colors"
+            className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors cursor-pointer"
             aria-label="Close"
           >
-            <X className="h-5 w-5" />
+            <X className="h-4 w-4" />
           </button>
         </header>
 
         {/* SEARCH BAR INPUT */}
-        <div className="shrink-0 p-4 border-b border-slate-100 bg-slate-50/70">
+        <div className="shrink-0 p-4 border-b border-slate-100 bg-slate-50/50">
           <div className="relative">
-            <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               autoFocus
               value={query}
               onChange={(e) => handleQueryChange(e.target.value)}
               placeholder="Search area, street name, apartment..."
-              className="h-12 w-full rounded-2xl border border-slate-200 bg-white pl-11 pr-10 text-sm font-bold text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 placeholder:text-slate-400 placeholder:font-semibold"
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-9 text-xs sm:text-sm font-medium text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 placeholder:text-slate-400"
             />
             {query && (
               <button
@@ -360,7 +360,7 @@ export default function LocationSearchModal({
                 }}
                 className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600"
               >
-                <X className="h-4 w-4" />
+                <X className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
@@ -368,7 +368,7 @@ export default function LocationSearchModal({
 
         {/* SERVICEABILITY ERROR ALERT BANNER */}
         {serviceError && (
-          <div className="shrink-0 mx-4 mt-3 p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-amber-900 text-xs font-bold flex items-center gap-2.5 animate-scale-in">
+          <div className="shrink-0 mx-4 mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs font-medium flex items-center gap-2.5 animate-scale-in">
             <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
             <span>{serviceError}</span>
           </div>
@@ -380,20 +380,20 @@ export default function LocationSearchModal({
           <button
             onClick={handleUseCurrentLocation}
             disabled={loadingGeolocate}
-            className="w-full flex items-center justify-between p-3.5 bg-emerald-50/80 hover:bg-emerald-100/80 border border-emerald-200/80 rounded-2xl transition-all text-left group"
+            className="w-full flex items-center justify-between p-3 bg-emerald-50/80 hover:bg-emerald-100/70 border border-emerald-200/80 rounded-xl transition-all text-left group cursor-pointer"
           >
-            <div className="flex items-center gap-3.5">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-600 text-white shadow-md group-hover:scale-105 transition-transform">
+            <div className="flex items-center gap-3">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-600 text-white shadow-sm group-hover:scale-105 transition-transform">
                 {loadingGeolocate ? (
-                  <LoaderCircle className="h-5 w-5 animate-spin" />
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Navigation className="h-5 w-5 fill-current" />
+                  <Navigation className="h-4 w-4 fill-current" />
                 )}
               </span>
               <div>
-                <span className="block text-sm font-black text-emerald-950">Use current location</span>
-                <span className="block text-xs font-semibold text-emerald-700 mt-0.5">
-                  {loadingGeolocate ? 'Detecting your GPS position...' : 'Using your device location'}
+                <span className="block text-xs font-bold text-slate-900">Use current location</span>
+                <span className="block text-[11px] font-medium text-emerald-700 mt-0.5">
+                  {loadingGeolocate ? 'Detecting your GPS position...' : 'Using device location'}
                 </span>
               </div>
             </div>
@@ -403,7 +403,7 @@ export default function LocationSearchModal({
           {/* GOOGLE PLACES LIVE PREDICTIONS LIST */}
           {predictions.length > 0 ? (
             <div className="space-y-1">
-              <span className="block text-[11px] font-black uppercase tracking-wider text-slate-400 px-1 mb-2">
+              <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1 mb-2">
                 Search Results
               </span>
               {predictions.map((prediction) => (
@@ -411,16 +411,16 @@ export default function LocationSearchModal({
                   key={prediction.place_id}
                   onClick={() => handleSelectPrediction(prediction)}
                   disabled={loadingPlaceSelect}
-                  className="w-full flex items-start gap-3 p-3 rounded-2xl hover:bg-slate-100/80 text-left transition-colors border border-transparent hover:border-slate-200"
+                  className="w-full flex items-start gap-3 p-2.5 rounded-xl hover:bg-slate-100/80 text-left transition-colors border border-transparent hover:border-slate-200 cursor-pointer"
                 >
-                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600 mt-0.5">
-                    <MapPin className="h-4 w-4 text-emerald-600" />
+                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600 mt-0.5">
+                    <MapPin className="h-3.5 w-3.5 text-emerald-600" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <span className="block text-sm font-extrabold text-slate-900 truncate">
+                    <span className="block text-xs font-bold text-slate-900 truncate">
                       {prediction.structured_formatting?.main_text || prediction.description}
                     </span>
-                    <span className="block text-xs font-semibold text-slate-500 line-clamp-1 mt-0.5">
+                    <span className="block text-[11px] font-medium text-slate-500 line-clamp-1 mt-0.5">
                       {prediction.structured_formatting?.secondary_text || prediction.description}
                     </span>
                   </div>
@@ -430,27 +430,27 @@ export default function LocationSearchModal({
           ) : (
             /* POPULAR BENGALURU LOCATIONS SUGGESTIONS */
             <div className="space-y-2 pt-1">
-              <span className="block text-[11px] font-black uppercase tracking-wider text-slate-400 px-1">
-                Recent / Popular Bengaluru Locations
+              <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1">
+                Popular Bengaluru Areas
               </span>
-              <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm">
+              <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
                 {POPULAR_HUB_LOCATIONS.map((hub, idx) => (
                   <button
                     key={idx}
                     onClick={() => handleSelectPopularHub(hub)}
                     disabled={loadingPlaceSelect}
-                    className="w-full flex items-center justify-between p-3.5 hover:bg-slate-50 text-left transition-colors"
+                    className="w-full flex items-center justify-between p-3 hover:bg-slate-50 text-left transition-colors cursor-pointer"
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
-                        <Building2 className="h-4 w-4" />
+                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-700">
+                        <Building2 className="h-3.5 w-3.5" />
                       </span>
                       <div className="min-w-0">
-                        <span className="block text-xs font-black text-slate-900 truncate">{hub.name}</span>
-                        <span className="block text-[11px] font-semibold text-slate-500">Bengaluru • {hub.pincode}</span>
+                        <span className="block text-xs font-bold text-slate-900 truncate">{hub.name}</span>
+                        <span className="block text-[10px] font-medium text-slate-500">Bengaluru • {hub.pincode}</span>
                       </div>
                     </div>
-                    <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />
+                    <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
                   </button>
                 ))}
               </div>
@@ -459,9 +459,9 @@ export default function LocationSearchModal({
         </div>
 
         {/* FOOTER */}
-        <footer className="shrink-0 border-t border-slate-100 p-4 bg-slate-50/50 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] text-center">
-          <p className="text-[11px] font-semibold text-slate-500">
-            ⚡ Doorstep waste pickup is active across all Bengaluru zones
+        <footer className="shrink-0 border-t border-slate-100 p-3 bg-slate-50/50 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] text-center">
+          <p className="text-[10px] font-medium text-slate-500">
+            Doorstep waste pickup active across Bengaluru service zones
           </p>
         </footer>
       </div>

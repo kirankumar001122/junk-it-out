@@ -117,7 +117,25 @@ export async function createOrder(
     };
   });
 
-  const discountAmount = input.couponCode === 'WELCOME50' ? 50.0 : 0.0;
+  let discountAmount = 0.0;
+  if (input.couponCode) {
+    const coupon = await db.coupon.findUnique({
+      where: { code: input.couponCode.trim().toUpperCase() },
+    });
+    if (coupon && coupon.active) {
+      if (coupon.discountType === 'FLAT') {
+        discountAmount = coupon.discountValue;
+      } else if (coupon.discountType === 'PERCENTAGE') {
+        discountAmount = (basePickupCharge + totalWasteCharge) * (coupon.discountValue / 100);
+        if (coupon.maxDiscount) {
+          discountAmount = Math.min(discountAmount, coupon.maxDiscount);
+        }
+      }
+    } else if (input.couponCode.trim().toUpperCase() === 'WELCOME50') {
+      discountAmount = 50.0;
+    }
+  }
+
   let financialDirection: 'CUSTOMER_PAYS' | 'JUNKITOUT_PAYS';
   let finalAmount: number;
 

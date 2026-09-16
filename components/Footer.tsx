@@ -15,36 +15,36 @@ export default function Footer() {
           {/* Brand Col */}
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700/80 p-0.5 flex items-center justify-center overflow-hidden">
-                <img src="/logo.png" alt="Junk It Out Logo" className="w-full h-full object-contain drop-shadow" />
+              <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700/80 p-0.5 flex items-center justify-center overflow-hidden shrink-0">
+                <img src="/logo.png" alt="Junk It Out Logo" className="w-full h-full object-contain p-0.5" />
               </div>
-              <span className="text-xl font-bold tracking-tight text-white">
-                JUNK IT <span className="text-emerald-400">OUT</span>
+              <span className="text-lg font-bold tracking-tight text-white">
+                JUNK IT <span className="text-emerald-400 font-extrabold">OUT</span>
               </span>
             </div>
-            <p className="text-sm text-slate-400 leading-relaxed">
-              Fast, reliable 20–30 minute doorstep waste pickup platform across Bengaluru. We collect, weigh, pay you for scrap recyclables, and manage waste responsibly.
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Fast, reliable doorstep waste pickup platform across Bengaluru. We collect, weigh, pay for recyclables, and process scrap responsibly.
             </p>
             
             {/* DPIIT Recognition Badge */}
-            <div className="flex items-center gap-2 text-xs text-emerald-300 bg-emerald-950/60 p-3 rounded-2xl border border-emerald-800/60">
+            <div className="flex items-center gap-2.5 text-xs text-slate-300 bg-slate-800/60 p-3 rounded-xl border border-slate-700/60">
               <Award className="w-4 h-4 shrink-0 text-emerald-400" />
               <div>
-                <span className="font-bold block text-white">🇮🇳 DPIIT Registered Startup</span>
+                <span className="font-semibold block text-white text-xs">DPIIT Registered Startup</span>
                 <span className="text-[10px] text-slate-400">Cert No: DIPP265455 • Govt. of India</span>
               </div>
             </div>
 
-            <div className="flex items-center gap-3 text-xs text-slate-400 bg-slate-800/50 p-2.5 rounded-xl border border-slate-800">
+            <div className="flex items-center gap-2.5 text-xs text-slate-400 bg-slate-800/40 p-2.5 rounded-xl border border-slate-800">
               <ShieldCheck className="w-4 h-4 shrink-0 text-emerald-400" />
-              <span>Operating across approved Bengaluru service boundaries.</span>
+              <span>Verified doorstep pickups across Bengaluru.</span>
             </div>
           </div>
 
           {/* Quick Links */}
           <div>
-            <h3 className="text-white font-semibold text-sm mb-4 uppercase tracking-wider">Quick Links</h3>
-            <ul className="space-y-2.5 text-sm">
+            <h3 className="text-slate-200 font-bold text-xs uppercase tracking-wider mb-4">Quick Links</h3>
+            <ul className="space-y-2 text-xs text-slate-400 font-medium">
               <li><Link href="/book" className="hover:text-emerald-400 transition-colors">Book a Pickup</Link></li>
               <li><Link href="/pricing" className="hover:text-emerald-400 transition-colors">Price List / Rates</Link></li>
               <li><Link href="/categories" className="hover:text-emerald-400 transition-colors">Waste Categories</Link></li>
@@ -59,25 +59,25 @@ export default function Footer() {
 
           {/* Bengaluru City Zones */}
           <div>
-            <h3 className="text-white font-semibold text-sm mb-4 uppercase tracking-wider">Bengaluru City Zones</h3>
-            <ul className="space-y-2 text-xs text-slate-400 grid grid-cols-2 gap-x-2">
-              <li>✓ JP Nagar & Jayanagar</li>
-              <li>✓ Electronic City</li>
-              <li>✓ Koramangala & HSR</li>
-              <li>✓ Whitefield & ITPL</li>
-              <li>✓ Indiranagar</li>
-              <li>✓ Yelahanka & Hebbal</li>
-              <li>✓ Rajajinagar</li>
-              <li>✓ Malleshwaram</li>
-              <li>✓ MG Road / Central</li>
-              <li>✓ BTM Layout</li>
+            <h3 className="text-slate-200 font-bold text-xs uppercase tracking-wider mb-4">Bengaluru Service Zones</h3>
+            <ul className="space-y-2 text-xs text-slate-400 grid grid-cols-2 gap-x-2 font-medium">
+              <li className="flex items-center gap-1.5"><span className="text-emerald-400">✓</span> JP Nagar & Jayanagar</li>
+              <li className="flex items-center gap-1.5"><span className="text-emerald-400">✓</span> Electronic City</li>
+              <li className="flex items-center gap-1.5"><span className="text-emerald-400">✓</span> Koramangala & HSR</li>
+              <li className="flex items-center gap-1.5"><span className="text-emerald-400">✓</span> Whitefield & ITPL</li>
+              <li className="flex items-center gap-1.5"><span className="text-emerald-400">✓</span> Indiranagar</li>
+              <li className="flex items-center gap-1.5"><span className="text-emerald-400">✓</span> Yelahanka & Hebbal</li>
+              <li className="flex items-center gap-1.5"><span className="text-emerald-400">✓</span> Rajajinagar</li>
+              <li className="flex items-center gap-1.5"><span className="text-emerald-400">✓</span> Malleshwaram</li>
+              <li className="flex items-center gap-1.5"><span className="text-emerald-400">✓</span> MG Road / Central</li>
+              <li className="flex items-center gap-1.5"><span className="text-emerald-400">✓</span> BTM Layout</li>
             </ul>
           </div>
 
           {/* Contact & Support */}
           <div>
-            <h3 className="text-white font-semibold text-sm mb-4 uppercase tracking-wider">Contact & Support</h3>
-            <div className="space-y-3 text-sm text-slate-400">
+            <h3 className="text-slate-200 font-bold text-xs uppercase tracking-wider mb-4">Contact & Support</h3>
+            <div className="space-y-3 text-xs text-slate-400 font-medium">
               <div className="flex items-start gap-2.5">
                 <MapPin className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                 <span>Munnekollala, Bengaluru, Karnataka 560037</span>
@@ -95,13 +95,13 @@ export default function Footer() {
         </div>
 
         {/* Bottom Bar */}
-        <div className="pt-8 border-t border-slate-800 flex flex-col md:flex-row items-center justify-between text-xs text-slate-500 gap-4">
+        <div className="pt-6 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-4">
           <p>© 2026 Junk It Out Technologies Pvt. Ltd. All rights reserved.</p>
-          <div className="flex items-center gap-6">
-            <Link href="/privacy-policy" className="hover:text-slate-300">Privacy Policy</Link>
-            <Link href="/terms" className="hover:text-slate-300">Terms & Conditions</Link>
-            <Link href="/faq" className="hover:text-slate-300">FAQ</Link>
-            <Link href="/accepted-waste" className="hover:text-slate-300">Waste Policy</Link>
+          <div className="flex items-center gap-5">
+            <Link href="/privacy-policy" className="hover:text-slate-200 transition-colors">Privacy Policy</Link>
+            <Link href="/terms" className="hover:text-slate-200 transition-colors">Terms & Conditions</Link>
+            <Link href="/faq" className="hover:text-slate-200 transition-colors">FAQ</Link>
+            <Link href="/accepted-waste" className="hover:text-slate-200 transition-colors">Waste Policy</Link>
           </div>
         </div>
       </div>
