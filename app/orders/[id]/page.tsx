@@ -191,21 +191,44 @@ export default function OrderTrackingPage() {
 
   const currentStatusIdx = getStatusStepIndex(order.status);
 
+  const loadRazorpayScript = (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (typeof window !== 'undefined' && (window as any).Razorpay) {
+        resolve(true);
+        return;
+      }
+      const scriptId = 'razorpay-checkout-script';
+      const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
+      if (existing) {
+        if ((window as any).Razorpay) {
+          resolve(true);
+          return;
+        }
+        existing.addEventListener('load', () => resolve(true), { once: true });
+        existing.addEventListener('error', () => resolve(false), { once: true });
+        return;
+      }
+      const script = document.createElement('script');
+      script.id = scriptId;
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
+  useEffect(() => {
+    if (order && order.financialDirection === 'CUSTOMER_PAYS' && order.paymentStatus !== 'CAPTURED') {
+      loadRazorpayScript().catch(() => {});
+    }
+  }, [order]);
+
   const handlePayNow = async () => {
     try {
       setPaymentLoading(true);
       setPaymentMessage(null);
-      const scriptId = 'razorpay-checkout-script';
-      if (!document.getElementById(scriptId)) {
-        await new Promise<void>((resolve, reject) => {
-          const script = document.createElement('script');
-          script.id = scriptId;
-          script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-          script.onload = () => resolve();
-          script.onerror = () => reject(new Error('Unable to load Razorpay Checkout.'));
-          document.body.appendChild(script);
-        });
-      }
+      const scriptPromise = loadRazorpayScript();
 
       const createResponse = await fetch('/api/payments/create', {
         method: 'POST',
@@ -214,6 +237,9 @@ export default function OrderTrackingPage() {
       });
       const createData = await createResponse.json();
       if (!createResponse.ok || !createData.success) throw new Error(createData.message || 'Unable to start payment.');
+
+      const scriptLoaded = await scriptPromise;
+      if (!scriptLoaded) throw new Error('Unable to load Razorpay Checkout script.');
 
       const checkoutOptions: any = {
         key: createData.data.key,
@@ -620,7 +646,7 @@ export default function OrderTrackingPage() {
                 className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-60 text-slate-950 font-bold text-xs px-5 py-3 rounded-xl shadow-md transition-all flex items-center gap-2"
               >
                 <CreditCard className="w-4 h-4" />
-                {paymentLoading ? 'OPENING RAZORPAY...' : 'PAY NOW (RAZORPAY)'}
+                {paymentLoading ? 'OPENING SECURE PAYMENT...' : 'PAY NOW (RAZORPAY)'}
               </button>
             )}
 

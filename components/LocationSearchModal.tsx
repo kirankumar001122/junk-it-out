@@ -60,6 +60,25 @@ export default function LocationSearchModal({
   const autocompleteServiceRef = useRef<any>(null);
   const geocoderRef = useRef<any>(null);
 
+  // Prevent background page scrolling when modal is open & handle Escape key
+  useEffect(() => {
+    if (!open) return;
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open, onClose]);
+
   // Initialize Google Maps Places & Geocoder Services
   useEffect(() => {
     if (!open) return;
@@ -311,7 +330,7 @@ export default function LocationSearchModal({
 
   return (
     <div
-      className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center p-0 sm:p-4"
+      className="fixed inset-0 z-[100] flex flex-col items-center justify-start pt-16 sm:pt-20 px-3 pb-4 sm:pb-6 overflow-hidden"
       role="dialog"
       aria-modal="true"
       aria-label="Select delivery location"
@@ -324,9 +343,9 @@ export default function LocationSearchModal({
       />
 
       {/* LOCATION SEARCH CONTAINER */}
-      <div className="animate-scale-in relative flex max-h-[90dvh] h-[90dvh] sm:h-auto w-full max-w-lg flex-col rounded-t-2xl sm:rounded-2xl bg-white shadow-xl overflow-hidden border border-slate-200">
+      <div className="animate-scale-in relative flex max-h-[calc(100dvh-5rem)] w-full max-w-lg flex-col rounded-2xl bg-white shadow-2xl overflow-hidden border border-slate-200 z-10">
         {/* HEADER */}
-        <header className="flex shrink-0 items-center justify-between border-b border-slate-100 px-5 py-4 bg-white">
+        <header className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 sm:px-5 py-3.5 bg-white">
           <div>
             <h2 className="text-sm font-bold text-slate-900">Select pickup location</h2>
             <p className="text-xs text-slate-500 font-medium mt-0.5">Choose your doorstep pickup area in Bengaluru</p>

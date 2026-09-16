@@ -312,13 +312,33 @@ export default function BookingPage() {
         resolve(true);
         return;
       }
+      const scriptId = 'razorpay-checkout-script';
+      const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
+      if (existing) {
+        if ((window as any).Razorpay) {
+          resolve(true);
+          return;
+        }
+        existing.addEventListener('load', () => resolve(true), { once: true });
+        existing.addEventListener('error', () => resolve(false), { once: true });
+        return;
+      }
       const script = document.createElement('script');
+      script.id = scriptId;
       script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
       script.onload = () => resolve(true);
       script.onerror = () => resolve(false);
       document.body.appendChild(script);
     });
   }
+
+  // Preload Razorpay checkout SDK as soon as customer reaches summary & payment step
+  useEffect(() => {
+    if (step === 3) {
+      loadRazorpayScript().catch(() => {});
+    }
+  }, [step]);
 
   // Master Customer Booking & Razorpay Payment Handler
   const handleConfirmOrder = async () => {
@@ -345,6 +365,9 @@ export default function BookingPage() {
 
     setLoading(true);
     setErrorMsg('');
+
+    // Preload / load SDK in parallel with API calls
+    const scriptPromise = loadRazorpayScript();
 
     try {
       // 1. Create order on server (CUSTOMER_PAYS)
@@ -403,7 +426,7 @@ export default function BookingPage() {
         return;
       }
 
-      const scriptLoaded = await loadRazorpayScript();
+      const scriptLoaded = await scriptPromise;
       if (!scriptLoaded) {
         setLoading(false);
         setErrorMsg('Failed to load Razorpay payment SDK. Please check your network connection.');
@@ -1087,7 +1110,7 @@ export default function BookingPage() {
                 {loading ? (
                   <>
                     <Clock className="w-4 h-4 animate-spin text-slate-950" />
-                    Opening Razorpay Checkout...
+                    Opening secure payment...
                   </>
                 ) : (
                   <>
