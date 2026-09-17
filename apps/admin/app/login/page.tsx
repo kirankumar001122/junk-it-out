@@ -61,8 +61,7 @@ export default function AdminLoginPage() {
         return;
       }
 
-      router.replace('/');
-      router.refresh();
+      window.location.href = '/';
     } catch {
       setError('Network error while verifying OTP.');
     } finally {
