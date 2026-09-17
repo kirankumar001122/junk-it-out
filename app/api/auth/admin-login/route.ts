@@ -70,24 +70,29 @@ export async function POST(req: NextRequest) {
           include: { admin: true, customer: true, agent: true },
         });
       } else {
-        if (!['ADMIN', 'SUPER_ADMIN'].includes(user.role) || !user.admin) {
-          let adminRecord = user.admin;
-          if (!adminRecord) {
-            adminRecord = await db.admin.create({
-              data: {
-                userId: user.id,
-                department: 'Operations & Management',
-                accessLevel: 'SUPER_ADMIN',
-              },
-            });
-          }
-          user = await db.user.update({
-            where: { id: user.id },
-            data: {
-              role: 'SUPER_ADMIN',
+        let adminRecord = user.admin || (await db.admin.findUnique({ where: { userId: user.id } }));
+        if (!adminRecord) {
+          adminRecord = await db.admin.upsert({
+            where: { userId: user.id },
+            update: { accessLevel: 'SUPER_ADMIN' },
+            create: {
+              userId: user.id,
+              department: 'Operations & Management',
+              accessLevel: 'SUPER_ADMIN',
             },
-            include: { admin: true, customer: true, agent: true },
           });
+        }
+
+        user = await db.user.update({
+          where: { id: user.id },
+          data: {
+            role: 'SUPER_ADMIN',
+          },
+          include: { admin: true, customer: true, agent: true },
+        });
+
+        if (!user.admin && adminRecord) {
+          (user as any).admin = adminRecord;
         }
       }
 
@@ -101,7 +106,9 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (!user || !user.admin || !['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
+    const adminRecord = user?.admin || (user?.id ? await db.admin.findUnique({ where: { userId: user.id } }) : null);
+
+    if (!user || !adminRecord || !['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
       return addCorsHeaders(
         errorResponse(
           'FORBIDDEN',
@@ -120,7 +127,7 @@ export async function POST(req: NextRequest) {
       role: user.role as 'ADMIN' | 'SUPER_ADMIN',
       customerId: user.customer?.id ?? null,
       agentId: user.agent?.id ?? null,
-      adminId: user.admin.id,
+      adminId: adminRecord.id,
     });
 
     const response = successResponse({
@@ -130,7 +137,7 @@ export async function POST(req: NextRequest) {
         phone: user.phone,
         name: user.name,
         role: user.role,
-        adminId: user.admin.id,
+        adminId: adminRecord.id,
       },
     });
 
