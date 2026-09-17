@@ -172,11 +172,11 @@ export default function AdminDashboardPage() {
               <Package className="w-4 h-4" />
             </div>
           </div>
-          <span className="text-3xl font-black text-slate-900">{stats?.totalOrders || 0}</span>
+          <span className="text-3xl font-black text-slate-900">{stats?.todaysBookings ?? stats?.totalBookings ?? 0}</span>
           <div className="flex items-center gap-2 mt-2 text-xs">
-            <span className="text-amber-600 font-bold">{stats?.activeOrders || 0} Active</span>
+            <span className="text-amber-600 font-bold">{stats?.activePickups ?? stats?.pendingBookings ?? 0} Active</span>
             <span className="text-slate-400">|</span>
-            <span className="text-emerald-600 font-bold">{stats?.completedOrders || 0} Completed</span>
+            <span className="text-emerald-600 font-bold">{stats?.completedPickups ?? 0} Completed</span>
           </div>
         </div>
 
@@ -188,7 +188,7 @@ export default function AdminDashboardPage() {
             </div>
           </div>
           <span className="text-3xl font-black text-slate-900">
-            {stats?.totalWeightKg || 0} <span className="text-lg text-slate-500">kg</span>
+            {stats?.totalWeightKg ?? 0} <span className="text-lg text-slate-500">kg</span>
           </span>
           <p className="text-xs text-slate-500 mt-2">South Bengaluru Total Weight</p>
         </div>
@@ -200,7 +200,7 @@ export default function AdminDashboardPage() {
               <CreditCard className="w-4 h-4" />
             </div>
           </div>
-          <span className="text-3xl font-black text-slate-900">₹{stats?.totalCustomerPayouts || 0}</span>
+          <span className="text-3xl font-black text-slate-900">₹{stats?.totalCustomerPayouts ?? stats?.totalRevenue ?? 0}</span>
           <p className="text-xs text-slate-500 mt-2">Recyclable Customer Settlements</p>
         </div>
 
@@ -211,7 +211,7 @@ export default function AdminDashboardPage() {
               <Clock className="w-4 h-4" />
             </div>
           </div>
-          <span className="text-3xl font-black text-emerald-600">{stats?.slaOnTimeRate || 96.4}%</span>
+          <span className="text-3xl font-black text-emerald-600">{stats?.slaOnTimeRate ?? 96.4}%</span>
           <div className="flex items-center gap-1 mt-2 text-xs font-bold text-emerald-700">
             <ShieldCheck className="w-4 h-4" />
             <span>Target 30 Mins Compliant</span>

@@ -8,9 +8,15 @@ export function getApiUrl(path: string): string {
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path;
   }
-  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || 'https://www.junkitout.in';
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  return `${baseUrl}${cleanPath}`;
+
+  if (typeof window !== 'undefined') {
+    return cleanPath;
+  }
+
+  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || 'https://www.junkitout.in';
+  const cleanBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+  return `${cleanBase}${cleanPath}`;
 }
 
 export async function adminFetch(path: string, options: RequestInit = {}): Promise<Response> {

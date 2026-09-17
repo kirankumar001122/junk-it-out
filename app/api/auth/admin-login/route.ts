@@ -40,9 +40,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Lookup & Provision Authorized Admin Account (Darshan - 8884176048)
+    // 2. Lookup & Provision Authorized Admin Account (7676272709 / 8884176048)
     const rawDigits = normalized.replace(/^\+91/, '').replace(/\D/g, '');
-    const isAuthorizedAdminNumber = rawDigits === '8884176048';
+    const isAuthorizedAdminNumber = rawDigits === '7676272709' || rawDigits === '8884176048';
     const phoneVariants = Array.from(
       new Set([normalized, rawDigits, `+91${rawDigits}`, `0${rawDigits}`])
     );
@@ -57,8 +57,8 @@ export async function POST(req: NextRequest) {
         user = await db.user.create({
           data: {
             phone: `+91${rawDigits}`,
-            email: 'darshan@junkitout.in',
-            name: 'Darshan Tejomaya M',
+            email: `admin_${rawDigits}@junkitout.in`,
+            name: 'Junk It Out Admin',
             role: 'SUPER_ADMIN',
             admin: {
               create: {
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
           include: { admin: true, customer: true, agent: true },
         });
       } else {
-        if (user.role !== 'SUPER_ADMIN' || user.name !== 'Darshan Tejomaya M' || !user.admin) {
+        if (!['ADMIN', 'SUPER_ADMIN'].includes(user.role) || !user.admin) {
           let adminRecord = user.admin;
           if (!adminRecord) {
             adminRecord = await db.admin.create({
@@ -84,7 +84,6 @@ export async function POST(req: NextRequest) {
           user = await db.user.update({
             where: { id: user.id },
             data: {
-              name: 'Darshan Tejomaya M',
               role: 'SUPER_ADMIN',
             },
             include: { admin: true, customer: true, agent: true },
@@ -92,11 +91,11 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Ensure NO other user retains ADMIN or SUPER_ADMIN access
+      // Ensure unauthorized users do not retain ADMIN or SUPER_ADMIN access
       await db.user.updateMany({
         where: {
           role: { in: ['ADMIN', 'SUPER_ADMIN'] },
-          phone: { notIn: ['+918884176048', '8884176048', '08884176048'] },
+          phone: { notIn: ['+917676272709', '7676272709', '07676272709', '+918884176048', '8884176048', '08884176048'] },
         },
         data: { role: 'CUSTOMER' },
       });
@@ -106,7 +105,7 @@ export async function POST(req: NextRequest) {
       return addCorsHeaders(
         errorResponse(
           'FORBIDDEN',
-          'Admin access required. This portal is strictly restricted to authorized admin Darshan (8884176048).',
+          'Admin access required. Access is strictly restricted to authorized administrative personnel.',
           403
         ),
         req

@@ -29,7 +29,18 @@ export default function AdminUsersPage() {
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
               <tr className="hover:bg-slate-50/80">
-                <td className="p-3 font-bold text-slate-900">Darshan Tejomaya M</td>
+                <td className="p-3 font-bold text-slate-900">Junk It Out Primary Admin</td>
+                <td className="p-3 font-mono text-slate-600">+91 7676272709</td>
+                <td className="p-3 text-slate-700">Operations & Management</td>
+                <td className="p-3 font-extrabold text-emerald-700">SUPER_ADMIN</td>
+                <td className="p-3">
+                  <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase bg-emerald-100 text-emerald-800">
+                    ACTIVE
+                  </span>
+                </td>
+              </tr>
+              <tr className="hover:bg-slate-50/80">
+                <td className="p-3 font-bold text-slate-900">Junk It Out Admin (Darshan)</td>
                 <td className="p-3 font-mono text-slate-600">+91 8884176048</td>
                 <td className="p-3 text-slate-700">Operations & Management</td>
                 <td className="p-3 font-extrabold text-emerald-700">SUPER_ADMIN</td>

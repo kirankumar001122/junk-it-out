@@ -5,14 +5,14 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('Seeding Junk It Out database...');
 
-  // 1. Create Admin User (Darshan Tejomaya M - 8884176048)
+  // 1. Create Admin User (7676272709)
   const adminUser = await prisma.user.upsert({
-    where: { phone: '+918884176048' },
-    update: { name: 'Darshan Tejomaya M', role: 'SUPER_ADMIN' },
+    where: { phone: '+917676272709' },
+    update: { role: 'SUPER_ADMIN' },
     create: {
-      phone: '+918884176048',
-      email: 'darshan@junkitout.in',
-      name: 'Darshan Tejomaya M',
+      phone: '+917676272709',
+      email: 'admin_7676272709@junkitout.in',
+      name: 'Junk It Out Operations Admin',
       role: 'SUPER_ADMIN',
       admin: {
         create: {

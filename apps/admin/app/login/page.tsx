@@ -156,11 +156,6 @@ export default function AdminLoginPage() {
           </button>
         </form>
 
-        <div className="text-center">
-          <p className="text-xs text-slate-500">
-            Strictly restricted to authorized admin Darshan (<span className="text-slate-400 font-mono">8884176048</span>).
-          </p>
-        </div>
       </div>
     </div>
   );
