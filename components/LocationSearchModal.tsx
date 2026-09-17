@@ -1,18 +1,17 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Search,
   X,
   Navigation,
   MapPin,
-  CheckCircle2,
   AlertTriangle,
   LoaderCircle,
-  Building2,
   ChevronRight,
+  ShieldCheck,
 } from 'lucide-react';
-import { BENGALURU_ZONES } from '@/lib/geofence';
+import { BENGALURU_ZONES, ServiceZone } from '@/lib/geofence';
 import { loadGoogleMaps } from '@/components/InteractiveMap';
 import { setSelectedLocation } from '@/lib/selectedLocation';
 
@@ -34,16 +33,6 @@ type Props = {
   currentArea?: string;
 };
 
-// Popular Bengaluru hubs for 1-tap quick selection
-const POPULAR_HUB_LOCATIONS = [
-  { name: 'Whitefield, ITPL & Kadugodi', lat: 12.9698, lng: 77.7500, street: 'ITPL Main Road', pincode: '560066' },
-  { name: 'Koramangala & HSR Layout', lat: 12.9352, lng: 77.6245, street: '80 Feet Road', pincode: '560034' },
-  { name: 'Indiranagar & Domlur', lat: 12.9784, lng: 77.6408, street: '100 Feet Road', pincode: '560038' },
-  { name: 'Jayanagar & JP Nagar', lat: 12.9250, lng: 77.5938, street: '4th Block', pincode: '560041' },
-  { name: 'Electronic City & Silk Board', lat: 12.8452, lng: 77.6602, street: 'Hosur Main Road', pincode: '560100' },
-  { name: 'Yelahanka & Hebbal', lat: 13.0991, lng: 77.5944, street: 'Bellary Road', pincode: '560064' },
-];
-
 export default function LocationSearchModal({
   open,
   onClose,
@@ -52,10 +41,11 @@ export default function LocationSearchModal({
 }: Props) {
   const [query, setQuery] = useState('');
   const [predictions, setPredictions] = useState<any[]>([]);
+  const [serviceZones, setServiceZones] = useState<any[]>(BENGALURU_ZONES);
+  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [loadingGeolocate, setLoadingGeolocate] = useState(false);
   const [loadingPlaceSelect, setLoadingPlaceSelect] = useState(false);
   const [serviceError, setServiceError] = useState<string | null>(null);
-  const [mapsReady, setMapsReady] = useState(false);
 
   const autocompleteServiceRef = useRef<any>(null);
   const geocoderRef = useRef<any>(null);
@@ -79,16 +69,32 @@ export default function LocationSearchModal({
     };
   }, [open, onClose]);
 
+  // Fetch configured service areas from backend API if available, fallback to BENGALURU_ZONES
+  useEffect(() => {
+    if (!open) return;
+
+    fetch('/api/service-areas')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.data) && data.data.length > 0) {
+          setServiceZones(data.data);
+        }
+      })
+      .catch(() => {
+        // Fallback to static BENGALURU_ZONES already in state
+      });
+  }, [open]);
+
   // Initialize Google Maps Places & Geocoder Services
   useEffect(() => {
     if (!open) return;
     setQuery('');
     setPredictions([]);
     setServiceError(null);
+    setSelectedZoneId(null);
 
     loadGoogleMaps()
       .then((maps) => {
-        setMapsReady(true);
         if (maps?.places && !autocompleteServiceRef.current) {
           autocompleteServiceRef.current = new maps.places.AutocompleteService();
         }
@@ -98,12 +104,14 @@ export default function LocationSearchModal({
       })
       .catch((err) => {
         console.warn('Google Maps Places Autocomplete setup notice:', err.message);
-        setMapsReady(false);
       });
   }, [open]);
 
   // Check serviceability via backend API
-  const checkServiceability = async (lat: number, lng: number): Promise<{ serviceable: boolean; zoneName?: string; message?: string }> => {
+  const checkServiceability = async (
+    lat: number,
+    lng: number
+  ): Promise<{ serviceable: boolean; zoneName?: string; message?: string }> => {
     try {
       const res = await fetch('/api/service-areas/check', {
         method: 'POST',
@@ -116,7 +124,10 @@ export default function LocationSearchModal({
       } else {
         return {
           serviceable: false,
-          message: data.data?.message || data.message || "We're not serving this location yet. Please select a location within Bengaluru.",
+          message:
+            data.data?.message ||
+            data.message ||
+            "We're not serving this location yet. Please select a location within Bengaluru.",
         };
       }
     } catch {
@@ -167,42 +178,86 @@ export default function LocationSearchModal({
     setLoadingPlaceSelect(true);
     setServiceError(null);
 
-    geocoderRef.current.geocode({ placeId: prediction.place_id }, async (results: any[], status: string) => {
-      setLoadingPlaceSelect(false);
-      if (status === 'OK' && results?.[0]?.geometry?.location) {
-        const targetLat = results[0].geometry.location.lat();
-        const targetLng = results[0].geometry.location.lng();
-        const formattedAddress = results[0].formatted_address || prediction.description;
+    geocoderRef.current.geocode(
+      { placeId: prediction.place_id },
+      async (results: any[], status: string) => {
+        setLoadingPlaceSelect(false);
+        if (status === 'OK' && results?.[0]?.geometry?.location) {
+          const targetLat = results[0].geometry.location.lat();
+          const targetLng = results[0].geometry.location.lng();
+          const formattedAddress = results[0].formatted_address || prediction.description;
 
-        const components = results[0].address_components || [];
-        const valueFor = (type: string) => components.find((item: any) => item.types?.includes(type))?.long_name || '';
-        const areaName = valueFor('sublocality_level_1') || valueFor('locality') || prediction.structured_formatting?.main_text || 'Bengaluru';
-        const streetName = valueFor('route') || valueFor('neighborhood') || '';
-        const postalCode = valueFor('postal_code') || '';
+          const components = results[0].address_components || [];
+          const valueFor = (type: string) =>
+            components.find((item: any) => item.types?.includes(type))?.long_name || '';
+          const areaName =
+            valueFor('sublocality_level_1') ||
+            valueFor('locality') ||
+            prediction.structured_formatting?.main_text ||
+            'Bengaluru';
+          const streetName = valueFor('route') || valueFor('neighborhood') || '';
+          const postalCode = valueFor('postal_code') || '';
 
-        const check = await checkServiceability(targetLat, targetLng);
-        if (check.serviceable) {
-          const locData = {
-            address: formattedAddress,
-            area: areaName,
-            lat: targetLat,
-            lng: targetLng,
-            placeId: prediction.place_id,
-            street: streetName,
-            pincode: postalCode,
-            serviceable: true,
-            zoneName: check.zoneName,
-          };
-          setSelectedLocation(locData);
-          onSelectLocation(locData);
-          onClose();
+          const check = await checkServiceability(targetLat, targetLng);
+          if (check.serviceable) {
+            const locData = {
+              address: formattedAddress,
+              area: areaName,
+              lat: targetLat,
+              lng: targetLng,
+              placeId: prediction.place_id,
+              street: streetName,
+              pincode: postalCode,
+              serviceable: true,
+              zoneName: check.zoneName,
+            };
+            setSelectedLocation(locData);
+            onSelectLocation(locData);
+            onClose();
+          } else {
+            setServiceError(
+              check.message ||
+                "We're not serving this location yet. Please select a location within Bengaluru."
+            );
+          }
         } else {
-          setServiceError(check.message || "We're not serving this location yet. Please select a location within Bengaluru.");
+          setServiceError('Unable to fetch coordinates for this location. Please select another suggestion.');
         }
-      } else {
-        setServiceError('Unable to fetch coordinates for this location. Please select another suggestion.');
       }
-    });
+    );
+  };
+
+  // Handle Selection of a Service Zone from the list
+  const handleSelectZone = async (zone: any) => {
+    const zoneKey = zone.id || zone.name;
+    setSelectedZoneId(zoneKey);
+    setLoadingPlaceSelect(true);
+    setServiceError(null);
+
+    const lat = zone.centerLat || 12.9077;
+    const lng = zone.centerLng || 77.5854;
+
+    const check = await checkServiceability(lat, lng);
+    setLoadingPlaceSelect(false);
+    setSelectedZoneId(null);
+
+    if (check.serviceable) {
+      const locData = {
+        address: `${zone.name}, Bengaluru`,
+        area: zone.name,
+        lat,
+        lng,
+        serviceable: true,
+        zoneName: check.zoneName || zone.name,
+      };
+      setSelectedLocation(locData);
+      onSelectLocation(locData);
+      onClose();
+    } else {
+      setServiceError(
+        check.message || "We're not serving this location yet. Please select a location within Bengaluru."
+      );
+    }
   };
 
   // Handle Current Location GPS Click
@@ -221,54 +276,63 @@ export default function LocationSearchModal({
         const userLng = position.coords.longitude;
 
         if (geocoderRef.current) {
-          geocoderRef.current.geocode({ location: { lat: userLat, lng: userLng } }, async (results: any[], status: string) => {
-            setLoadingGeolocate(false);
-            if (status === 'OK' && results?.[0]) {
-              const res = results[0];
-              const formattedAddress = res.formatted_address || `GPS (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`;
-              const components = res.address_components || [];
-              const valueFor = (type: string) => components.find((item: any) => item.types?.includes(type))?.long_name || '';
-              const areaName = valueFor('sublocality_level_1') || valueFor('locality') || 'Bengaluru';
-              const streetName = valueFor('route') || '';
-              const postalCode = valueFor('postal_code') || '';
+          geocoderRef.current.geocode(
+            { location: { lat: userLat, lng: userLng } },
+            async (results: any[], status: string) => {
+              setLoadingGeolocate(false);
+              if (status === 'OK' && results?.[0]) {
+                const res = results[0];
+                const formattedAddress =
+                  res.formatted_address || `GPS (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`;
+                const components = res.address_components || [];
+                const valueFor = (type: string) =>
+                  components.find((item: any) => item.types?.includes(type))?.long_name || '';
+                const areaName = valueFor('sublocality_level_1') || valueFor('locality') || 'Bengaluru';
+                const streetName = valueFor('route') || '';
+                const postalCode = valueFor('postal_code') || '';
 
-              const check = await checkServiceability(userLat, userLng);
-              if (check.serviceable) {
-                const locData = {
-                  address: formattedAddress,
-                  area: areaName,
-                  lat: userLat,
-                  lng: userLng,
-                  placeId: res.place_id,
-                  street: streetName,
-                  pincode: postalCode,
-                  serviceable: true,
-                  zoneName: check.zoneName,
-                };
-                setSelectedLocation(locData);
-                onSelectLocation(locData);
-                onClose();
+                const check = await checkServiceability(userLat, userLng);
+                if (check.serviceable) {
+                  const locData = {
+                    address: formattedAddress,
+                    area: areaName,
+                    lat: userLat,
+                    lng: userLng,
+                    placeId: res.place_id,
+                    street: streetName,
+                    pincode: postalCode,
+                    serviceable: true,
+                    zoneName: check.zoneName,
+                  };
+                  setSelectedLocation(locData);
+                  onSelectLocation(locData);
+                  onClose();
+                } else {
+                  setServiceError(
+                    "We're not serving this location yet. Please select a location within Bengaluru."
+                  );
+                }
               } else {
-                setServiceError("We're not serving this location yet. Please select a location within Bengaluru.");
-              }
-            } else {
-              const check = await checkServiceability(userLat, userLng);
-              if (check.serviceable) {
-                const locData = {
-                  address: `Near (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`,
-                  area: 'Bengaluru',
-                  lat: userLat,
-                  lng: userLng,
-                  serviceable: true,
-                };
-                setSelectedLocation(locData);
-                onSelectLocation(locData);
-                onClose();
-              } else {
-                setServiceError("We're not serving this location yet. Please select a location within Bengaluru.");
+                const check = await checkServiceability(userLat, userLng);
+                if (check.serviceable) {
+                  const locData = {
+                    address: `Near (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`,
+                    area: 'Bengaluru',
+                    lat: userLat,
+                    lng: userLng,
+                    serviceable: true,
+                  };
+                  setSelectedLocation(locData);
+                  onSelectLocation(locData);
+                  onClose();
+                } else {
+                  setServiceError(
+                    "We're not serving this location yet. Please select a location within Bengaluru."
+                  );
+                }
               }
             }
-          });
+          );
         } else {
           setLoadingGeolocate(false);
           const check = await checkServiceability(userLat, userLng);
@@ -284,56 +348,37 @@ export default function LocationSearchModal({
             onSelectLocation(locData);
             onClose();
           } else {
-            setServiceError("We're not serving this location yet. Please select a location within Bengaluru.");
+            setServiceError(
+              "We're not serving this location yet. Please select a location within Bengaluru."
+            );
           }
         }
       },
       (err) => {
         setLoadingGeolocate(false);
         if (err.code === err.PERMISSION_DENIED) {
-          setServiceError('Location permission denied. Please search for your area manually.');
+          setServiceError('Location permission denied. Please select your area from the available list.');
         } else {
-          setServiceError('Unable to detect current GPS location. Please search for your area.');
+          setServiceError('Unable to detect current GPS location. Please select your area from the list below.');
         }
       },
       { timeout: 10000, enableHighAccuracy: true }
     );
   };
 
-  // Handle Quick Select Popular Bengaluru Hubs
-  const handleSelectPopularHub = async (hub: typeof POPULAR_HUB_LOCATIONS[0]) => {
-    setLoadingPlaceSelect(true);
-    setServiceError(null);
-    const check = await checkServiceability(hub.lat, hub.lng);
-    setLoadingPlaceSelect(false);
-
-    if (check.serviceable) {
-      const locData = {
-        address: `${hub.name}, Bengaluru - ${hub.pincode}`,
-        area: hub.name,
-        lat: hub.lat,
-        lng: hub.lng,
-        street: hub.street,
-        pincode: hub.pincode,
-        serviceable: true,
-        zoneName: check.zoneName,
-      };
-      setSelectedLocation(locData);
-      onSelectLocation(locData);
-      onClose();
-    } else {
-      setServiceError("We're not serving this location yet. Please select a location within Bengaluru.");
-    }
-  };
-
   if (!open) return null;
+
+  // Filter service zones by user search query
+  const filteredZones = query.trim()
+    ? serviceZones.filter((z) => z.name.toLowerCase().includes(query.trim().toLowerCase()))
+    : serviceZones;
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex flex-col items-center justify-start pt-16 sm:pt-20 px-3 pb-4 sm:pb-6 overflow-hidden"
+      className="fixed inset-0 z-[100] flex flex-col items-center justify-start pt-12 sm:pt-16 px-3 pb-4 sm:pb-6 overflow-hidden"
       role="dialog"
       aria-modal="true"
-      aria-label="Select delivery location"
+      aria-label="Select pickup location"
     >
       {/* BACKDROP */}
       <button
@@ -343,12 +388,17 @@ export default function LocationSearchModal({
       />
 
       {/* LOCATION SEARCH CONTAINER */}
-      <div className="animate-scale-in relative flex max-h-[calc(100dvh-5rem)] w-full max-w-lg flex-col rounded-2xl bg-white shadow-2xl overflow-hidden border border-slate-200 z-10">
+      <div className="animate-scale-in relative flex max-h-[calc(100dvh-4rem)] w-full max-w-lg flex-col rounded-2xl bg-white shadow-2xl overflow-hidden border border-slate-200 z-10">
         {/* HEADER */}
         <header className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 sm:px-5 py-3.5 bg-white">
-          <div>
-            <h2 className="text-sm font-bold text-slate-900">Select pickup location</h2>
-            <p className="text-xs text-slate-500 font-medium mt-0.5">Choose your doorstep pickup area in Bengaluru</p>
+          <div className="flex items-center gap-2">
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100">
+              <MapPin className="h-4 w-4" />
+            </span>
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">Select Pickup Location</h2>
+              <p className="text-xs text-slate-500 font-medium">📍 Doorstep waste pickup across Bengaluru</p>
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -360,7 +410,7 @@ export default function LocationSearchModal({
         </header>
 
         {/* SEARCH BAR INPUT */}
-        <div className="shrink-0 p-4 border-b border-slate-100 bg-slate-50/50">
+        <div className="shrink-0 p-3.5 border-b border-slate-100 bg-slate-50/50">
           <div className="relative">
             <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
@@ -368,7 +418,7 @@ export default function LocationSearchModal({
               autoFocus
               value={query}
               onChange={(e) => handleQueryChange(e.target.value)}
-              placeholder="Search area, street name, apartment..."
+              placeholder="Search area, zone name, apartment..."
               className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-9 text-xs sm:text-sm font-medium text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 placeholder:text-slate-400"
             />
             {query && (
@@ -398,8 +448,8 @@ export default function LocationSearchModal({
           {/* PROMINENT USE CURRENT LOCATION BUTTON */}
           <button
             onClick={handleUseCurrentLocation}
-            disabled={loadingGeolocate}
-            className="w-full flex items-center justify-between p-3 bg-emerald-50/80 hover:bg-emerald-100/70 border border-emerald-200/80 rounded-xl transition-all text-left group cursor-pointer"
+            disabled={loadingGeolocate || loadingPlaceSelect}
+            className="w-full flex items-center justify-between p-3 bg-emerald-50/80 hover:bg-emerald-100/70 border border-emerald-200/80 rounded-xl transition-all text-left group cursor-pointer disabled:opacity-50"
           >
             <div className="flex items-center gap-3">
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-600 text-white shadow-sm group-hover:scale-105 transition-transform">
@@ -412,25 +462,25 @@ export default function LocationSearchModal({
               <div>
                 <span className="block text-xs font-bold text-slate-900">Use current location</span>
                 <span className="block text-[11px] font-medium text-emerald-700 mt-0.5">
-                  {loadingGeolocate ? 'Detecting your GPS position...' : 'Using device location'}
+                  {loadingGeolocate ? 'Detecting your GPS position...' : 'Use device GPS location'}
                 </span>
               </div>
             </div>
             <ChevronRight className="h-4 w-4 text-emerald-600 group-hover:translate-x-0.5 transition-transform" />
           </button>
 
-          {/* GOOGLE PLACES LIVE PREDICTIONS LIST */}
-          {predictions.length > 0 ? (
+          {/* GOOGLE PLACES LIVE PREDICTIONS LIST (IF SEARCHING) */}
+          {predictions.length > 0 && (
             <div className="space-y-1">
               <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1 mb-2">
-                Search Results
+                Google Search Results
               </span>
               {predictions.map((prediction) => (
                 <button
                   key={prediction.place_id}
                   onClick={() => handleSelectPrediction(prediction)}
                   disabled={loadingPlaceSelect}
-                  className="w-full flex items-start gap-3 p-2.5 rounded-xl hover:bg-slate-100/80 text-left transition-colors border border-transparent hover:border-slate-200 cursor-pointer"
+                  className="w-full flex items-start gap-3 p-2.5 rounded-xl hover:bg-slate-100/80 text-left transition-colors border border-transparent hover:border-slate-200 cursor-pointer disabled:opacity-50"
                 >
                   <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600 mt-0.5">
                     <MapPin className="h-3.5 w-3.5 text-emerald-600" />
@@ -446,35 +496,60 @@ export default function LocationSearchModal({
                 </button>
               ))}
             </div>
-          ) : (
-            /* POPULAR BENGALURU LOCATIONS SUGGESTIONS */
-            <div className="space-y-2 pt-1">
-              <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1">
-                Popular Bengaluru Areas
-              </span>
-              <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
-                {POPULAR_HUB_LOCATIONS.map((hub, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handleSelectPopularHub(hub)}
-                    disabled={loadingPlaceSelect}
-                    className="w-full flex items-center justify-between p-3 hover:bg-slate-50 text-left transition-colors cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-700">
-                        <Building2 className="h-3.5 w-3.5" />
-                      </span>
-                      <div className="min-w-0">
-                        <span className="block text-xs font-bold text-slate-900 truncate">{hub.name}</span>
-                        <span className="block text-[10px] font-medium text-slate-500">Bengaluru • {hub.pincode}</span>
-                      </div>
-                    </div>
-                    <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                  </button>
-                ))}
-              </div>
-            </div>
           )}
+
+          {/* AVAILABLE SERVICE AREAS LIST */}
+          <div className="space-y-2 pt-1">
+            <div className="flex items-center justify-between px-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                📍 Available Bengaluru Service Areas
+              </span>
+              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                <ShieldCheck className="h-3 w-3 text-emerald-600" />
+                {filteredZones.length} Active Zones
+              </span>
+            </div>
+
+            {filteredZones.length === 0 ? (
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-center text-xs text-slate-500">
+                No matching service areas found for "{query}".
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
+                {filteredZones.map((zone) => {
+                  const zoneKey = zone.id || zone.name;
+                  const isSelectingThisZone = loadingPlaceSelect && selectedZoneId === zoneKey;
+                  return (
+                    <button
+                      key={zoneKey}
+                      onClick={() => handleSelectZone(zone)}
+                      disabled={loadingPlaceSelect}
+                      className="w-full flex items-center justify-between p-3 hover:bg-slate-50 text-left transition-colors cursor-pointer group disabled:opacity-60"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100/80 group-hover:scale-105 transition-transform">
+                          {isSelectingThisZone ? (
+                            <LoaderCircle className="h-4 w-4 animate-spin text-emerald-600" />
+                          ) : (
+                            <MapPin className="h-4 w-4 text-emerald-600" />
+                          )}
+                        </span>
+                        <div className="min-w-0">
+                          <span className="block text-xs font-bold text-slate-900 truncate group-hover:text-emerald-700 transition-colors">
+                            {zone.name}
+                          </span>
+                          <span className="block text-[10px] font-medium text-slate-500 mt-0.5">
+                            ⏱️ ETA {zone.etaMinutes || 20} mins • Base Fee: ₹{zone.basePickupCharge || 69}
+                          </span>
+                        </div>
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-slate-400 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* FOOTER */}
