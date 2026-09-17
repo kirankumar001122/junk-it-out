@@ -231,8 +231,8 @@ export default function AgentDashboardPage() {
         }),
       });
       const weighData = await weighRes.json();
-      if (!weighData.success) {
-        alert(weighData.error?.message || 'Failed to record weighing.');
+      if (!weighRes.ok || !weighData.success) {
+        alert(weighData.error?.message || weighData.message || 'Failed to record weighing.');
         return;
       }
 
@@ -241,14 +241,15 @@ export default function AgentDashboardPage() {
         headers: { 'Content-Type': 'application/json' },
       });
       const completeData = await completeRes.json();
-      if (completeData.success) {
+      if (completeRes.ok || completeData.success) {
         setShowWeighModal(false);
         fetchAgentData();
       } else {
-        alert(completeData.error?.message || 'Failed to complete pickup.');
+        alert(completeData.error?.message || completeData.message || 'Failed to complete pickup.');
       }
     } catch (e) {
       console.error(e);
+      alert('Network error while completing pickup.');
     }
   };
 

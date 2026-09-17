@@ -38,16 +38,17 @@ export async function POST(
       return successResponse(order, 200, { message: 'Order was already completed.' });
     }
 
-    const oldStatus = order.status;
-    const newStatus = 'PICKUP_COMPLETED';
-
-    if (!validateStatusTransition(oldStatus, newStatus)) {
-      return errorResponse('INVALID_STATUS_TRANSITION', `Cannot complete order from current status (${oldStatus}). Please complete weighing first.`, 400);
-    }
-
     // Verify weighing record exists
     if (order.weightRecords.length === 0) {
       return errorResponse('WEIGHING_REQUIRED', 'Digital scale weights must be recorded before completing pickup.', 400);
+    }
+
+    const oldStatus = order.status;
+    const newStatus = 'PICKUP_COMPLETED';
+
+    const isWeighingComplete = order.status === 'WEIGHING' || order.status === 'AGENT_ARRIVED' || order.status === 'WASTE_VERIFICATION';
+    if (!validateStatusTransition(oldStatus, newStatus) && !isWeighingComplete) {
+      return errorResponse('INVALID_STATUS_TRANSITION', `Cannot complete order from current status (${oldStatus}). Please complete weighing first.`, 400);
     }
 
     const invoiceNumber = `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
