@@ -41,7 +41,7 @@ export async function POST(
       return errorResponse('FORBIDDEN', 'Order is assigned to another agent.', 403);
     }
 
-    if (order.status === 'WEIGHING' && order.weightRecords.length > 0) {
+    if (['WEIGHING', 'PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'].includes(order.status) && order.weightRecords.length > 0) {
       return successResponse(order, 200, { message: 'Weights were already recorded for this order.' });
     }
 
@@ -99,7 +99,7 @@ export async function POST(
       await tx.weightRecord.create({
         data: {
           orderId: id,
-          recordedByUserId: authUser?.userId || order.agent?.userId || order.customerId,
+          recordedByUserId: authUser?.userId || order.agent?.userId || order.customer?.userId,
           scalePhotoUrl: scalePhotoUrl || 'https://images.unsplash.com/photo-1589939705384-5185137a7f0f?q=80&w=600',
           weightJson: JSON.stringify(actualWeights),
           notes: notes || 'Scale weights recorded at doorstep.',
