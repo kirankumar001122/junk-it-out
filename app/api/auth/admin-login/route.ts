@@ -1,34 +1,42 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { verifyOtp } from '@/lib/auth/otp';
 import { validatePhone } from '@/lib/validations/schemas';
 import { signToken } from '@/lib/auth/jwt';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
-import { getClientIp, hasTrustedOrigin } from '@/lib/auth/requestSecurity';
+import { getClientIp, hasTrustedOrigin, addCorsHeaders } from '@/lib/auth/requestSecurity';
+
+export async function OPTIONS(req: NextRequest) {
+  const res = new NextResponse(null, { status: 204 });
+  return addCorsHeaders(res, req);
+}
 
 export async function POST(req: NextRequest) {
   try {
     if (!hasTrustedOrigin(req)) {
-      return errorResponse('FORBIDDEN', 'This request is not allowed.', 403);
+      return addCorsHeaders(errorResponse('FORBIDDEN', 'This request is not allowed.', 403), req);
     }
     const body = await req.json().catch(() => ({}));
     const { valid: phoneValid, normalized, error: phoneError } = validatePhone(body.phone);
 
     if (!phoneValid) {
-      return errorResponse('INVALID_PHONE', phoneError || 'Invalid phone number.', 400);
+      return addCorsHeaders(errorResponse('INVALID_PHONE', phoneError || 'Invalid phone number.', 400), req);
     }
 
     if (!body.code || typeof body.code !== 'string') {
-      return errorResponse('INVALID_OTP', 'OTP code is required.', 400);
+      return addCorsHeaders(errorResponse('INVALID_OTP', 'OTP code is required.', 400), req);
     }
 
     // 1. Verify OTP with Fast2SMS provider
     const otpVerification = await verifyOtp(normalized, body.code, getClientIp(req));
     if (!otpVerification.valid) {
-      return errorResponse(
-        'OTP_VERIFICATION_FAILED',
-        'The OTP could not be verified. Please request a new code and try again.',
-        otpVerification.status === 'rate_limited' ? 429 : 400
+      return addCorsHeaders(
+        errorResponse(
+          'OTP_VERIFICATION_FAILED',
+          'The OTP could not be verified. Please request a new code and try again.',
+          otpVerification.status === 'rate_limited' ? 429 : 400
+        ),
+        req
       );
     }
 
@@ -95,10 +103,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (!user || !user.admin || !['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-      return errorResponse(
-        'FORBIDDEN',
-        'Admin access required. This portal is strictly restricted to authorized admin Darshan (8884176048).',
-        403
+      return addCorsHeaders(
+        errorResponse(
+          'FORBIDDEN',
+          'Admin access required. This portal is strictly restricted to authorized admin Darshan (8884176048).',
+          403
+        ),
+        req
       );
     }
 
@@ -130,13 +141,14 @@ export async function POST(req: NextRequest) {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
+      domain: process.env.NODE_ENV === 'production' ? '.junkitout.in' : undefined,
       path: '/',
       maxAge: 7 * 24 * 60 * 60,
     });
 
-    return response;
+    return addCorsHeaders(response, req);
   } catch (err: unknown) {
     console.error('Admin login error:', err);
-    return errorResponse('INTERNAL_SERVER_ERROR', 'Admin authentication failed.', 500);
+    return addCorsHeaders(errorResponse('INTERNAL_SERVER_ERROR', 'Admin authentication failed.', 500), req);
   }
 }

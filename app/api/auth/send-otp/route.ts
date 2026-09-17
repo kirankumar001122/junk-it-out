@@ -1,20 +1,25 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { sendOtp } from '@/lib/auth/otp';
 import { validatePhone } from '@/lib/validations/schemas';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
-import { getClientIp, hasTrustedOrigin } from '@/lib/auth/requestSecurity';
+import { getClientIp, hasTrustedOrigin, addCorsHeaders } from '@/lib/auth/requestSecurity';
 import { db } from '@/lib/db';
+
+export async function OPTIONS(req: NextRequest) {
+  const res = new NextResponse(null, { status: 204 });
+  return addCorsHeaders(res, req);
+}
 
 export async function POST(req: NextRequest) {
   try {
     if (!hasTrustedOrigin(req)) {
-      return errorResponse('FORBIDDEN', 'This request is not allowed.', 403);
+      return addCorsHeaders(errorResponse('FORBIDDEN', 'This request is not allowed.', 403), req);
     }
     const body = await req.json().catch(() => ({}));
     const { valid, normalized, error } = validatePhone(body.phone);
 
     if (!valid) {
-      return errorResponse('INVALID_PHONE', error || 'Invalid phone number format.', 400);
+      return addCorsHeaders(errorResponse('INVALID_PHONE', error || 'Invalid phone number format.', 400), req);
     }
 
     // 1. Send OTP via Fast2SMS provider
@@ -23,16 +28,16 @@ export async function POST(req: NextRequest) {
       if (result.status === 'cooldown') {
         const response = errorResponse('RATE_LIMIT_EXCEEDED', `Please wait ${result.retryAfterSeconds}s before requesting another OTP.`, 429);
         response.headers.set('Retry-After', String(result.retryAfterSeconds));
-        return response;
+        return addCorsHeaders(response, req);
       }
       if (result.status === 'rate_limited') {
         const response = errorResponse('RATE_LIMIT_EXCEEDED', `Too many OTP requests. Please try again in ${Math.ceil((result.retryAfterSeconds || 60) / 60)} minutes.`, 429);
         response.headers.set('Retry-After', String(result.retryAfterSeconds));
-        return response;
+        return addCorsHeaders(response, req);
       }
       if (result.status === 'provider_failed') {
         const providerMsg = typeof result.errorDetails === 'string' ? result.errorDetails : 'Unable to send OTP. Please check mobile number or try again.';
-        return errorResponse('OTP_UNAVAILABLE', providerMsg, 503);
+        return addCorsHeaders(errorResponse('OTP_UNAVAILABLE', providerMsg, 503), req);
       }
     }
 
@@ -64,14 +69,17 @@ export async function POST(req: NextRequest) {
       console.warn('[SEND_OTP_DB_LOOKUP_WARNING] Non-fatal DB lookup warning:', dbErr.message);
     }
 
-    return successResponse({
-      message: 'If this number can receive SMS, an OTP will arrive shortly.',
-      cooldownSeconds: result.cooldownSeconds,
-      isExisting: isCustomer,
-      existingName,
-    });
+    return addCorsHeaders(
+      successResponse({
+        message: 'If this number can receive SMS, an OTP will arrive shortly.',
+        cooldownSeconds: result.cooldownSeconds,
+        isExisting: isCustomer,
+        existingName,
+      }),
+      req
+    );
   } catch (err: any) {
     console.error('[SEND_OTP_FATAL_ERROR]', err?.message || err);
-    return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to send OTP.', 500);
+    return addCorsHeaders(errorResponse('INTERNAL_SERVER_ERROR', 'Failed to send OTP.', 500), req);
   }
 }
