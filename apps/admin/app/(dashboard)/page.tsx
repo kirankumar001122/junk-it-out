@@ -44,12 +44,17 @@ export default function AdminDashboardPage() {
         adminFetch('/api/admin/agents').then((r) => r.json()).catch(() => ({ success: false })),
       ]);
 
-      if (statsRes.success) setStats(statsRes.data);
-      if (ordersRes.success) setOrders(ordersRes.data || []);
-      if (agentsRes.success) {
-        setAgents(agentsRes.data || []);
-      } else {
-        setAgentsError(agentsRes.error?.message || agentsRes.message || 'Failed to load field agents.');
+      const fetchedStats = statsRes?.data || (statsRes?.success ? statsRes.data : (statsRes?.todaysBookings !== undefined || statsRes?.totalBookings !== undefined ? statsRes : null));
+      if (fetchedStats) {
+        setStats(fetchedStats);
+      }
+      if (ordersRes?.success || Array.isArray(ordersRes?.data) || Array.isArray(ordersRes)) {
+        setOrders(ordersRes?.data || (Array.isArray(ordersRes) ? ordersRes : []));
+      }
+      if (agentsRes?.success || Array.isArray(agentsRes?.data) || Array.isArray(agentsRes)) {
+        setAgents(agentsRes?.data || (Array.isArray(agentsRes) ? agentsRes : []));
+      } else if (!agentsRes?.success) {
+        setAgentsError(agentsRes?.error?.message || agentsRes?.message || 'Failed to load field agents.');
       }
     } catch (e: any) {
       console.error(e);

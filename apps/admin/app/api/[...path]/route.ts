@@ -17,9 +17,16 @@ async function handleProxy(req: NextRequest, props: Props) {
   const targetUrl = `${baseUrl}/api/${subPath}${search}`;
 
   const cookieStore = await cookies();
-  const token = cookieStore.get('jio_token')?.value;
+  let token = cookieStore.get('jio_token')?.value;
 
   const incomingHeaders = new Headers(req.headers);
+  const rawCookie = incomingHeaders.get('cookie') || '';
+
+  if (!token && rawCookie) {
+    const match = rawCookie.match(/jio_token=([^;]+)/);
+    if (match) token = match[1];
+  }
+
   const headers = new Headers();
 
   const contentType = incomingHeaders.get('content-type');
@@ -28,10 +35,7 @@ async function handleProxy(req: NextRequest, props: Props) {
   const accept = incomingHeaders.get('accept');
   if (accept) headers.set('accept', accept);
 
-  const rawCookie = incomingHeaders.get('cookie') || '';
-  if (token && !rawCookie.includes('jio_token=')) {
-    headers.set('cookie', `jio_token=${token}${rawCookie ? `; ${rawCookie}` : ''}`);
-  } else if (rawCookie) {
+  if (rawCookie) {
     headers.set('cookie', rawCookie);
   } else if (token) {
     headers.set('cookie', `jio_token=${token}`);
