@@ -19,6 +19,7 @@ export function isAllowedOrigin(origin: string | null): boolean {
     'https://www.junkitout.in',
     'https://junkitout.in',
     'https://admin.junkitout.in',
+    'https://junk-it-out-admin.vercel.app',
   ];
   if (process.env.NODE_ENV !== 'production') {
     allowed.push('http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000', 'http://127.0.0.1:3001');
