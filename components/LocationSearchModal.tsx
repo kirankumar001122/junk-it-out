@@ -95,15 +95,19 @@ export default function LocationSearchModal({
 
     loadGoogleMaps()
       .then((maps) => {
-        if (maps?.places && !autocompleteServiceRef.current) {
-          autocompleteServiceRef.current = new maps.places.AutocompleteService();
-        }
-        if (maps && !geocoderRef.current) {
-          geocoderRef.current = new maps.Geocoder();
+        try {
+          if (maps?.places?.AutocompleteService && !autocompleteServiceRef.current) {
+            autocompleteServiceRef.current = new maps.places.AutocompleteService();
+          }
+          if (maps?.Geocoder && !geocoderRef.current) {
+            geocoderRef.current = new maps.Geocoder();
+          }
+        } catch (err: any) {
+          console.warn('Google Maps Places Autocomplete setup notice:', err?.message || err);
         }
       })
       .catch((err) => {
-        console.warn('Google Maps Places Autocomplete setup notice:', err.message);
+        console.warn('Google Maps Places Autocomplete setup notice:', err?.message || err);
       });
   }, [open]);
 
@@ -149,17 +153,23 @@ export default function LocationSearchModal({
     }
 
     try {
+      const LatLngBoundsClass = window.google?.maps?.LatLngBounds;
+      const locationBias = LatLngBoundsClass
+        ? new LatLngBoundsClass(
+            { lat: 12.734, lng: 77.379 },
+            { lat: 13.203, lng: 77.978 }
+          )
+        : undefined;
+
       autocompleteServiceRef.current.getPlacePredictions(
         {
           input: val,
           componentRestrictions: { country: 'in' },
-          locationBias: new window.google.maps.LatLngBounds(
-            { lat: 12.734, lng: 77.379 },
-            { lat: 13.203, lng: 77.978 }
-          ),
+          ...(locationBias ? { locationBias } : {}),
         },
         (results: any[], status: any) => {
-          if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
+          const okStatus = window.google?.maps?.places?.PlacesServiceStatus?.OK || 'OK';
+          if (status === okStatus && results) {
             setPredictions(results);
           } else {
             setPredictions([]);
