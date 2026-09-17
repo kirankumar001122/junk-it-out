@@ -12,11 +12,17 @@ export async function GET(req: NextRequest) {
       return errorResponse('FORBIDDEN', 'Admin access required.', 403);
     }
 
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+    // Calculate start & end of TODAY in Asia/Kolkata (IST) timezone
+    const now = new Date();
+    const kolkataDateStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(now);
 
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
+    const startOfDay = new Date(`${kolkataDateStr}T00:00:00+05:30`);
+    const endOfDay = new Date(`${kolkataDateStr}T23:59:59.999+05:30`);
 
     const [
       totalBookings,
