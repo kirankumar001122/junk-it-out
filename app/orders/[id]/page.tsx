@@ -69,33 +69,45 @@ export default function OrderTrackingPage() {
   useEffect(() => {
     fetchOrderDetails();
 
-    // Subscribe to SSE stream for live updates
-    const eventSource = new EventSource('/api/realtime/stream');
+    // Subscribe to authenticated Customer SSE stream for live updates
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource('/api/customer/stream');
 
-    eventSource.addEventListener('ORDER_UPDATED', (e: any) => {
-      try {
-        const updated = JSON.parse(e.data);
-        if (updated.id === id || updated.orderNumber === id) {
-          fetchOrderDetails();
-        }
-      } catch (err) {}
-    });
-
-    eventSource.addEventListener('AGENT_LOCATION_UPDATED', (e: any) => {
-      try {
-        const loc = JSON.parse(e.data);
-        setOrder((currentOrder: any) => {
-          if (
-            currentOrder &&
-            loc.agentId === currentOrder.agentId &&
-            ACTIVE_TRACKING_STATUSES.includes(currentOrder.status)
-          ) {
-            setAgentLocation({ lat: loc.lat, lng: loc.lng });
+      eventSource.addEventListener('AGENT_ASSIGNED', (e: any) => {
+        try {
+          const payload = JSON.parse(e.data);
+          if (payload.orderId === id || payload.orderNumber === id) {
+            fetchOrderDetails();
           }
-          return currentOrder;
-        });
-      } catch (err) {}
-    });
+        } catch (err) {}
+      });
+
+      eventSource.addEventListener('ORDER_UPDATED', (e: any) => {
+        try {
+          const updated = JSON.parse(e.data);
+          if (updated.id === id || updated.orderNumber === id) {
+            fetchOrderDetails();
+          }
+        } catch (err) {}
+      });
+
+      eventSource.addEventListener('AGENT_LOCATION_UPDATED', (e: any) => {
+        try {
+          const loc = JSON.parse(e.data);
+          setOrder((currentOrder: any) => {
+            if (
+              currentOrder &&
+              loc.agentId === currentOrder.agentId &&
+              ACTIVE_TRACKING_STATUSES.includes(currentOrder.status)
+            ) {
+              setAgentLocation({ lat: loc.lat, lng: loc.lng });
+            }
+            return currentOrder;
+          });
+        } catch (err) {}
+      });
+    } catch (err) {}
 
     // Gentle 10-second polling fallback in case SSE connection drops or is blocked
     const pollInterval = setInterval(() => {
@@ -103,7 +115,9 @@ export default function OrderTrackingPage() {
     }, 10000);
 
     return () => {
-      eventSource.close();
+      if (eventSource) {
+        eventSource.close();
+      }
       clearInterval(pollInterval);
     };
   }, [id]);

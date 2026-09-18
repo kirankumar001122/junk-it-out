@@ -28,6 +28,7 @@ export default function MyPickupsPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [unauthenticated, setUnauthenticated] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
+  const [agentNotice, setAgentNotice] = useState<any | null>(null);
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -36,7 +37,7 @@ export default function MyPickupsPage() {
     try {
       const res = await fetch('/api/orders');
       const data = await res.json();
-      if (res.status === 401 || !data.success && data.message?.includes('Authentication required')) {
+      if (res.status === 401 || (!data.success && data.message?.includes('Authentication required'))) {
         setUnauthenticated(true);
         setOrders([]);
       } else if (data.success) {
@@ -54,7 +55,41 @@ export default function MyPickupsPage() {
 
   useEffect(() => {
     fetchOrders();
-  }, []);
+
+    if (unauthenticated) return;
+
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource('/api/customer/stream');
+
+      eventSource.addEventListener('AGENT_ASSIGNED', (e: MessageEvent) => {
+        try {
+          const payload = JSON.parse(e.data);
+          console.log('[CUSTOMER SSE] AGENT_ASSIGNED received:', payload);
+          setAgentNotice(payload);
+          fetchOrders();
+        } catch (err) {
+          console.error('[CUSTOMER SSE] Parse error:', err);
+        }
+      });
+
+      eventSource.addEventListener('ORDER_UPDATED', () => {
+        fetchOrders();
+      });
+
+      eventSource.onerror = () => {
+        // EventSource will automatically handle reconnection safely
+      };
+    } catch (err) {
+      console.error('[CUSTOMER SSE] Init notice:', err);
+    }
+
+    return () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+    };
+  }, [unauthenticated]);
 
   if (unauthenticated && !loading) {
     return (
@@ -125,6 +160,35 @@ export default function MyPickupsPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+      {/* REALTIME AGENT ASSIGNED NOTIFICATION BANNER */}
+      {agentNotice && (
+        <div className="bg-slate-900 border-2 border-emerald-500 rounded-3xl p-5 text-white shadow-xl flex items-start justify-between animate-scale-in">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500 text-slate-950 flex items-center justify-center font-black shrink-0 animate-bounce">
+              <Truck className="w-5 h-5" />
+            </div>
+            <div className="space-y-0.5">
+              <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-400 px-2.5 py-0.5 rounded-full border border-emerald-500/30">
+                🔔 AGENT ASSIGNED
+              </span>
+              <h3 className="font-extrabold text-sm text-white mt-1">
+                Your Pickup #{agentNotice.orderNumber} has been accepted!
+              </h3>
+              <p className="text-xs text-slate-300">
+                Agent <strong className="text-emerald-400">{agentNotice.agentName || 'Partner'}</strong> ({agentNotice.vehicleNumber || 'Auto Loading'}) has been assigned to your pickup request.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setAgentNotice(null)}
+            className="text-slate-400 hover:text-white p-1 rounded-lg"
+            title="Dismiss notification"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* HEADER WITH BOOK NEW PICKUP BUTTON */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>

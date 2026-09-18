@@ -161,6 +161,26 @@ export async function POST(
     if (updatedOrder) {
       broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
       broadcaster.broadcast('ORDER_ACCEPTED', { orderId: order.id, agentId });
+
+      // Phase 4: Dispatch AGENT_ASSIGNED event for authenticated Customer SSE stream
+      try {
+        const agentAssignedPayload = {
+          type: 'AGENT_ASSIGNED',
+          orderId: updatedOrder.id,
+          orderNumber: updatedOrder.orderNumber,
+          customerId: updatedOrder.customerId,
+          userId: updatedOrder.customer?.userId,
+          agentId: agentId,
+          agentName: agent.user.name,
+          vehicleNumber: agent.vehicleNumber,
+          status: 'AGENT_ACCEPTED',
+          assignedAt: new Date().toISOString(),
+        };
+
+        broadcaster.broadcast('AGENT_ASSIGNED', agentAssignedPayload);
+      } catch (dispatchErr) {
+        console.warn('[CUSTOMER DISPATCH ERROR] Safe notification dispatch notice:', dispatchErr);
+      }
     }
 
     return successResponse({
