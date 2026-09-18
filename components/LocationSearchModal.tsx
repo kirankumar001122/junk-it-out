@@ -56,6 +56,7 @@ export default function LocationSearchModal({
   useEffect(() => {
     if (!open) return;
 
+    console.log('[LocationModal] Modal opened');
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
@@ -75,14 +76,17 @@ export default function LocationSearchModal({
   useEffect(() => {
     if (!open) return;
 
+    console.log('[LocationModal] Fetching service areas from /api/service-areas');
     fetch('/api/service-areas')
       .then((res) => res.json())
       .then((data) => {
         if (data.success && Array.isArray(data.data) && data.data.length > 0) {
+          console.log('[LocationModal] Loaded service areas count:', data.data.length);
           setServiceZones(data.data);
         }
       })
-      .catch(() => {
+      .catch((err) => {
+        console.warn('[LocationModal] Failed to load service areas from API:', err?.message || err);
         // Fallback to static BENGALURU_ZONES already in state
       });
   }, [open]);
@@ -131,7 +135,7 @@ export default function LocationSearchModal({
           setIsMapsLoading(false);
           setMapsError(null);
         } catch (err: any) {
-          console.warn('Google Maps Places Autocomplete setup notice:', err?.message || err);
+          console.warn('[LocationModal] Google Maps Places Autocomplete setup notice:', err?.message || err);
           setIsMapsLoading(false);
           setMapsError('Location search is temporarily unavailable. Please select a service area below.');
         }
@@ -139,7 +143,7 @@ export default function LocationSearchModal({
       .catch((err) => {
         if (!isSubscribed) return;
         clearTimeout(timeout);
-        console.warn('Google Maps Places Autocomplete setup notice:', err?.message || err);
+        console.warn('[LocationModal] Google Maps Places Autocomplete setup notice:', err?.message || err);
         setIsMapsLoading(false);
         setMapsError('Location search is temporarily unavailable. Please select a service area below.');
       });
@@ -224,7 +228,7 @@ export default function LocationSearchModal({
         }
       );
     } catch (e) {
-      console.error('Places autocomplete prediction error:', e);
+      console.error('[LocationModal] Places autocomplete prediction error:', e);
       setPredictions([]);
       setMapsError('Location search is temporarily unavailable. Please select a service area below.');
     }
@@ -454,24 +458,23 @@ export default function LocationSearchModal({
     ? serviceZones.filter((z) => z.name.toLowerCase().includes(query.trim().toLowerCase()))
     : serviceZones;
 
-  const isAnyActionLoading = loadingGeolocate || loadingPlaceSelect || loadingZoneId !== null;
-
   return (
     <div
-      className="fixed inset-0 z-[100] flex flex-col items-center justify-start pt-12 sm:pt-16 px-3 pb-4 sm:pb-6 overflow-hidden"
+      className="fixed inset-0 z-[100] flex flex-col items-center justify-start pt-12 sm:pt-16 px-3 pb-4 sm:pb-6 overflow-hidden pointer-events-auto"
       role="dialog"
       aria-modal="true"
       aria-label="Select pickup location"
     >
       {/* BACKDROP */}
       <button
+        type="button"
         onClick={onClose}
-        className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm transition-opacity"
+        className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm transition-opacity z-0 cursor-pointer"
         aria-label="Close modal"
       />
 
       {/* LOCATION SEARCH CONTAINER */}
-      <div className="animate-scale-in relative flex max-h-[calc(100dvh-4rem)] w-full max-w-lg flex-col rounded-2xl bg-white shadow-2xl overflow-hidden border border-slate-200 z-10">
+      <div className="animate-scale-in relative flex max-h-[calc(100dvh-4rem)] w-full max-w-lg flex-col rounded-2xl bg-white shadow-2xl overflow-hidden border border-slate-200 z-10 pointer-events-auto">
         {/* HEADER */}
         <header className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 sm:px-5 py-3.5 bg-white">
           <div className="flex items-center gap-2">
@@ -484,6 +487,7 @@ export default function LocationSearchModal({
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors cursor-pointer"
             aria-label="Close"
@@ -506,11 +510,12 @@ export default function LocationSearchModal({
             />
             {query && (
               <button
+                type="button"
                 onClick={() => {
                   setQuery('');
                   setPredictions([]);
                 }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600"
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -538,8 +543,9 @@ export default function LocationSearchModal({
         <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4">
           {/* PROMINENT USE CURRENT LOCATION BUTTON */}
           <button
+            type="button"
             onClick={handleUseCurrentLocation}
-            disabled={isAnyActionLoading}
+            disabled={loadingGeolocate}
             className="w-full flex items-center justify-between p-3 bg-emerald-50/80 hover:bg-emerald-100/70 border border-emerald-200/80 rounded-xl transition-all text-left group cursor-pointer disabled:opacity-50"
           >
             <div className="flex items-center gap-3">
@@ -569,8 +575,9 @@ export default function LocationSearchModal({
               {predictions.map((prediction) => (
                 <button
                   key={prediction.place_id}
+                  type="button"
                   onClick={() => handleSelectPrediction(prediction)}
-                  disabled={isAnyActionLoading}
+                  disabled={loadingPlaceSelect}
                   className="w-full flex items-start gap-3 p-2.5 rounded-xl hover:bg-slate-100/80 text-left transition-colors border border-transparent hover:border-slate-200 cursor-pointer disabled:opacity-50"
                 >
                   <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600 mt-0.5">
@@ -617,8 +624,9 @@ export default function LocationSearchModal({
                   return (
                     <button
                       key={zoneKey}
+                      type="button"
                       onClick={() => handleSelectZone(zone)}
-                      disabled={isAnyActionLoading}
+                      disabled={isSelectingThisZone}
                       className="w-full flex items-center justify-between p-3 hover:bg-slate-50 text-left transition-colors cursor-pointer group disabled:opacity-60"
                     >
                       <div className="flex items-center gap-3 min-w-0">
