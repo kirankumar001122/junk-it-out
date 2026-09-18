@@ -11,7 +11,7 @@ import {
   ChevronRight,
   ShieldCheck,
 } from 'lucide-react';
-import { BENGALURU_ZONES, ServiceZone } from '@/lib/geofence';
+import { BENGALURU_ZONES } from '@/lib/geofence';
 import { loadGoogleMaps } from '@/components/InteractiveMap';
 import { setSelectedLocation } from '@/lib/selectedLocation';
 
@@ -42,9 +42,11 @@ export default function LocationSearchModal({
   const [query, setQuery] = useState('');
   const [predictions, setPredictions] = useState<any[]>([]);
   const [serviceZones, setServiceZones] = useState<any[]>(BENGALURU_ZONES);
-  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+  const [loadingZoneId, setLoadingZoneId] = useState<string | null>(null);
   const [loadingGeolocate, setLoadingGeolocate] = useState(false);
   const [loadingPlaceSelect, setLoadingPlaceSelect] = useState(false);
+  const [isMapsLoading, setIsMapsLoading] = useState(false);
+  const [mapsError, setMapsError] = useState<string | null>(null);
   const [serviceError, setServiceError] = useState<string | null>(null);
 
   const autocompleteServiceRef = useRef<any>(null);
@@ -85,16 +87,40 @@ export default function LocationSearchModal({
       });
   }, [open]);
 
-  // Initialize Google Maps Places & Geocoder Services
+  // Initialize Google Maps Places & Geocoder Services asynchronously
   useEffect(() => {
     if (!open) return;
     setQuery('');
     setPredictions([]);
     setServiceError(null);
-    setSelectedZoneId(null);
+    setLoadingZoneId(null);
+    setLoadingPlaceSelect(false);
+    setLoadingGeolocate(false);
+
+    // If services are already initialized, retain them
+    if (autocompleteServiceRef.current && geocoderRef.current) {
+      setIsMapsLoading(false);
+      setMapsError(null);
+      return;
+    }
+
+    setIsMapsLoading(true);
+    setMapsError(null);
+
+    let isSubscribed = true;
+
+    // Timeout safeguard (5 seconds) so Google Maps init never hangs the search field
+    const timeout = setTimeout(() => {
+      if (isSubscribed && isMapsLoading) {
+        setIsMapsLoading(false);
+        setMapsError('Location search is temporarily unavailable. Please select a service area below.');
+      }
+    }, 5000);
 
     loadGoogleMaps()
       .then((maps) => {
+        if (!isSubscribed) return;
+        clearTimeout(timeout);
         try {
           if (maps?.places?.AutocompleteService && !autocompleteServiceRef.current) {
             autocompleteServiceRef.current = new maps.places.AutocompleteService();
@@ -102,13 +128,26 @@ export default function LocationSearchModal({
           if (maps?.Geocoder && !geocoderRef.current) {
             geocoderRef.current = new maps.Geocoder();
           }
+          setIsMapsLoading(false);
+          setMapsError(null);
         } catch (err: any) {
           console.warn('Google Maps Places Autocomplete setup notice:', err?.message || err);
+          setIsMapsLoading(false);
+          setMapsError('Location search is temporarily unavailable. Please select a service area below.');
         }
       })
       .catch((err) => {
+        if (!isSubscribed) return;
+        clearTimeout(timeout);
         console.warn('Google Maps Places Autocomplete setup notice:', err?.message || err);
+        setIsMapsLoading(false);
+        setMapsError('Location search is temporarily unavailable. Please select a service area below.');
       });
+
+    return () => {
+      isSubscribed = false;
+      clearTimeout(timeout);
+    };
   }, [open]);
 
   // Check serviceability via backend API
@@ -147,8 +186,16 @@ export default function LocationSearchModal({
     setQuery(val);
     setServiceError(null);
 
-    if (!val || val.trim().length < 2 || !autocompleteServiceRef.current) {
+    if (!val || val.trim().length < 2) {
       setPredictions([]);
+      return;
+    }
+
+    if (!autocompleteServiceRef.current) {
+      setPredictions([]);
+      if (!isMapsLoading) {
+        setMapsError('Location search is temporarily unavailable. Please select a service area below.');
+      }
       return;
     }
 
@@ -179,94 +226,110 @@ export default function LocationSearchModal({
     } catch (e) {
       console.error('Places autocomplete prediction error:', e);
       setPredictions([]);
+      setMapsError('Location search is temporarily unavailable. Please select a service area below.');
     }
   };
 
   // Handle Selection of a Google Places Result
-  const handleSelectPrediction = (prediction: any) => {
-    if (!geocoderRef.current) return;
+  const handleSelectPrediction = async (prediction: any) => {
+    if (!geocoderRef.current) {
+      setServiceError('Location geocoding is unavailable. Please select an available service zone below.');
+      return;
+    }
     setLoadingPlaceSelect(true);
     setServiceError(null);
 
-    geocoderRef.current.geocode(
-      { placeId: prediction.place_id },
-      async (results: any[], status: string) => {
-        setLoadingPlaceSelect(false);
-        if (status === 'OK' && results?.[0]?.geometry?.location) {
-          const targetLat = results[0].geometry.location.lat();
-          const targetLng = results[0].geometry.location.lng();
-          const formattedAddress = results[0].formatted_address || prediction.description;
+    try {
+      geocoderRef.current.geocode(
+        { placeId: prediction.place_id },
+        async (results: any[], status: string) => {
+          try {
+            if (status === 'OK' && results?.[0]?.geometry?.location) {
+              const targetLat = results[0].geometry.location.lat();
+              const targetLng = results[0].geometry.location.lng();
+              const formattedAddress = results[0].formatted_address || prediction.description;
 
-          const components = results[0].address_components || [];
-          const valueFor = (type: string) =>
-            components.find((item: any) => item.types?.includes(type))?.long_name || '';
-          const areaName =
-            valueFor('sublocality_level_1') ||
-            valueFor('locality') ||
-            prediction.structured_formatting?.main_text ||
-            'Bengaluru';
-          const streetName = valueFor('route') || valueFor('neighborhood') || '';
-          const postalCode = valueFor('postal_code') || '';
+              const components = results[0].address_components || [];
+              const valueFor = (type: string) =>
+                components.find((item: any) => item.types?.includes(type))?.long_name || '';
+              const areaName =
+                valueFor('sublocality_level_1') ||
+                valueFor('locality') ||
+                prediction.structured_formatting?.main_text ||
+                'Bengaluru';
+              const streetName = valueFor('route') || valueFor('neighborhood') || '';
+              const postalCode = valueFor('postal_code') || '';
 
-          const check = await checkServiceability(targetLat, targetLng);
-          if (check.serviceable) {
-            const locData = {
-              address: formattedAddress,
-              area: areaName,
-              lat: targetLat,
-              lng: targetLng,
-              placeId: prediction.place_id,
-              street: streetName,
-              pincode: postalCode,
-              serviceable: true,
-              zoneName: check.zoneName,
-            };
-            setSelectedLocation(locData);
-            onSelectLocation(locData);
-            onClose();
-          } else {
-            setServiceError(
-              check.message ||
-                "We're not serving this location yet. Please select a location within Bengaluru."
-            );
+              const check = await checkServiceability(targetLat, targetLng);
+              if (check.serviceable) {
+                const locData = {
+                  address: formattedAddress,
+                  area: areaName,
+                  lat: targetLat,
+                  lng: targetLng,
+                  placeId: prediction.place_id,
+                  street: streetName,
+                  pincode: postalCode,
+                  serviceable: true,
+                  zoneName: check.zoneName,
+                };
+                setSelectedLocation(locData);
+                onSelectLocation(locData);
+                onClose();
+              } else {
+                setServiceError(
+                  check.message ||
+                    "We're not serving this location yet. Please select a location within Bengaluru."
+                );
+              }
+            } else {
+              setServiceError('Unable to fetch coordinates for this location. Please select another suggestion.');
+            }
+          } catch (err: any) {
+            setServiceError('Location verification error. Please select an available service area.');
+          } finally {
+            setLoadingPlaceSelect(false);
           }
-        } else {
-          setServiceError('Unable to fetch coordinates for this location. Please select another suggestion.');
         }
-      }
-    );
+      );
+    } catch (err: any) {
+      setLoadingPlaceSelect(false);
+      setServiceError('Location verification error. Please select an available service area.');
+    }
   };
 
   // Handle Selection of a Service Zone from the list
   const handleSelectZone = async (zone: any) => {
     const zoneKey = zone.id || zone.name;
-    setSelectedZoneId(zoneKey);
-    setLoadingPlaceSelect(true);
+    setLoadingZoneId(zoneKey);
     setServiceError(null);
 
     const lat = zone.centerLat || 12.9077;
     const lng = zone.centerLng || 77.5854;
 
-    const check = await checkServiceability(lat, lng);
-    setLoadingPlaceSelect(false);
-    setSelectedZoneId(null);
-
-    if (check.serviceable) {
-      const locData = {
-        address: `${zone.name}, Bengaluru`,
-        area: zone.name,
-        lat,
-        lng,
-        serviceable: true,
-        zoneName: check.zoneName || zone.name,
-      };
-      setSelectedLocation(locData);
-      onSelectLocation(locData);
-      onClose();
-    } else {
-      setServiceError(
-        check.message || "We're not serving this location yet. Please select a location within Bengaluru."
-      );
+    try {
+      const check = await checkServiceability(lat, lng);
+      if (check.serviceable) {
+        const locData = {
+          address: `${zone.name}, Bengaluru`,
+          area: zone.name,
+          lat,
+          lng,
+          serviceable: true,
+          zoneName: check.zoneName || zone.name,
+        };
+        setSelectedLocation(locData);
+        onSelectLocation(locData);
+        onClose();
+      } else {
+        setServiceError(
+          check.message || "We're not serving this location yet. Please select a location within Bengaluru."
+        );
+      }
+    } catch (err) {
+      setServiceError('Unable to set service location. Please try again.');
+    } finally {
+      setLoadingZoneId(null);
     }
   };
 
@@ -282,86 +345,94 @@ export default function LocationSearchModal({
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
-        const userLat = position.coords.latitude;
-        const userLng = position.coords.longitude;
+        try {
+          const userLat = position.coords.latitude;
+          const userLng = position.coords.longitude;
 
-        if (geocoderRef.current) {
-          geocoderRef.current.geocode(
-            { location: { lat: userLat, lng: userLng } },
-            async (results: any[], status: string) => {
-              setLoadingGeolocate(false);
-              if (status === 'OK' && results?.[0]) {
-                const res = results[0];
-                const formattedAddress =
-                  res.formatted_address || `GPS (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`;
-                const components = res.address_components || [];
-                const valueFor = (type: string) =>
-                  components.find((item: any) => item.types?.includes(type))?.long_name || '';
-                const areaName = valueFor('sublocality_level_1') || valueFor('locality') || 'Bengaluru';
-                const streetName = valueFor('route') || '';
-                const postalCode = valueFor('postal_code') || '';
+          if (geocoderRef.current) {
+            geocoderRef.current.geocode(
+              { location: { lat: userLat, lng: userLng } },
+              async (results: any[], status: string) => {
+                try {
+                  if (status === 'OK' && results?.[0]) {
+                    const res = results[0];
+                    const formattedAddress =
+                      res.formatted_address || `GPS (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`;
+                    const components = res.address_components || [];
+                    const valueFor = (type: string) =>
+                      components.find((item: any) => item.types?.includes(type))?.long_name || '';
+                    const areaName = valueFor('sublocality_level_1') || valueFor('locality') || 'Bengaluru';
+                    const streetName = valueFor('route') || '';
+                    const postalCode = valueFor('postal_code') || '';
 
-                const check = await checkServiceability(userLat, userLng);
-                if (check.serviceable) {
-                  const locData = {
-                    address: formattedAddress,
-                    area: areaName,
-                    lat: userLat,
-                    lng: userLng,
-                    placeId: res.place_id,
-                    street: streetName,
-                    pincode: postalCode,
-                    serviceable: true,
-                    zoneName: check.zoneName,
-                  };
-                  setSelectedLocation(locData);
-                  onSelectLocation(locData);
-                  onClose();
-                } else {
-                  setServiceError(
-                    "We're not serving this location yet. Please select a location within Bengaluru."
-                  );
-                }
-              } else {
-                const check = await checkServiceability(userLat, userLng);
-                if (check.serviceable) {
-                  const locData = {
-                    address: `Near (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`,
-                    area: 'Bengaluru',
-                    lat: userLat,
-                    lng: userLng,
-                    serviceable: true,
-                  };
-                  setSelectedLocation(locData);
-                  onSelectLocation(locData);
-                  onClose();
-                } else {
-                  setServiceError(
-                    "We're not serving this location yet. Please select a location within Bengaluru."
-                  );
+                    const check = await checkServiceability(userLat, userLng);
+                    if (check.serviceable) {
+                      const locData = {
+                        address: formattedAddress,
+                        area: areaName,
+                        lat: userLat,
+                        lng: userLng,
+                        placeId: res.place_id,
+                        street: streetName,
+                        pincode: postalCode,
+                        serviceable: true,
+                        zoneName: check.zoneName,
+                      };
+                      setSelectedLocation(locData);
+                      onSelectLocation(locData);
+                      onClose();
+                    } else {
+                      setServiceError(
+                        "We're not serving this location yet. Please select a location within Bengaluru."
+                      );
+                    }
+                  } else {
+                    const check = await checkServiceability(userLat, userLng);
+                    if (check.serviceable) {
+                      const locData = {
+                        address: `Near (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`,
+                        area: 'Bengaluru',
+                        lat: userLat,
+                        lng: userLng,
+                        serviceable: true,
+                      };
+                      setSelectedLocation(locData);
+                      onSelectLocation(locData);
+                      onClose();
+                    } else {
+                      setServiceError(
+                        "We're not serving this location yet. Please select a location within Bengaluru."
+                      );
+                    }
+                  }
+                } finally {
+                  setLoadingGeolocate(false);
                 }
               }
-            }
-          );
-        } else {
-          setLoadingGeolocate(false);
-          const check = await checkServiceability(userLat, userLng);
-          if (check.serviceable) {
-            const locData = {
-              address: `GPS (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`,
-              area: 'Bengaluru',
-              lat: userLat,
-              lng: userLng,
-              serviceable: true,
-            };
-            setSelectedLocation(locData);
-            onSelectLocation(locData);
-            onClose();
-          } else {
-            setServiceError(
-              "We're not serving this location yet. Please select a location within Bengaluru."
             );
+          } else {
+            const check = await checkServiceability(userLat, userLng);
+            setLoadingGeolocate(false);
+            if (check.serviceable) {
+              const locData = {
+                address: `GPS (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`,
+                area: 'Bengaluru',
+                lat: userLat,
+                lng: userLng,
+                serviceable: true,
+              };
+              setSelectedLocation(locData);
+              onSelectLocation(locData);
+              onClose();
+            } else {
+              setServiceError(
+                "We're not serving this location yet. Please select a location within Bengaluru."
+              );
+            }
           }
+        } catch (e) {
+          setLoadingGeolocate(false);
+          setServiceError('Error processing location data. Please select a service area below.');
         }
       },
       (err) => {
@@ -382,6 +453,8 @@ export default function LocationSearchModal({
   const filteredZones = query.trim()
     ? serviceZones.filter((z) => z.name.toLowerCase().includes(query.trim().toLowerCase()))
     : serviceZones;
+
+  const isAnyActionLoading = loadingGeolocate || loadingPlaceSelect || loadingZoneId !== null;
 
   return (
     <div
@@ -445,6 +518,14 @@ export default function LocationSearchModal({
           </div>
         </div>
 
+        {/* GOOGLE PLACES NOTICE / MAPS ERROR HINT BANNER */}
+        {mapsError && query.trim().length > 0 && (
+          <div className="shrink-0 mx-4 mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs font-medium flex items-center gap-2.5 animate-scale-in">
+            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+            <span>{mapsError}</span>
+          </div>
+        )}
+
         {/* SERVICEABILITY ERROR ALERT BANNER */}
         {serviceError && (
           <div className="shrink-0 mx-4 mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs font-medium flex items-center gap-2.5 animate-scale-in">
@@ -458,7 +539,7 @@ export default function LocationSearchModal({
           {/* PROMINENT USE CURRENT LOCATION BUTTON */}
           <button
             onClick={handleUseCurrentLocation}
-            disabled={loadingGeolocate || loadingPlaceSelect}
+            disabled={isAnyActionLoading}
             className="w-full flex items-center justify-between p-3 bg-emerald-50/80 hover:bg-emerald-100/70 border border-emerald-200/80 rounded-xl transition-all text-left group cursor-pointer disabled:opacity-50"
           >
             <div className="flex items-center gap-3">
@@ -489,11 +570,15 @@ export default function LocationSearchModal({
                 <button
                   key={prediction.place_id}
                   onClick={() => handleSelectPrediction(prediction)}
-                  disabled={loadingPlaceSelect}
+                  disabled={isAnyActionLoading}
                   className="w-full flex items-start gap-3 p-2.5 rounded-xl hover:bg-slate-100/80 text-left transition-colors border border-transparent hover:border-slate-200 cursor-pointer disabled:opacity-50"
                 >
                   <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600 mt-0.5">
-                    <MapPin className="h-3.5 w-3.5 text-emerald-600" />
+                    {loadingPlaceSelect ? (
+                      <LoaderCircle className="h-3.5 w-3.5 text-emerald-600 animate-spin" />
+                    ) : (
+                      <MapPin className="h-3.5 w-3.5 text-emerald-600" />
+                    )}
                   </span>
                   <div className="min-w-0 flex-1">
                     <span className="block text-xs font-bold text-slate-900 truncate">
@@ -528,12 +613,12 @@ export default function LocationSearchModal({
               <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
                 {filteredZones.map((zone) => {
                   const zoneKey = zone.id || zone.name;
-                  const isSelectingThisZone = loadingPlaceSelect && selectedZoneId === zoneKey;
+                  const isSelectingThisZone = loadingZoneId === zoneKey;
                   return (
                     <button
                       key={zoneKey}
                       onClick={() => handleSelectZone(zone)}
-                      disabled={loadingPlaceSelect}
+                      disabled={isAnyActionLoading}
                       className="w-full flex items-center justify-between p-3 hover:bg-slate-50 text-left transition-colors cursor-pointer group disabled:opacity-60"
                     >
                       <div className="flex items-center gap-3 min-w-0">
