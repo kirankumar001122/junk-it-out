@@ -14,6 +14,7 @@ export interface SendDispatchUpdateInput {
 
 export interface WhatsAppServiceResult {
   success: boolean;
+  requestId?: string;
   message?: string;
   error?: string;
 }
@@ -149,10 +150,17 @@ export async function sendDispatchUpdate(
       // Non-JSON response
     }
 
+    const requestId =
+      responseData.request_id ||
+      responseData.requestId ||
+      (Array.isArray(responseData.data) && responseData.data[0]?.request_id) ||
+      undefined;
+
     console.log('[WHATSAPP_DISPATCH_RESPONSE]', {
       httpStatus: response.status,
       returnStatus: responseData.return,
       statusCode: responseData.status_code,
+      requestId: requestId || 'N/A',
       orderNumber: input.orderNumber || 'N/A',
     });
 
@@ -165,6 +173,7 @@ export async function sendDispatchUpdate(
     if (isSuccess) {
       return {
         success: true,
+        requestId,
         message: 'WhatsApp Dispatch Update delivered successfully.',
       };
     } else {
@@ -176,6 +185,7 @@ export async function sendDispatchUpdate(
 
       return {
         success: false,
+        requestId,
         error: typeof errMsg === 'object' ? JSON.stringify(errMsg) : String(errMsg),
       };
     }

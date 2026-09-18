@@ -252,16 +252,20 @@ model OrderStatusHistory {
 }
 
 model Notification {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  orderId   String?
-  order     Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  type      String   @default("WHATSAPP") // SMS, WHATSAPP, EMAIL
-  recipient String
-  content   String
-  status    String   @default("SENT") // SENT, FAILED
-  sentAt    DateTime @default(now())
+  id                String   @id @default(uuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orderId           String?
+  order             Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  type              String   @default("WHATSAPP") // SMS, WHATSAPP, EMAIL
+  recipient         String
+  content           String
+  status            String   @default("SENT") // SENT, FAILED
+  provider          String?  @default("FAST2SMS")
+  providerRequestId String?
+  deliveryStatus    String?  @default("sent") // sent, delivered, read, failed
+  statusDescription String?
+  sentAt            DateTime @default(now())
 }
 
 model Coupon {

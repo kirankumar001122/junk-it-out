@@ -103,6 +103,10 @@ export async function POST(
               recipient: customerPhone,
               content: `Dispatch update sent via Fast2SMS WhatsApp: Agent ${agentName} on the way.`,
               status: whatsappResult.success ? 'SENT' : 'FAILED',
+              provider: 'FAST2SMS',
+              providerRequestId: whatsappResult.requestId || null,
+              deliveryStatus: whatsappResult.success ? 'sent' : 'failed',
+              statusDescription: whatsappResult.error || 'Sent via Fast2SMS API',
             },
           });
         }
