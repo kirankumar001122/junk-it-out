@@ -2,6 +2,7 @@ import { db } from '../db';
 import { findOrCreateUserCustomer, saveCustomerAddress } from './customerService';
 import { checkGeofenceServiceability } from './serviceAreaService';
 import { findEligibleAgentsForServiceArea } from './agentService';
+import { broadcaster } from '../realtime';
 
 // In-memory Idempotency Store to prevent duplicate order placements on network retries
 const idempotencyStore = new Map<string, { orderId: string; responseData: any; timestamp: number }>();
@@ -178,15 +179,44 @@ export async function createOrder(
     return createdOrder;
   });
 
-  // 7. Service Area Agent Matching (Phase 1 Dispatch Prep)
+  // 7. Service Area Agent Matching & Realtime Dispatch (Phase 2 Notification)
   try {
     const targetServiceArea = geofence.zone?.name || input.address.area;
     const eligibleAgents = await findEligibleAgentsForServiceArea(targetServiceArea);
-    console.log(
-      `[DISPATCH PREP] Order #${newOrder.orderNumber} placed for service area '${targetServiceArea}'. Available eligible agents count: ${eligibleAgents.length}`
+    
+    // Exclude offline agents (only AVAILABLE agents are targeted)
+    const availableEligibleAgents = (eligibleAgents || []).filter(
+      (agent: any) => agent.status === 'AVAILABLE'
     );
+
+    console.log(
+      `[DISPATCH] Order #${newOrder.orderNumber} placed for service area '${targetServiceArea}'. Available eligible agents count: ${availableEligibleAgents.length}`
+    );
+
+    if (availableEligibleAgents.length > 0) {
+      const targetAgentIds = availableEligibleAgents.map((a: any) => a.id);
+      const estimatedTotalWeight = input.items.reduce(
+        (sum, item) => sum + (Number(item.estimatedWeight) || 0),
+        0
+      );
+
+      const notificationPayload = {
+        type: 'NEW_PICKUP_AVAILABLE',
+        targetAgentIds,
+        orderId: newOrder.id,
+        orderNumber: newOrder.orderNumber,
+        serviceArea: targetServiceArea,
+        estimatedQuantity: `${estimatedTotalWeight.toFixed(1)} kg`,
+        itemsSummary: `${input.items.length} category item(s)`,
+        createdAt: newOrder.createdAt.toISOString(),
+      };
+
+      // Broadcast NEW_PICKUP_AVAILABLE event to SSE engine
+      broadcaster.broadcast('NEW_PICKUP_AVAILABLE', notificationPayload);
+    }
   } catch (err) {
-    console.warn('[DISPATCH PREP] Eligible agent lookup notice:', err);
+    // Notification dispatch failure MUST NEVER rollback customer booking
+    console.warn('[DISPATCH ERROR] Safe notification dispatch notice:', err);
   }
 
   // 8. Store in Idempotency Map

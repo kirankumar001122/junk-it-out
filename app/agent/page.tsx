@@ -19,6 +19,9 @@ import {
   Lock,
   ArrowRight,
   LogOut,
+  Bell,
+  Eye,
+  X,
 } from 'lucide-react';
 
 export default function AgentDashboardPage() {
@@ -30,6 +33,11 @@ export default function AgentDashboardPage() {
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+
+  // Realtime Pickup Notification & Read-Only View Modal State
+  const [newPickupNotice, setNewPickupNotice] = useState<any | null>(null);
+  const [viewPickupModal, setViewPickupModal] = useState<any | null>(null);
+  const [loadingPickupDetails, setLoadingPickupDetails] = useState(false);
 
   // Agent OTP Login State
   const [loginPhone, setLoginPhone] = useState('');
@@ -136,6 +144,55 @@ export default function AgentDashboardPage() {
 
     return () => clearInterval(locationInterval);
   }, [activeOrder?.id, isOnline, agent?.id]);
+
+  // Authenticated Agent SSE Stream Connection for NEW_PICKUP_AVAILABLE Notifications
+  useEffect(() => {
+    if (!agent?.id || !isOnline) return;
+
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource('/api/agent/stream');
+
+      eventSource.addEventListener('NEW_PICKUP_AVAILABLE', (e: MessageEvent) => {
+        try {
+          const payload = JSON.parse(e.data);
+          console.log('[AGENT SSE] NEW_PICKUP_AVAILABLE notification received:', payload);
+          setNewPickupNotice(payload);
+        } catch (err) {
+          console.error('[AGENT SSE] Error parsing notification payload:', err);
+        }
+      });
+
+      eventSource.onerror = () => {
+        // EventSource will automatically handle reconnection safely
+      };
+    } catch (err) {
+      console.error('[AGENT SSE] EventSource initialization notice:', err);
+    }
+
+    return () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+    };
+  }, [agent?.id, isOnline]);
+
+  const handleViewPickupDetails = async (orderId: string) => {
+    setLoadingPickupDetails(true);
+    try {
+      const res = await fetch(`/api/orders/${orderId}`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setViewPickupModal(data.data);
+      } else {
+        alert(data.error?.message || data.message || 'Unable to view pickup details.');
+      }
+    } catch (err) {
+      alert('Network error fetching pickup details.');
+    } finally {
+      setLoadingPickupDetails(false);
+    }
+  };
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -443,6 +500,60 @@ export default function AgentDashboardPage() {
         </div>
       </div>
 
+      {/* REALTIME NEW PICKUP NOTIFICATION BANNER */}
+      {newPickupNotice && (
+        <div className="mx-4 mt-4 bg-gradient-to-r from-emerald-950 via-slate-900 to-emerald-950 border-2 border-emerald-500 rounded-3xl p-5 shadow-2xl shadow-emerald-500/10">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-500 text-slate-950 flex items-center justify-center font-black animate-pulse shrink-0">
+                <Bell className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="text-[10px] font-black tracking-widest text-emerald-400 uppercase bg-emerald-500/20 px-2.5 py-0.5 rounded-full border border-emerald-500/30">
+                  🔔 NEW PICKUP AVAILABLE
+                </span>
+                <h3 className="font-extrabold text-white text-sm mt-1">
+                  Order #{newPickupNotice.orderNumber}
+                </h3>
+              </div>
+            </div>
+            <button
+              onClick={() => setNewPickupNotice(null)}
+              className="text-slate-400 hover:text-white p-1 rounded-lg transition-colors"
+              title="Dismiss notification"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="mt-3 pt-3 border-t border-slate-800 grid grid-cols-2 gap-2 text-xs">
+            <div>
+              <span className="text-slate-400 block text-[10px] uppercase font-bold">Service Area</span>
+              <span className="text-slate-200 font-semibold">{newPickupNotice.serviceArea || 'Bengaluru'}</span>
+            </div>
+            <div>
+              <span className="text-slate-400 block text-[10px] uppercase font-bold">Est. Quantity</span>
+              <span className="text-emerald-400 font-semibold">{newPickupNotice.estimatedQuantity || 'N/A'}</span>
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <button
+              onClick={() => handleViewPickupDetails(newPickupNotice.orderId)}
+              disabled={loadingPickupDetails}
+              className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-xs py-3.5 rounded-2xl uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.01]"
+            >
+              {loadingPickupDetails ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <Eye className="w-4 h-4" />
+              )}
+              VIEW PICKUP DETAILS
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* TODAY'S METRICS SUMMARY */}
       <div className="p-4 grid grid-cols-3 gap-2">
         <div className="bg-slate-800/80 p-3 rounded-2xl border border-slate-700/50 text-center">
@@ -636,6 +747,82 @@ export default function AgentDashboardPage() {
             >
               <CheckCircle className="w-5 h-5" />
               CONFIRM WEIGHTS & COMPLETE PICKUP
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* READ-ONLY VIEW PICKUP MODAL */}
+      {viewPickupModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <span className="text-[10px] font-black text-amber-400 bg-amber-500/20 px-2.5 py-0.5 rounded-full border border-amber-500/30 uppercase">
+                  UNASSIGNED PICKUP
+                </span>
+                <h3 className="text-base font-extrabold text-white mt-1 flex items-center gap-2">
+                  <Truck className="w-5 h-5 text-emerald-400" />
+                  Pickup Details
+                </h3>
+              </div>
+              <button
+                onClick={() => setViewPickupModal(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-xl bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="flex items-center justify-between bg-slate-800/80 p-3 rounded-2xl border border-slate-700/50">
+                <span className="text-slate-400 font-medium">Order Number:</span>
+                <span className="font-mono font-bold text-white">{viewPickupModal.orderNumber}</span>
+              </div>
+
+              <div className="flex items-center justify-between bg-slate-800/80 p-3 rounded-2xl border border-slate-700/50">
+                <span className="text-slate-400 font-medium">Status:</span>
+                <span className="font-bold text-amber-400 bg-amber-950/60 border border-amber-800/60 px-2 py-0.5 rounded-full text-[11px]">
+                  {viewPickupModal.status} (Unassigned)
+                </span>
+              </div>
+
+              <div className="bg-slate-800/80 p-3 rounded-2xl border border-slate-700/50 space-y-1">
+                <span className="text-slate-400 font-medium block">Pickup Location / Service Area:</span>
+                <p className="font-bold text-white">
+                  📍 {viewPickupModal.address?.area || viewPickupModal.serviceArea?.name || 'Bengaluru Zone'}
+                </p>
+                {viewPickupModal.address && (
+                  <p className="text-slate-400 text-[11px] leading-relaxed">
+                    {viewPickupModal.address.houseNo}, {viewPickupModal.address.street}, {viewPickupModal.address.area}
+                  </p>
+                )}
+              </div>
+
+              {viewPickupModal.items && viewPickupModal.items.length > 0 && (
+                <div className="bg-slate-800/80 p-3 rounded-2xl border border-slate-700/50 space-y-2">
+                  <span className="text-slate-400 font-medium block">Scrap Categories & Estimated Weights:</span>
+                  <div className="space-y-1.5">
+                    {viewPickupModal.items.map((item: any) => (
+                      <div key={item.id} className="flex items-center justify-between bg-slate-900/60 p-2 rounded-xl border border-slate-800">
+                        <span className="text-slate-200 font-semibold">{item.category?.name || 'Item'}</span>
+                        <span className="text-emerald-400 font-bold">{item.estimatedWeight} kg</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-slate-950/60 border border-slate-800 p-3 rounded-2xl text-[11px] text-slate-400 leading-relaxed">
+                ℹ️ <strong className="text-slate-300">Read-Only View:</strong> This pickup is unassigned and broadcast to eligible available agents in this service zone. Order status remains <code className="text-amber-400 font-mono">BOOKING_RECEIVED</code>.
+              </div>
+            </div>
+
+            <button
+              onClick={() => setViewPickupModal(null)}
+              className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs py-3.5 rounded-2xl uppercase tracking-wider transition-colors"
+            >
+              CLOSE DETAILS
             </button>
           </div>
         </div>
