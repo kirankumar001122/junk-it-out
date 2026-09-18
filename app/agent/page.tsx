@@ -27,6 +27,8 @@ export default function AgentDashboardPage() {
   const [activeOrder, setActiveOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(true);
+  const [statusUpdating, setStatusUpdating] = useState(false);
+  const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
   // Agent OTP Login State
@@ -202,6 +204,33 @@ export default function AgentDashboardPage() {
     }
   };
 
+  const toggleAgentStatus = async () => {
+    const targetStatus = isOnline ? 'OFFLINE' : 'AVAILABLE';
+    setStatusUpdating(true);
+    setStatusNotice(null);
+    try {
+      const res = await fetch('/api/agent/status', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: targetStatus }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const newStatus = data.data.status;
+        setIsOnline(newStatus === 'AVAILABLE');
+        setAgent((prev: any) => (prev ? { ...prev, status: newStatus } : prev));
+        setStatusNotice(`Status updated to ${newStatus}`);
+        setTimeout(() => setStatusNotice(null), 3000);
+      } else {
+        setStatusNotice(data.error?.message || data.message || 'Failed to update status.');
+      }
+    } catch {
+      setStatusNotice('Network error updating status.');
+    } finally {
+      setStatusUpdating(false);
+    }
+  };
+
   const handleCallEndpoint = async (action: 'accept' | 'start' | 'arrive') => {
     if (!activeOrder) return;
     try {
@@ -367,6 +396,11 @@ export default function AgentDashboardPage() {
       {authError && (
         <div className="p-4 text-xs text-amber-200 bg-amber-500/10 border-b border-amber-500/30">{authError}</div>
       )}
+      {statusNotice && (
+        <div className="p-3 text-xs font-bold text-center text-emerald-300 bg-emerald-950/60 border-b border-emerald-800 animate-scale-in">
+          {statusNotice}
+        </div>
+      )}
 
       {/* AGENT TOP APP BAR */}
       <div className="p-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-30 flex items-center justify-between">
@@ -382,14 +416,20 @@ export default function AgentDashboardPage() {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setIsOnline(!isOnline)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-extrabold border transition-all ${
+            type="button"
+            onClick={toggleAgentStatus}
+            disabled={statusUpdating}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-extrabold border transition-all cursor-pointer disabled:opacity-50 ${
               isOnline
                 ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
                 : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
             }`}
           >
-            <Power className="w-3.5 h-3.5" />
+            {statusUpdating ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Power className="w-3.5 h-3.5" />
+            )}
             {isOnline ? 'ONLINE' : 'OFFLINE'}
           </button>
 

@@ -1,6 +1,7 @@
 import { db } from '../db';
 import { findOrCreateUserCustomer, saveCustomerAddress } from './customerService';
 import { checkGeofenceServiceability } from './serviceAreaService';
+import { findEligibleAgentsForServiceArea } from './agentService';
 
 // In-memory Idempotency Store to prevent duplicate order placements on network retries
 const idempotencyStore = new Map<string, { orderId: string; responseData: any; timestamp: number }>();
@@ -177,7 +178,18 @@ export async function createOrder(
     return createdOrder;
   });
 
-  // 7. Store in Idempotency Map
+  // 7. Service Area Agent Matching (Phase 1 Dispatch Prep)
+  try {
+    const targetServiceArea = geofence.zone?.name || input.address.area;
+    const eligibleAgents = await findEligibleAgentsForServiceArea(targetServiceArea);
+    console.log(
+      `[DISPATCH PREP] Order #${newOrder.orderNumber} placed for service area '${targetServiceArea}'. Available eligible agents count: ${eligibleAgents.length}`
+    );
+  } catch (err) {
+    console.warn('[DISPATCH PREP] Eligible agent lookup notice:', err);
+  }
+
+  // 8. Store in Idempotency Map
   if (idempotencyKey) {
     idempotencyStore.set(idempotencyKey, {
       orderId: newOrder.id,

@@ -46,3 +46,37 @@ export async function getAgentActiveOrder(agentId: string) {
     orderBy: { createdAt: 'desc' },
   });
 }
+
+export async function findEligibleAgentsForServiceArea(serviceAreaName?: string) {
+  try {
+    const availableAgents = await db.agent.findMany({
+      where: {
+        status: 'AVAILABLE',
+      },
+      include: {
+        user: true,
+      },
+    });
+
+    if (!serviceAreaName) {
+      return availableAgents;
+    }
+
+    const normalizedAreaName = serviceAreaName.toLowerCase();
+
+    // Filter agents whose serviceAreas string covers the requested area
+    const eligibleAgents = availableAgents.filter((agent) => {
+      if (!agent.serviceAreas || agent.serviceAreas.trim() === '') {
+        return true; // Agent covers all zones if unspecified
+      }
+      const agentAreas = agent.serviceAreas.toLowerCase().split(',').map((a) => a.trim());
+      return agentAreas.some((area) => normalizedAreaName.includes(area) || area.includes(normalizedAreaName));
+    });
+
+    return eligibleAgents.length > 0 ? eligibleAgents : availableAgents;
+  } catch (err) {
+    console.error('Failed to query eligible agents for service area:', err);
+    return [];
+  }
+}
+
