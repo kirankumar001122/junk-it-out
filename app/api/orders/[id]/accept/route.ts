@@ -55,8 +55,11 @@ export async function POST(
     }
 
     // 4. Check Order State & Idempotency / Conflict
-    if (order.agentId === agentId) {
-      // Idempotent retry: Order is already assigned to this exact agent
+    if (
+      order.agentId === agentId &&
+      !['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'].includes(order.status)
+    ) {
+      // Idempotent retry: Order is already accepted or beyond by this exact agent
       return successResponse({
         orderId: order.id,
         orderNumber: order.orderNumber,
@@ -95,12 +98,14 @@ export async function POST(
     }
 
     // 6. Atomic Conditional Update (Race-Condition Prevention)
-    // Only update if agentId is still NULL and status is in an acceptable state
+    // Update status to AGENT_ACCEPTED if order is unassigned or assigned to this agent in AGENT_ASSIGNED state
     const updateResult = await db.order.updateMany({
       where: {
         id: order.id,
-        agentId: null,
-        status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] },
+        OR: [
+          { agentId: null, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
+          { agentId: agentId, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
+        ],
       },
       data: {
         agentId: agentId,
