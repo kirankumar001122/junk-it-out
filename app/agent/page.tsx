@@ -39,6 +39,7 @@ export default function AgentDashboardPage() {
   const [viewPickupModal, setViewPickupModal] = useState<any | null>(null);
   const [loadingPickupDetails, setLoadingPickupDetails] = useState(false);
   const [acceptingPickup, setAcceptingPickup] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
 
   // Agent OTP Login State
   const [loginPhone, setLoginPhone] = useState('');
@@ -325,17 +326,42 @@ export default function AgentDashboardPage() {
 
   const handleCallEndpoint = async (action: 'accept' | 'start' | 'arrive') => {
     if (!activeOrder) return;
+
+    if (!isOnline && action === 'accept') {
+      setStatusNotice('You are currently OFFLINE. Please switch status to ONLINE to accept pickups.');
+      setTimeout(() => setStatusNotice(null), 5000);
+      return;
+    }
+
+    setActionLoading(true);
+    setStatusNotice(null);
     try {
       const res = await fetch(`/api/orders/${activeOrder.id}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
       const data = await res.json();
-      if (data.success) {
-        fetchAgentData();
+      if (res.ok && data.success) {
+        setStatusNotice(
+          action === 'accept'
+            ? 'Pickup assignment accepted!'
+            : action === 'start'
+            ? 'Journey started!'
+            : 'Arrived at customer doorstep!'
+        );
+        setTimeout(() => setStatusNotice(null), 4000);
+        await fetchAgentData();
+      } else {
+        const errorText = data.error?.message || data.message || `Failed to perform ${action} action.`;
+        setStatusNotice(errorText);
+        setTimeout(() => setStatusNotice(null), 5000);
       }
     } catch (e) {
       console.error(e);
+      setStatusNotice('Network error while processing action. Please try again.');
+      setTimeout(() => setStatusNotice(null), 4000);
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -667,33 +693,64 @@ export default function AgentDashboardPage() {
           <div className="space-y-2">
             <span className="text-xs font-bold text-slate-400 uppercase px-1">Pickup Workflow Actions:</span>
 
-            {activeOrder.status === 'AGENT_ASSIGNED' && (
+            {!isOnline && activeOrder.status === 'AGENT_ASSIGNED' && (
+              <div className="bg-rose-950/60 border border-rose-800 p-3.5 rounded-2xl space-y-2 text-center">
+                <p className="text-xs text-rose-300 font-bold">
+                  ⚠️ You are currently OFFLINE. Switch to ONLINE to accept pickups.
+                </p>
+                <button
+                  onClick={toggleAgentStatus}
+                  disabled={statusUpdating}
+                  className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs py-3 rounded-xl uppercase tracking-wider shadow-md flex items-center justify-center gap-2"
+                >
+                  {statusUpdating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Power className="w-4 h-4" />}
+                  SWITCH STATUS TO ONLINE
+                </button>
+              </div>
+            )}
+
+            {isOnline && activeOrder.status === 'AGENT_ASSIGNED' && (
               <button
                 onClick={() => handleCallEndpoint('accept')}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2"
+                disabled={actionLoading}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
               >
-                <CheckCircle className="w-5 h-5" />
-                ACCEPT PICKUP ASSIGNMENT
+                {actionLoading ? (
+                  <RefreshCw className="w-5 h-5 animate-spin" />
+                ) : (
+                  <CheckCircle className="w-5 h-5" />
+                )}
+                {actionLoading ? 'ACCEPTING ASSIGNMENT...' : 'ACCEPT PICKUP ASSIGNMENT'}
               </button>
             )}
 
             {activeOrder.status === 'AGENT_ACCEPTED' && (
               <button
                 onClick={() => handleCallEndpoint('start')}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2"
+                disabled={actionLoading}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
               >
-                <Play className="w-5 h-5" />
-                START JOURNEY TO CUSTOMER
+                {actionLoading ? (
+                  <RefreshCw className="w-5 h-5 animate-spin" />
+                ) : (
+                  <Play className="w-5 h-5" />
+                )}
+                {actionLoading ? 'STARTING JOURNEY...' : 'START JOURNEY TO CUSTOMER'}
               </button>
             )}
 
             {activeOrder.status === 'AGENT_ON_WAY' && (
               <button
                 onClick={() => handleCallEndpoint('arrive')}
-                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2"
+                disabled={actionLoading}
+                className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
               >
-                <MapPin className="w-5 h-5" />
-                MARK ARRIVED AT DOORSTEP
+                {actionLoading ? (
+                  <RefreshCw className="w-5 h-5 animate-spin" />
+                ) : (
+                  <MapPin className="w-5 h-5" />
+                )}
+                {actionLoading ? 'MARKING ARRIVED...' : 'MARK ARRIVED AT DOORSTEP'}
               </button>
             )}
 
