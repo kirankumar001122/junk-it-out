@@ -38,6 +38,7 @@ export default function AgentDashboardPage() {
   const [newPickupNotice, setNewPickupNotice] = useState<any | null>(null);
   const [viewPickupModal, setViewPickupModal] = useState<any | null>(null);
   const [loadingPickupDetails, setLoadingPickupDetails] = useState(false);
+  const [acceptingPickup, setAcceptingPickup] = useState(false);
 
   // Agent OTP Login State
   const [loginPhone, setLoginPhone] = useState('');
@@ -191,6 +192,40 @@ export default function AgentDashboardPage() {
       alert('Network error fetching pickup details.');
     } finally {
       setLoadingPickupDetails(false);
+    }
+  };
+
+  const handleAcceptPickup = async (orderId: string) => {
+    setAcceptingPickup(true);
+    try {
+      const res = await fetch(`/api/orders/${orderId}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+
+      if (res.status === 409) {
+        setStatusNotice('This pickup has already been accepted by another agent.');
+        setTimeout(() => setStatusNotice(null), 5000);
+        setViewPickupModal(null);
+        setNewPickupNotice(null);
+        fetchAgentData();
+        return;
+      }
+
+      if (res.ok && data.success) {
+        setStatusNotice(`Pickup Accepted! Order #${data.data?.orderNumber || ''} assigned to you.`);
+        setTimeout(() => setStatusNotice(null), 5000);
+        setViewPickupModal(null);
+        setNewPickupNotice(null);
+        fetchAgentData();
+      } else {
+        alert(data.error?.message || data.message || 'Failed to accept pickup.');
+      }
+    } catch (err) {
+      alert('Network error while accepting pickup.');
+    } finally {
+      setAcceptingPickup(false);
     }
   };
 
@@ -817,6 +852,19 @@ export default function AgentDashboardPage() {
                 ℹ️ <strong className="text-slate-300">Read-Only View:</strong> This pickup is unassigned and broadcast to eligible available agents in this service zone. Order status remains <code className="text-amber-400 font-mono">BOOKING_RECEIVED</code>.
               </div>
             </div>
+
+            <button
+              onClick={() => handleAcceptPickup(viewPickupModal.id)}
+              disabled={acceptingPickup}
+              className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-xs py-4 rounded-2xl uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.01]"
+            >
+              {acceptingPickup ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <CheckCircle className="w-4 h-4" />
+              )}
+              ACCEPT PICKUP
+            </button>
 
             <button
               onClick={() => setViewPickupModal(null)}
