@@ -102,19 +102,17 @@ export default function Navbar() {
           </span>
         </Link>
 
-        {/* Location selector trigger */}
-        <button
-          onClick={() => setLocationOpen(true)}
-          className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2 rounded-xl bg-slate-50/90 px-2 sm:px-3 py-1.5 text-left border border-slate-200/90 hover:bg-slate-100 hover:border-slate-300 transition-all group cursor-pointer max-w-[135px] sm:max-w-[200px] md:max-w-[240px]"
-          aria-label="Change pickup location"
+        {/* Display-only location indicator */}
+        <div
+          className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2 rounded-xl bg-slate-50/90 px-2 sm:px-3 py-1.5 text-left border border-slate-200/90 max-w-[135px] sm:max-w-[200px] md:max-w-[240px]"
           title={`Pickup Location: ${location}`}
         >
-          <MapPin className="h-4 w-4 shrink-0 text-emerald-600 transition-transform group-hover:scale-110" />
+          <MapPin className="h-4 w-4 shrink-0 text-emerald-600" />
           <span className="min-w-0 flex-1 overflow-hidden">
             <span className="block text-[9px] sm:text-[10px] font-semibold uppercase tracking-wider text-slate-500 leading-tight">Picking Up From</span>
             <span className="block truncate text-xs font-bold text-slate-900 leading-tight">{location}</span>
           </span>
-        </button>
+        </div>
 
         {/* Search input */}
         <form onSubmit={submitSearch} className="relative min-w-0 flex-1 max-w-md mx-auto">
