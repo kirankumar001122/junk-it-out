@@ -87,9 +87,11 @@ export default function CategoriesPage() {
                 </p>
                 <p className="mt-2 text-xs font-bold text-emerald-700">
                   ₹{category.pricePerKg} <span className="text-[10px] font-normal text-slate-500">/ kg</span>
-                  <span className="ml-2 text-[10px] font-medium text-slate-400">
-                    ({category.type === 'RECYCLABLE_BUY' ? 'We pay you' : 'Service charge'})
-                  </span>
+                  {category.type !== 'RECYCLABLE_BUY' && (
+                    <span className="ml-2 text-[10px] font-medium text-slate-400">
+                      (Service charge)
+                    </span>
+                  )}
                 </p>
               </div>
 
