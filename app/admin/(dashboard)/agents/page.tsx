@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Users, Truck, Star, Phone, MapPin, RefreshCw, Plus, AlertCircle } from 'lucide-react';
+import { Users, Truck, Star, Phone, MapPin, RefreshCw, Plus, AlertCircle, LogOut } from 'lucide-react';
 
 export default function AdminAgentsPage() {
   const [agents, setAgents] = useState<any[]>([]);
@@ -15,6 +15,10 @@ export default function AdminAgentsPage() {
   const [vehicleType, setVehicleType] = useState('Three-Wheeler Auto Loading');
   const [vehicleNumber, setVehicleNumber] = useState('');
   const [serviceAreas, setServiceAreas] = useState('JP Nagar, Jayanagar, Koramangala');
+
+  // Force Exit modal state
+  const [exitModalAgent, setExitModalAgent] = useState<any | null>(null);
+  const [exiting, setExiting] = useState(false);
 
   const loadAgents = async () => {
     setLoading(true);
@@ -52,6 +56,29 @@ export default function AdminAgentsPage() {
       }
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const handleForceExitAgent = async () => {
+    if (!exitModalAgent || exiting) return;
+    setExiting(true);
+    try {
+      const res = await fetch('/api/admin/agents/force-exit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId: exitModalAgent.id }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setExitModalAgent(null);
+        loadAgents();
+      } else {
+        alert(data.message || 'Failed to force exit agent.');
+      }
+    } catch (e: any) {
+      alert(e.message || 'Error executing force exit.');
+    } finally {
+      setExiting(false);
     }
   };
 
@@ -186,16 +213,26 @@ export default function AdminAgentsPage() {
                 </div>
               </div>
 
-              <button
-                onClick={() => toggleAgentStatus(agent.id, agent.status)}
-                className={`w-full text-xs font-bold py-3 rounded-xl border transition-colors ${
-                  agent.status === 'OFFLINE'
-                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600'
-                    : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-200'
-                }`}
-              >
-                {agent.status === 'OFFLINE' ? 'Set Agent Online' : 'Set Agent Offline'}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => toggleAgentStatus(agent.id, agent.status)}
+                  className={`flex-1 text-xs font-bold py-3 rounded-xl border transition-colors ${
+                    agent.status === 'OFFLINE'
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-200'
+                  }`}
+                >
+                  {agent.status === 'OFFLINE' ? 'Set Agent Online' : 'Set Agent Offline'}
+                </button>
+                <button
+                  onClick={() => setExitModalAgent(agent)}
+                  className="px-4 text-xs font-bold py-3 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 flex items-center gap-1.5 transition-colors"
+                  title="Force exit agent portal session"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  Force Exit
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -273,6 +310,61 @@ export default function AdminAgentsPage() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Force Exit Confirmation Modal */}
+      {exitModalAgent && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center">
+                <LogOut className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">Force Exit Agent Portal?</h3>
+                <p className="text-xs text-slate-500">Immediate session invalidation</p>
+              </div>
+            </div>
+
+            <div className="bg-rose-50 border border-rose-100 rounded-2xl p-4 text-xs text-rose-900 space-y-2">
+              <p className="font-bold">
+                Are you sure you want to force exit <span className="underline">{exitModalAgent.name}</span> ({exitModalAgent.phone})?
+              </p>
+              <ul className="list-disc list-inside text-rose-800 space-y-1 text-[11px]">
+                <li>Agent&apos;s active portal sessions will be <strong>revoked immediately</strong> globally.</li>
+                <li>Agent status will be changed to <strong>OFFLINE</strong>.</li>
+                <li>Agent will be required to re-authenticate with mobile OTP.</li>
+                <li><strong>Active orders and pickup history will NOT be lost or cleared.</strong></li>
+              </ul>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                disabled={exiting}
+                onClick={() => setExitModalAgent(null)}
+                className="w-1/2 bg-slate-100 text-slate-700 font-bold text-xs py-3 rounded-xl hover:bg-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={exiting}
+                onClick={handleForceExitAgent}
+                className="w-1/2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs py-3 rounded-xl shadow-md flex items-center justify-center gap-2"
+              >
+                {exiting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    Exiting...
+                  </>
+                ) : (
+                  'Confirm Force Exit'
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

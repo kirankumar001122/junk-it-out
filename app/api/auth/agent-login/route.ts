@@ -121,6 +121,7 @@ export async function POST(req: NextRequest) {
       customerId: null,
       agentId: user.agent.id,
       adminId: null,
+      tokenVersion: (user.agent as any).tokenVersion || 1,
     });
 
     const response = successResponse({

@@ -81,3 +81,42 @@ export function verifyRazorpayWebhookSignature(rawBody: string, signature: strin
 export function getRazorpayKeyId() {
   return requireCredentials().keyId;
 }
+
+export async function refundRazorpayPayment(
+  paymentId: string,
+  amountInPaise?: number,
+  notes?: Record<string, string>
+) {
+  const { keyId, secret } = requireCredentials();
+  const body: any = {};
+  if (amountInPaise && amountInPaise > 0) {
+    body.amount = amountInPaise;
+  }
+  if (notes) {
+    body.notes = notes;
+  }
+
+  const response = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}/refund`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${keyId}:${secret}`).toString('base64')}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.id) {
+    throw new Error(data?.error?.description || 'Razorpay refund failed.');
+  }
+
+  return {
+    id: data.id as string,
+    entity: data.entity as string,
+    amount: data.amount as number,
+    currency: data.currency as string,
+    payment_id: data.payment_id as string,
+    status: data.status as string,
+  };
+}
+

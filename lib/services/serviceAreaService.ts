@@ -12,29 +12,35 @@ export async function checkGeofenceServiceability(
 }> {
   const point: [number, number] = [lat, lng];
 
-  // 1. Check database active service area boundary polygons
+  // 1. Check database service area boundary polygons
   try {
-    const activeAreas = await db.serviceArea.findMany({
-      where: { status: 'ACTIVE' },
-    });
-
-    for (const area of activeAreas) {
-      try {
-        const polygon: [number, number][] = JSON.parse(area.boundaryPolygon);
-        if (isPointInPolygon(point, polygon)) {
-          return {
-            serviceable: true,
-            message: `Location is inside active Junk It Out service zone: ${area.name}`,
-            zone: {
-              id: area.id,
-              name: area.name,
-              etaMinutes: area.etaMinutes,
-              basePickupCharge: area.basePickupCharge,
-            },
-          };
+    const dbAreas = await db.serviceArea.findMany();
+    if (dbAreas.length > 0) {
+      for (const area of dbAreas) {
+        try {
+          const polygon: [number, number][] = JSON.parse(area.boundaryPolygon);
+          if (isPointInPolygon(point, polygon)) {
+            if (area.status === 'ACTIVE') {
+              return {
+                serviceable: true,
+                message: `Location is inside active Junk It Out service zone: ${area.name}`,
+                zone: {
+                  id: area.id,
+                  name: area.name,
+                  etaMinutes: area.etaMinutes,
+                  basePickupCharge: area.basePickupCharge,
+                },
+              };
+            } else {
+              return {
+                serviceable: false,
+                message: `Service is currently disabled/inactive in ${area.name}.`,
+              };
+            }
+          }
+        } catch (err) {
+          console.error(`Failed to parse polygon for zone ${area.name}`, err);
         }
-      } catch (err) {
-        console.error(`Failed to parse polygon for zone ${area.name}`, err);
       }
     }
   } catch (err) {

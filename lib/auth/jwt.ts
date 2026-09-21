@@ -8,6 +8,7 @@ export interface JwtPayload {
   customerId?: string | null;
   agentId?: string | null;
   adminId?: string | null;
+  tokenVersion?: number;
   iat?: number;
   exp?: number;
 }

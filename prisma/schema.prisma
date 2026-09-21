@@ -52,6 +52,7 @@ model Agent {
   currentLng    Float    @default(77.5996)
   rating        Float    @default(4.9)
   serviceAreas  String   @default("JP Nagar, Jayanagar, Koramangala, Electronic City")
+  tokenVersion  Int      @default(1)
   createdAt     DateTime @default(now())
 
   orders    Order[]

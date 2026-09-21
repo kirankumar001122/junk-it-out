@@ -40,6 +40,9 @@ export async function POST(req: NextRequest) {
     if (!failed && !authorized && !captured) {
       return NextResponse.json({ success: true, status: 'Event ignored' });
     }
+    if (payment.status === 'REFUNDED') {
+      return NextResponse.json({ success: true, status: 'Payment is already REFUNDED. Event ignored.' });
+    }
     if (payment.status === 'CAPTURED') {
       return NextResponse.json({ success: true, status: 'Already processed' });
     }

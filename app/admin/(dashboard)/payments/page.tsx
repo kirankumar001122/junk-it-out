@@ -1,13 +1,18 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { CreditCard, RefreshCw, ArrowUpRight, ArrowDownLeft, Search, AlertCircle } from 'lucide-react';
+import { CreditCard, RefreshCw, ArrowUpRight, ArrowDownLeft, Search, AlertCircle, RotateCcw } from 'lucide-react';
 
 export default function AdminPaymentsPage() {
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Refund modal state
+  const [refundModalPayment, setRefundModalPayment] = useState<any | null>(null);
+  const [refunding, setRefunding] = useState(false);
+  const [refundReason, setRefundReason] = useState('Customer request / order adjustment');
 
   const loadPayments = async () => {
     setLoading(true);
@@ -31,11 +36,38 @@ export default function AdminPaymentsPage() {
     loadPayments();
   }, []);
 
+  const handleConfirmRefund = async () => {
+    if (!refundModalPayment || refunding) return;
+    setRefunding(true);
+    try {
+      const res = await fetch('/api/admin/payments/refund', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paymentRecordId: refundModalPayment.id,
+          reason: refundReason,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setRefundModalPayment(null);
+        loadPayments();
+      } else {
+        alert(data.message || 'Failed to issue refund.');
+      }
+    } catch (e: any) {
+      alert(e.message || 'Error processing refund request.');
+    } finally {
+      setRefunding(false);
+    }
+  };
+
   const filteredPayments = payments.filter(
     (p) =>
       p.orderNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.customer?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.gatewayOrderId?.toLowerCase().includes(searchTerm.toLowerCase())
+      p.gatewayOrderId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.gatewayPaymentId?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
@@ -101,6 +133,7 @@ export default function AdminPaymentsPage() {
                   <th className="p-3">Actual Weight</th>
                   <th className="p-3">Status</th>
                   <th className="p-3">Date</th>
+                  <th className="p-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
@@ -134,6 +167,8 @@ export default function AdminPaymentsPage() {
                         className={`text-[10px] font-extrabold px-2.5 py-1 rounded-full uppercase ${
                           p.status === 'SETTLEMENT_COMPLETED' || p.status === 'CAPTURED'
                             ? 'bg-emerald-100 text-emerald-800'
+                            : p.status === 'REFUNDED'
+                            ? 'bg-purple-100 text-purple-800'
                             : 'bg-amber-100 text-amber-800'
                         }`}
                       >
@@ -141,6 +176,24 @@ export default function AdminPaymentsPage() {
                       </span>
                     </td>
                     <td className="p-3 text-slate-500 font-mono text-[11px]">{p.date}</td>
+                    <td className="p-3 text-right">
+                      {p.status === 'CAPTURED' ? (
+                        <button
+                          onClick={() => setRefundModalPayment(p)}
+                          className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 font-bold text-[11px] rounded-xl flex items-center gap-1 ml-auto transition-colors"
+                          title="Initiate server-side Razorpay refund"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          Refund
+                        </button>
+                      ) : p.status === 'REFUNDED' ? (
+                        <span className="text-[11px] text-purple-700 font-bold px-2 py-1 bg-purple-50 rounded-lg">
+                          Refunded
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 text-[11px] font-medium">—</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -148,6 +201,83 @@ export default function AdminPaymentsPage() {
           </div>
         )}
       </div>
+
+      {/* Razorpay Refund Confirmation Modal */}
+      {refundModalPayment && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center">
+                <RotateCcw className="w-5 h-5 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">Initiate Razorpay Refund</h3>
+                <p className="text-xs text-slate-500">Order: {refundModalPayment.orderNumber}</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-xs space-y-2 font-medium">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Customer:</span>
+                <span className="font-bold text-slate-900">{refundModalPayment.customer}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Gateway Payment ID:</span>
+                <span className="font-mono font-bold text-slate-900">{refundModalPayment.gatewayPaymentId}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Total Refund Amount:</span>
+                <span className="font-black text-sm text-emerald-700">₹{refundModalPayment.amount || refundModalPayment.serviceCharge || 0}</span>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-700">Refund Reason (Internal Notes)</label>
+              <input
+                type="text"
+                value={refundReason}
+                onChange={(e) => setRefundReason(e.target.value)}
+                placeholder="e.g. Order cancellation / Customer service request"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-900"
+              />
+            </div>
+
+            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-xs text-rose-900 space-y-1">
+              <p className="font-bold">⚠️ Warning: Irreversible Payout Action</p>
+              <p className="text-[11px] text-rose-800">
+                This will trigger Razorpay REST API to refund ₹{refundModalPayment.amount || refundModalPayment.serviceCharge || 0} back to customer&apos;s source account. The payment status will be updated to REFUNDED in PostgreSQL.
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                disabled={refunding}
+                onClick={() => setRefundModalPayment(null)}
+                className="w-1/2 bg-slate-100 text-slate-700 font-bold text-xs py-3 rounded-xl hover:bg-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={refunding}
+                onClick={handleConfirmRefund}
+                className="w-1/2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs py-3 rounded-xl shadow-md flex items-center justify-center gap-2"
+              >
+                {refunding ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    Refunding...
+                  </>
+                ) : (
+                  'Confirm Refund'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
