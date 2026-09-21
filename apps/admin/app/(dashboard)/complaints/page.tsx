@@ -78,7 +78,7 @@ export default function AdminComplaintsPage() {
                     <td className="p-3 font-mono font-bold text-slate-900">#{c.ticketNumber || c.id}</td>
                     <td className="p-3 font-bold text-slate-900">{c.customerName || c.userPhone}</td>
                     <td className="p-3 font-semibold text-slate-700">{c.category || 'General Inquiry'}</td>
-                    <td className="p-3 text-slate-600 max-w-xs truncate">{c.message}</td>
+                    <td className="p-3 text-slate-600 max-w-xs whitespace-pre-wrap break-words">{c.message || c.description}</td>
                     <td className="p-3">
                       <span
                         className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase ${

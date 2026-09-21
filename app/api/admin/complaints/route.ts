@@ -31,6 +31,7 @@ export async function GET(req: NextRequest) {
       customerPhone: c.customer?.user?.phone || '—',
       category: c.category,
       description: c.description,
+      message: c.description,
       status: c.status,
       photoUrl: c.photoUrl,
       resolutionNotes: c.resolutionNotes || null,

@@ -55,7 +55,7 @@ export default function AdminComplaintsPage() {
       c.orderNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       c.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       c.category?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.description?.toLowerCase().includes(searchTerm.toLowerCase())
+      (c.message || c.description)?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
@@ -83,7 +83,7 @@ export default function AdminComplaintsPage() {
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
           <input
             type="text"
-            placeholder="Search Order # / Customer / Category"
+            placeholder="Search Order # / Customer / Category / Message"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-10 pr-4 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
@@ -117,7 +117,7 @@ export default function AdminComplaintsPage() {
                   <th className="p-3">Order Number</th>
                   <th className="p-3">Customer</th>
                   <th className="p-3">Category</th>
-                  <th className="p-3">Description</th>
+                  <th className="p-3">Message</th>
                   <th className="p-3">Status</th>
                   <th className="p-3">Created</th>
                   <th className="p-3">Actions</th>
@@ -133,7 +133,7 @@ export default function AdminComplaintsPage() {
                       <span className="text-[11px] text-slate-500">{cmp.customerPhone}</span>
                     </td>
                     <td className="p-3 font-bold text-slate-800">{cmp.category.replace(/_/g, ' ')}</td>
-                    <td className="p-3 text-slate-600 max-w-xs">{cmp.description}</td>
+                    <td className="p-3 text-slate-600 max-w-xs whitespace-pre-wrap break-words">{cmp.message || cmp.description}</td>
                     <td className="p-3">
                       <span
                         className={`text-[10px] font-extrabold px-2.5 py-1 rounded-full uppercase ${
