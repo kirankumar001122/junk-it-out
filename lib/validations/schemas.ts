@@ -3,11 +3,22 @@ export function validatePhone(phone: string): { valid: boolean; normalized: stri
     return { valid: false, normalized: '', error: 'Phone number is required.' };
   }
   const clean = phone.replace(/[\s-]/g, '');
-  if (!/^\+?[0-9]{10,13}$/.test(clean)) {
-    return { valid: false, normalized: '', error: 'Invalid phone number format. Must be 10 to 12 digits.' };
+
+  if (/^[6-9]\d{9}$/.test(clean)) {
+    return { valid: true, normalized: `+91${clean}` };
   }
-  const normalized = clean.startsWith('+') ? clean : `+91${clean.replace(/^0+/, '')}`;
-  return { valid: true, normalized };
+  if (/^91[6-9]\d{9}$/.test(clean)) {
+    return { valid: true, normalized: `+91${clean.slice(2)}` };
+  }
+  if (/^\+91[6-9]\d{9}$/.test(clean)) {
+    return { valid: true, normalized: clean };
+  }
+
+  return {
+    valid: false,
+    normalized: '',
+    error: 'Invalid Indian phone number format. Must be a 10-digit mobile number, or prefixed with 91 / +91.',
+  };
 }
 
 export function validateCoordinates(lat: any, lng: any): boolean {

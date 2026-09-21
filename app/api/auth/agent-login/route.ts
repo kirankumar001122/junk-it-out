@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Lookup & Provision Agent User (Authorized Agent: 9353276638)
-    const rawDigits = normalized.replace(/^\+91/, '').replace(/\D/g, '');
+    const rawDigits = normalized.replace(/\D/g, '').slice(-10);
     const isAuthorizedAgentNumber = rawDigits === '9353276638';
     const phoneVariants = Array.from(
       new Set([normalized, rawDigits, `+91${rawDigits}`, `0${rawDigits}`])

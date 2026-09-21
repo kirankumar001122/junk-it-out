@@ -97,7 +97,7 @@ export default function AdminLoginPage() {
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="+91XXXXXXXXXX"
                 required
-                disabled={otpSent && loading}
+                disabled={otpSent || loading}
                 className="w-full bg-slate-950 border border-slate-700 rounded-2xl pl-10 pr-4 py-3 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-emerald-500"
               />
             </div>
@@ -115,6 +115,7 @@ export default function AdminLoginPage() {
                   onChange={(e) => setOtp(e.target.value)}
                   placeholder="6-digit OTP"
                   required
+                  disabled={loading}
                   className="w-full bg-slate-950 border border-slate-700 rounded-2xl pl-10 pr-4 py-3 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 tracking-widest"
                 />
               </div>
