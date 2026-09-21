@@ -54,7 +54,8 @@ export default function AdminComplaintsPage() {
     (c) =>
       c.orderNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       c.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.category?.toLowerCase().includes(searchTerm.toLowerCase())
+      c.category?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.description?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (

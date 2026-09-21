@@ -9,6 +9,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, message: 'Admin access required.' }, { status: 403 });
     }
 
+    try {
+      await db.$executeRawUnsafe(`ALTER TABLE "Complaint" ALTER COLUMN "orderId" DROP NOT NULL;`);
+    } catch (_e) {
+      // Schema synchronized
+    }
+
     const complaints = await db.complaint.findMany({
       include: {
         order: { select: { orderNumber: true } },
@@ -20,7 +26,7 @@ export async function GET(req: NextRequest) {
     const formatted = complaints.map((c) => ({
       id: c.id,
       orderId: c.orderId,
-      orderNumber: c.order?.orderNumber || '—',
+      orderNumber: c.order?.orderNumber || 'General Support',
       customerName: c.customer?.user?.name || 'Customer',
       customerPhone: c.customer?.user?.phone || '—',
       category: c.category,

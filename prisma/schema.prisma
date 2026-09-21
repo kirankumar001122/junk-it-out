@@ -282,8 +282,8 @@ model Coupon {
 
 model Complaint {
   id              String   @id @default(uuid())
-  orderId         String
-  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId         String?
+  order           Order?   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   customerId      String
   customer        Customer @relation(fields: [customerId], references: [id])
   category        String   @default("WEIGHT_DISPUTE") // WEIGHT_DISPUTE, AGENT_BEHAVIOR, DELAY, PAYMENT

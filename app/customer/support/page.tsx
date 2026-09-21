@@ -5,16 +5,20 @@ import { AlertCircle, CheckCircle, RefreshCw, Send, HelpCircle } from 'lucide-re
 
 export default function CustomerSupportPage() {
   const [complaints, setComplaints] = useState<any[]>([]);
+  const [userOrders, setUserOrders] = useState<any[]>([]);
+  const [selectedOrderId, setSelectedOrderId] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [category, setCategory] = useState('WEIGHT_DISPUTE');
   const [description, setDescription] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchComplaints = async () => {
     try {
       const res = await fetch('/api/complaints');
       const data = await res.json();
-      if (data.success) setComplaints(data.data);
+      if (data.success) setComplaints(data.data || []);
     } catch (e) {
       console.error(e);
     } finally {
@@ -22,34 +26,59 @@ export default function CustomerSupportPage() {
     }
   };
 
+  const fetchUserOrders = async () => {
+    try {
+      const res = await fetch('/api/orders');
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) {
+        setUserOrders(data.data);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
     fetchComplaints();
+    fetchUserOrders();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!description) return;
+    if (!description.trim() || submitting) return;
+
+    setSubmitting(true);
+    setError(null);
+    setSubmitted(false);
 
     try {
+      const payload: any = {
+        category,
+        description: description.trim(),
+      };
+      if (selectedOrderId) {
+        payload.orderId = selectedOrderId;
+      }
+
       const res = await fetch('/api/complaints', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orderId: 'JIO-20260907-000124',
-          customerId: 'cust-1-uuid',
-          category,
-          description,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         setSubmitted(true);
         setDescription('');
+        setSelectedOrderId('');
         fetchComplaints();
+      } else {
+        setError(data.message || 'Failed to submit support ticket.');
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setError(err.message || 'Network error occurred while submitting ticket.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -64,50 +93,80 @@ export default function CustomerSupportPage() {
       <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
         <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
           <HelpCircle className="w-4 h-4 text-emerald-600" />
-          Report an Issue with a Pickup
+          Report an Issue or Submit Support Ticket
         </h3>
 
         {submitted && (
           <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl text-xs font-bold flex items-center gap-2">
             <CheckCircle className="w-4 h-4 text-emerald-600" />
-            <span>Complaint ticket submitted. Operations team will investigate immediately.</span>
+            <span>Complaint ticket submitted successfully. Operations team will investigate immediately.</span>
+          </div>
+        )}
+
+        {error && (
+          <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-bold flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{error}</span>
+            </div>
+            <button type="button" onClick={() => setError(null)} className="text-rose-600 font-extrabold text-sm">×</button>
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Issue Category:</label>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-800"
-            >
-              <option value="WEIGHT_DISPUTE">Wrong Weight Measured</option>
-              <option value="PAYMENT_ISSUE">Payment / Valuation Mismatch</option>
-              <option value="AGENT_BEHAVIOR">Agent Behavior Issue</option>
-              <option value="PICKUP_DELAY">Pickup Delay (Exceeded 30 mins)</option>
-              <option value="WASTE_NOT_COLLECTED">Waste Not Collected</option>
-              <option value="OTHER">Other Issue</option>
-            </select>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Issue Category:</label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-800"
+              >
+                <option value="WEIGHT_DISPUTE">Wrong Weight Measured</option>
+                <option value="PAYMENT_ISSUE">Payment / Valuation Mismatch</option>
+                <option value="AGENT_BEHAVIOR">Agent Behavior Issue</option>
+                <option value="PICKUP_DELAY">Pickup Delay (Exceeded 30 mins)</option>
+                <option value="WASTE_NOT_COLLECTED">Waste Not Collected</option>
+                <option value="General Inquiry">General Inquiry / Other</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Associated Pickup Order (Optional):</label>
+              <select
+                value={selectedOrderId}
+                onChange={(e) => setSelectedOrderId(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-800"
+              >
+                <option value="">General Support (No Order Selected)</option>
+                {userOrders.map((ord) => (
+                  <option key={ord.id} value={ord.id}>
+                    Order #{ord.orderNumber} ({new Date(ord.createdAt).toLocaleDateString('en-IN')})
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">Description:</label>
             <textarea
               rows={3}
+              required
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Provide specific details about your issue..."
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
             ></textarea>
           </div>
 
           <button
             type="submit"
-            className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-3.5 rounded-2xl shadow-md flex items-center justify-center gap-2"
+            disabled={submitting}
+            className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-500 text-white font-bold text-xs py-3.5 rounded-2xl shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
           >
-            <Send className="w-4 h-4 text-emerald-400" />
-            SUBMIT SUPPORT TICKET
+            <Send className={`w-4 h-4 text-emerald-400 ${submitting ? 'animate-spin' : ''}`} />
+            {submitting ? 'SUBMITTING TICKET...' : 'SUBMIT SUPPORT TICKET'}
           </button>
         </form>
       </div>

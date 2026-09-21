@@ -314,21 +314,28 @@ export default function OrderTrackingPage() {
   };
 
   const handleSubmitComplaint = async () => {
+    if (!complaintText.trim()) return;
     try {
-      await fetch('/api/complaints', {
+      const res = await fetch('/api/complaints', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           orderId: order.id,
-          customerId: order.customerId,
           category: 'WEIGHT_DISPUTE',
-          description: complaintText,
+          description: complaintText.trim(),
         }),
       });
-      setShowComplaintModal(false);
-      alert('Issue reported to Junk It Out support desk. We will investigate immediately.');
-    } catch (e) {
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setShowComplaintModal(false);
+        setComplaintText('');
+        alert('Issue reported to Junk It Out support desk. We will investigate immediately.');
+      } else {
+        alert(data.message || 'Failed to report issue. Please try again.');
+      }
+    } catch (e: any) {
       console.error(e);
+      alert('Failed to report issue. Please try again.');
     }
   };
 

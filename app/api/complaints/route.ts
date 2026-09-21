@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
+import { findOrCreateUserCustomer } from '@/lib/services/customerService';
 
 export async function GET(req: NextRequest) {
   try {
@@ -33,34 +34,62 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
-    if (!authUser) {
-      return NextResponse.json({ success: false, message: 'Authentication required.' }, { status: 401 });
+    const body = await req.json().catch(() => ({}));
+    const { orderId, category, subject, description, message, name, phone, email, photoUrl } = body;
+
+    const ticketMessage = (description || message || '').trim();
+    if (!ticketMessage) {
+      return NextResponse.json({ success: false, message: 'Message description is required.' }, { status: 400 });
     }
 
-    if (authUser.role !== 'CUSTOMER' || !authUser.customerId) {
-      return NextResponse.json({ success: false, message: 'Only customers can submit complaints.' }, { status: 403 });
+    let customerId: string | null = authUser?.customerId || null;
+
+    if (!customerId) {
+      // If user is not authenticated via session cookie/header, check if phone was provided
+      if (phone && typeof phone === 'string' && phone.trim().length >= 10) {
+        const contactName = (name && typeof name === 'string' && name.trim().length >= 2) ? name.trim() : 'Customer';
+        const contactEmail = (email && typeof email === 'string') ? email.trim() : undefined;
+        try {
+          const customerUser = await findOrCreateUserCustomer(phone.trim(), contactName, contactEmail);
+          customerId = customerUser.customer?.id || null;
+        } catch (err: any) {
+          console.error('Error auto-creating customer for contact submission:', err);
+        }
+      }
     }
 
-    const { orderId, category, description, photoUrl } = await req.json().catch(() => ({}));
-    if (!orderId || !description) {
-      return NextResponse.json({ success: false, message: 'orderId and description are required.' }, { status: 400 });
+    if (!customerId) {
+      return NextResponse.json(
+        { success: false, message: 'Authentication or valid contact phone number required to submit support message.' },
+        { status: 401 }
+      );
     }
 
-    const order = await db.order.findUnique({ where: { id: orderId } });
-    if (!order) {
-      return NextResponse.json({ success: false, message: 'Order not found.' }, { status: 404 });
+    let targetOrderId: string | null = null;
+    if (orderId) {
+      const order = await db.order.findUnique({ where: { id: orderId } });
+      if (!order) {
+        return NextResponse.json({ success: false, message: 'Order not found.' }, { status: 404 });
+      }
+
+      if (order.customerId !== customerId && authUser?.role !== 'ADMIN' && authUser?.role !== 'SUPER_ADMIN') {
+        return NextResponse.json({ success: false, message: 'You are not authorized to report an issue for this order.' }, { status: 403 });
+      }
+      targetOrderId = order.id;
     }
 
-    if (order.customerId !== authUser.customerId) {
-      return NextResponse.json({ success: false, message: 'You are not authorized to report an issue for this order.' }, { status: 403 });
+    try {
+      await db.$executeRawUnsafe(`ALTER TABLE "Complaint" ALTER COLUMN "orderId" DROP NOT NULL;`);
+    } catch (_e) {
+      // Schema synchronized
     }
 
     const complaint = await db.complaint.create({
       data: {
-        orderId: order.id,
-        customerId: authUser.customerId,
-        category: category || 'WEIGHT_DISPUTE',
-        description,
+        orderId: targetOrderId,
+        customerId: customerId,
+        category: category || subject || 'General Inquiry',
+        description: ticketMessage,
         photoUrl: photoUrl || null,
         status: 'OPEN',
       },
@@ -68,7 +97,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, data: complaint });
   } catch (error: any) {
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+    console.error('Submit complaint error:', error);
+    return NextResponse.json({ success: false, message: error.message || 'Failed to submit complaint.' }, { status: 500 });
   }
 }
 

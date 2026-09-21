@@ -5,6 +5,8 @@ import { Phone, Mail, MapPin, Clock, Send, CheckCircle2 } from 'lucide-react';
 
 export default function ContactPage() {
   const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
@@ -13,9 +15,44 @@ export default function ContactPage() {
     message: '',
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitted(true);
+    if (loading) return;
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch('/api/complaints', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: formData.name,
+          phone: formData.phone,
+          email: formData.email,
+          subject: formData.subject,
+          category: formData.subject,
+          description: formData.message,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSubmitted(true);
+        setFormData({
+          name: '',
+          phone: '',
+          email: '',
+          subject: 'General Inquiry',
+          message: '',
+        });
+      } else {
+        setError(data.message || 'Failed to send message. Please try again.');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Network error. Failed to send message.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -129,6 +166,12 @@ export default function ContactPage() {
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-4">
+                {error && (
+                  <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-bold flex items-center justify-between">
+                    <span>{error}</span>
+                    <button type="button" onClick={() => setError(null)} className="text-rose-600 font-extrabold text-sm ml-2">×</button>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Your Name</label>
@@ -197,10 +240,11 @@ export default function ContactPage() {
 
                 <button
                   type="submit"
-                  className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-3 rounded-xl shadow-sm flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+                  disabled={loading}
+                  className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-500 text-white font-bold text-xs py-3 rounded-xl shadow-sm flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer disabled:cursor-not-allowed"
                 >
-                  <Send className="w-4 h-4 text-emerald-400" />
-                  Send Message
+                  <Send className={`w-4 h-4 text-emerald-400 ${loading ? 'animate-spin' : ''}`} />
+                  {loading ? 'Sending Message...' : 'Send Message'}
                 </button>
               </form>
             )}
