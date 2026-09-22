@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
           ...(isAuthorizedAdminNumber ? [{ email: adminEmail }] : []),
         ],
       },
-      include: { admin: true, customer: true, agent: true },
+      include: { admin: true, customer: true },
     });
 
     if (isAuthorizedAdminNumber) {
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
               },
             },
           },
-          include: { admin: true, customer: true, agent: true },
+          include: { admin: true, customer: true },
         });
       } else {
         let adminRecord = user.admin || (await db.admin.findUnique({ where: { userId: user.id } }));
@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
             phone: user.phone || `+91${rawDigits}`,
             role: 'SUPER_ADMIN',
           },
-          include: { admin: true, customer: true, agent: true },
+          include: { admin: true, customer: true },
         });
 
         if (!user.admin && adminRecord) {
@@ -133,7 +133,7 @@ export async function POST(req: NextRequest) {
       name: user.name,
       role: user.role as 'ADMIN' | 'SUPER_ADMIN',
       customerId: user.customer?.id ?? null,
-      agentId: user.agent?.id ?? null,
+      agentId: null,
       adminId: adminRecord.id,
     });
 
