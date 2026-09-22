@@ -1,13 +1,18 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Users, Truck, Star, Phone, MapPin, RefreshCw, Plus, AlertCircle } from 'lucide-react';
+import { Users, Truck, Star, Phone, MapPin, RefreshCw, Plus, AlertCircle, UserX, Loader2 } from 'lucide-react';
 import { adminFetch } from '@/lib/api';
 
 export default function AdminAgentsPage() {
   const [agents, setAgents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Remove agent state
+  const [removeTarget, setRemoveTarget] = useState<any | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [removeMessage, setRemoveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Add agent modal state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -56,6 +61,33 @@ export default function AdminAgentsPage() {
     }
   };
 
+  const handleConfirmRemove = async () => {
+    if (!removeTarget) return;
+    setRemoving(true);
+    setRemoveMessage(null);
+    try {
+      const res = await adminFetch('/api/admin/agents', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: removeTarget.id, status: 'OFFLINE' }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setRemoveMessage({ type: 'success', text: 'Agent removed from active fleet.' });
+        setTimeout(() => {
+          setRemoveTarget(null);
+          loadAgents();
+        }, 1200);
+      } else {
+        setRemoveMessage({ type: 'error', text: data.message || 'Failed to remove agent.' });
+      }
+    } catch (e: any) {
+      setRemoveMessage({ type: 'error', text: e.message || 'Error connecting to server.' });
+    } finally {
+      setRemoving(false);
+    }
+  };
+
   const handleAddAgent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !phone) return;
@@ -92,14 +124,14 @@ export default function AdminAgentsPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => setShowAddModal(true)}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md flex items-center gap-2"
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md flex items-center gap-2 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             REGISTER NEW AGENT
           </button>
           <button
             onClick={loadAgents}
-            className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2"
+            className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             Refresh
@@ -159,12 +191,25 @@ export default function AdminAgentsPage() {
                       </span>
                     </td>
                     <td className="p-3">
-                      <button
-                        onClick={() => toggleAgentStatus(ag.id, ag.status)}
-                        className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-3 py-1.5 rounded-lg text-[11px] font-bold"
-                      >
-                        Toggle {ag.status === 'OFFLINE' ? 'Online' : 'Offline'}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => toggleAgentStatus(ag.id, ag.status)}
+                          className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer"
+                        >
+                          Toggle {ag.status === 'OFFLINE' ? 'Online' : 'Offline'}
+                        </button>
+                        {ag.status !== 'OFFLINE' && (
+                          <button
+                            onClick={() => {
+                              setRemoveTarget(ag);
+                              setRemoveMessage(null);
+                            }}
+                            className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition-colors"
+                          >
+                            Remove Agent
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -173,6 +218,60 @@ export default function AdminAgentsPage() {
           </table>
         </div>
       </div>
+
+      {removeTarget && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-base font-extrabold text-slate-900">Remove Agent?</h3>
+              <button
+                type="button"
+                onClick={() => setRemoveTarget(null)}
+                disabled={removing}
+                className="text-slate-400 hover:text-slate-600 text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              This will remove <strong className="text-slate-900 font-bold">{removeTarget.name}</strong> from active fleet operations. Existing order history will be preserved.
+            </p>
+
+            {removeMessage && (
+              <div
+                className={`p-3 rounded-xl text-xs font-bold ${
+                  removeMessage.type === 'success'
+                    ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                    : 'bg-rose-50 border border-rose-200 text-rose-800'
+                }`}
+              >
+                {removeMessage.text}
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setRemoveTarget(null)}
+                disabled={removing}
+                className="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2.5 rounded-xl disabled:opacity-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRemove}
+                disabled={removing}
+                className="w-1/2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs py-2.5 rounded-xl shadow-md disabled:opacity-50 flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {removing ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserX className="w-4 h-4" />}
+                {removing ? 'Removing...' : 'Remove Agent'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showAddModal && (
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
