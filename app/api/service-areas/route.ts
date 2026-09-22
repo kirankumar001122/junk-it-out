@@ -34,9 +34,26 @@ export async function PUT(req: NextRequest) {
       return errorResponse('BAD_REQUEST', 'Valid ServiceArea ID and status (ACTIVE | INACTIVE) required.', 400);
     }
 
-    const updated = await db.serviceArea.update({
+    const defaultZone = SOUTH_BENGALURU_ZONES.find((z) => z.id === id);
+    const existing = await db.serviceArea.findUnique({ where: { id } });
+
+    if (!existing && !defaultZone) {
+      return errorResponse('NOT_FOUND', 'Service area not found.', 404);
+    }
+
+    const updated = await db.serviceArea.upsert({
       where: { id },
-      data: { status },
+      update: { status },
+      create: {
+        id,
+        name: defaultZone?.name || id,
+        status,
+        etaMinutes: defaultZone?.etaMinutes || 25,
+        basePickupCharge: defaultZone?.basePickupCharge || 49,
+        boundaryPolygon: defaultZone?.boundaryPolygon ? JSON.stringify(defaultZone.boundaryPolygon) : '[]',
+        centerLat: defaultZone?.centerLat || 12.9166,
+        centerLng: defaultZone?.centerLng || 77.5996,
+      },
     });
 
     return successResponse(updated);
