@@ -6,16 +6,24 @@ import { getAuthUser } from '@/lib/auth/middleware';
 
 export async function GET(req: NextRequest) {
   try {
-    const areas = await db.serviceArea.findMany({
-      orderBy: { name: 'asc' },
+    const dbAreas = await db.serviceArea.findMany();
+    const dbAreaMap = new Map(dbAreas.map((a) => [a.id, a]));
+
+    const mergedZones = SOUTH_BENGALURU_ZONES.map((z) => {
+      const dbRecord = dbAreaMap.get(z.id);
+      if (dbRecord) {
+        return {
+          ...z,
+          status: dbRecord.status as 'ACTIVE' | 'INACTIVE' | 'TEMPORARY_BLOCKED',
+          name: dbRecord.name || z.name,
+          etaMinutes: dbRecord.etaMinutes ?? z.etaMinutes,
+          basePickupCharge: dbRecord.basePickupCharge ?? z.basePickupCharge,
+        };
+      }
+      return z;
     });
 
-    if (areas.length === 0) {
-      // Fallback to initial South Bengaluru zones list
-      return successResponse(SOUTH_BENGALURU_ZONES);
-    }
-
-    return successResponse(areas);
+    return successResponse(mergedZones);
   } catch (err: any) {
     return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to fetch service areas.', 500);
   }
