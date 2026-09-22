@@ -1,21 +1,42 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { ShieldCheck, Smartphone, KeyRound, ArrowRight, Loader2 } from 'lucide-react';
+import { ShieldCheck, Smartphone, KeyRound, ArrowRight, Loader2, RotateCw } from 'lucide-react';
 import { adminFetch } from '@/lib/api';
 
 export default function AdminLoginPage() {
   const router = useRouter();
   const [phone, setPhone] = useState('');
+  const [sentPhone, setSentPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [cooldown, setCooldown] = useState(0);
 
-  const handleSendOtp = async (e: FormEvent) => {
-    e.preventDefault();
+  const isSubmittingRef = useRef(false);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = window.setInterval(() => {
+      setCooldown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [cooldown]);
+
+  const handleSendOtp = async (e?: FormEvent) => {
+    if (e) e.preventDefault();
+    if (isSubmittingRef.current || loading) return;
+
+    const trimmedPhone = phone.trim();
+    if (!trimmedPhone) {
+      setError('Please enter your admin phone number.');
+      return;
+    }
+
+    isSubmittingRef.current = true;
     setError(null);
     setInfo(null);
     setLoading(true);
@@ -24,26 +45,69 @@ export default function AdminLoginPage() {
       const res = await adminFetch('/api/auth/send-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone }),
+        body: JSON.stringify({ phone: trimmedPhone }),
       });
       const data = await res.json();
 
-      if (!data.success) {
-        setError(data.error?.message || 'Failed to send OTP.');
+      if (!res.ok || !data.success) {
+        setError(data.error?.message || data.message || 'Failed to send OTP.');
         return;
       }
 
+      setSentPhone(trimmedPhone);
       setOtpSent(true);
       setInfo('OTP sent to your registered admin phone.');
+      setCooldown(Number(data.data?.cooldownSeconds) || 30);
     } catch {
       setError('Network error while sending OTP.');
     } finally {
       setLoading(false);
+      isSubmittingRef.current = false;
     }
   };
 
-  const handleVerifyOtp = async (e: FormEvent) => {
-    e.preventDefault();
+  const handleResendOtp = async () => {
+    if (isSubmittingRef.current || loading || cooldown > 0 || !sentPhone) return;
+
+    isSubmittingRef.current = true;
+    setError(null);
+    setInfo(null);
+    setLoading(true);
+
+    try {
+      const res = await adminFetch('/api/auth/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: sentPhone }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        setError(data.error?.message || data.message || 'Failed to resend OTP.');
+        return;
+      }
+
+      setInfo('A new OTP has been sent. Please use the latest OTP. The previous OTP is no longer valid.');
+      setCooldown(Number(data.data?.cooldownSeconds) || 30);
+    } catch {
+      setError('Network error while resending OTP.');
+    } finally {
+      setLoading(false);
+      isSubmittingRef.current = false;
+    }
+  };
+
+  const handleVerifyOtp = async (e?: FormEvent) => {
+    if (e) e.preventDefault();
+    if (isSubmittingRef.current || loading) return;
+
+    const cleanOtp = otp.trim();
+    if (!cleanOtp) {
+      setError('Please enter the 6-digit OTP code.');
+      return;
+    }
+
+    isSubmittingRef.current = true;
     setError(null);
     setInfo(null);
     setLoading(true);
@@ -52,12 +116,12 @@ export default function AdminLoginPage() {
       const res = await adminFetch('/api/auth/admin-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, code: otp }),
+        body: JSON.stringify({ phone: sentPhone || phone.trim(), code: cleanOtp }),
       });
       const data = await res.json();
 
-      if (!data.success) {
-        setError(data.error?.message || 'Admin login failed.');
+      if (!res.ok || !data.success) {
+        setError(data.error?.message || data.message || 'Admin login failed.');
         return;
       }
 
@@ -66,7 +130,18 @@ export default function AdminLoginPage() {
       setError('Network error while verifying OTP.');
     } finally {
       setLoading(false);
+      isSubmittingRef.current = false;
     }
+  };
+
+  const handleChangePhone = () => {
+    if (loading) return;
+    setOtpSent(false);
+    setSentPhone('');
+    setOtp('');
+    setError(null);
+    setInfo(null);
+    setCooldown(0);
   };
 
   return (
@@ -92,11 +167,11 @@ export default function AdminLoginPage() {
               <Smartphone className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="tel"
-                value={phone}
+                value={otpSent ? sentPhone : phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="+91XXXXXXXXXX"
                 required
-                disabled={otpSent && loading}
+                disabled={otpSent || loading}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2.5 text-sm font-semibold text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
               />
             </div>
@@ -109,12 +184,14 @@ export default function AdminLoginPage() {
                 <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
+                  inputMode="numeric"
                   value={otp}
                   onChange={(e) => setOtp(e.target.value)}
                   placeholder="Enter OTP"
                   maxLength={6}
                   required
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2.5 text-sm font-semibold text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  disabled={loading}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2.5 text-sm font-semibold text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
                 />
               </div>
             </div>
@@ -135,7 +212,7 @@ export default function AdminLoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
           >
             {loading ? (
               <>
@@ -154,8 +231,30 @@ export default function AdminLoginPage() {
               </>
             )}
           </button>
-        </form>
 
+          {otpSent && (
+            <div className="flex items-center justify-between pt-1">
+              <button
+                type="button"
+                onClick={handleChangePhone}
+                disabled={loading}
+                className="text-xs font-bold text-slate-400 hover:text-white py-1 disabled:opacity-50 cursor-pointer"
+              >
+                Change phone number
+              </button>
+
+              <button
+                type="button"
+                onClick={handleResendOtp}
+                disabled={loading || cooldown > 0}
+                className="text-xs font-bold text-emerald-400 hover:text-emerald-300 disabled:text-slate-600 py-1 flex items-center gap-1 cursor-pointer"
+              >
+                <RotateCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+                {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend OTP'}
+              </button>
+            </div>
+          )}
+        </form>
       </div>
     </div>
   );
