@@ -91,6 +91,24 @@ export async function PUT(req: NextRequest) {
         ...(vehicleNumber ? { vehicleNumber } : {}),
         ...(serviceAreas ? { serviceAreas } : {}),
       },
+      select: {
+        id: true,
+        userId: true,
+        vehicleType: true,
+        vehicleNumber: true,
+        status: true,
+        currentLat: true,
+        currentLng: true,
+        rating: true,
+        serviceAreas: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+          },
+        },
+      },
     });
 
     return successResponse(updated);
