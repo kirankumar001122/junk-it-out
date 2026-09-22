@@ -28,22 +28,32 @@ export async function GET(req: NextRequest) {
 
     const formatted = customers.map((c) => {
       const primaryAddress = c.user.addresses.find((a) => a.isDefault) || c.user.addresses[0];
+      const area = primaryAddress ? `${primaryAddress.area}, ${primaryAddress.city}` : 'South Bengaluru';
+      const createdAtDate = c.createdAt || c.user.createdAt;
+      const totalOrders = c.orders.length;
+
       return {
         id: c.id,
         userId: c.userId,
         name: c.user.name,
         phone: c.user.phone,
         email: c.user.email || '—',
+        totalOrders: totalOrders,
+        totalOrdersCount: totalOrders,
         pickupsCount: c.orders.filter((o) => o.status === 'PICKUP_COMPLETED' || o.status === 'SETTLEMENT_COMPLETED').length,
-        totalOrdersCount: c.orders.length,
         points: c.points,
         status: 'ACTIVE',
-        joinedDate: new Date(c.createdAt).toLocaleDateString('en-IN', {
-          year: 'numeric',
-          month: 'short',
-          day: '2-digit',
-        }),
-        area: primaryAddress ? `${primaryAddress.area}, ${primaryAddress.city}` : 'South Bengaluru',
+        createdAt: createdAtDate ? createdAtDate.toISOString() : null,
+        joinedDate: createdAtDate
+          ? new Date(createdAtDate).toLocaleDateString('en-IN', {
+              year: 'numeric',
+              month: 'short',
+              day: '2-digit',
+            })
+          : 'N/A',
+        area: area,
+        defaultArea: area,
+        primaryArea: area,
         addressesCount: c.user.addresses.length,
       };
     });

@@ -97,10 +97,12 @@ export default function AdminCustomersPage() {
                   <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="p-3 font-bold text-slate-900">{c.name || 'Customer'}</td>
                     <td className="p-3 font-mono text-slate-600">{c.phone}</td>
-                    <td className="p-3 text-slate-700">{c.defaultArea || 'South Bengaluru'}</td>
-                    <td className="p-3 font-bold text-emerald-700">{c.totalOrders || 0} Pickups</td>
+                    <td className="p-3 text-slate-700">{c.primaryArea || c.area || c.defaultArea || 'South Bengaluru'}</td>
+                    <td className="p-3 font-bold text-emerald-700">
+                      {typeof c.totalOrders === 'number' ? c.totalOrders : typeof c.totalOrdersCount === 'number' ? c.totalOrdersCount : 0} Pickups
+                    </td>
                     <td className="p-3 text-slate-500">
-                      {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : 'N/A'}
+                      {c.joinedDate || (c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A')}
                     </td>
                   </tr>
                 ))
