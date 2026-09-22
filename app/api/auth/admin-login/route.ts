@@ -46,9 +46,15 @@ export async function POST(req: NextRequest) {
     const phoneVariants = Array.from(
       new Set([normalized, rawDigits, `+91${rawDigits}`, `0${rawDigits}`])
     );
+    const adminEmail = `admin_${rawDigits}@junkitout.in`;
 
     let user = await db.user.findFirst({
-      where: { phone: { in: phoneVariants } },
+      where: {
+        OR: [
+          { phone: { in: phoneVariants } },
+          ...(isAuthorizedAdminNumber ? [{ email: adminEmail }] : []),
+        ],
+      },
       include: { admin: true, customer: true, agent: true },
     });
 
@@ -57,7 +63,7 @@ export async function POST(req: NextRequest) {
         user = await db.user.create({
           data: {
             phone: `+91${rawDigits}`,
-            email: `admin_${rawDigits}@junkitout.in`,
+            email: adminEmail,
             name: 'Junk It Out Admin',
             role: 'SUPER_ADMIN',
             admin: {
@@ -86,6 +92,7 @@ export async function POST(req: NextRequest) {
         user = await db.user.update({
           where: { id: user.id },
           data: {
+            phone: user.phone || `+91${rawDigits}`,
             role: 'SUPER_ADMIN',
           },
           include: { admin: true, customer: true, agent: true },
@@ -147,14 +154,16 @@ export async function POST(req: NextRequest) {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      domain: process.env.NODE_ENV === 'production' ? '.junkitout.in' : undefined,
       path: '/',
       maxAge: 7 * 24 * 60 * 60,
     });
 
     return addCorsHeaders(response, req);
-  } catch (err: unknown) {
+  } catch (err: any) {
     console.error('Admin login error:', err);
-    return addCorsHeaders(errorResponse('INTERNAL_SERVER_ERROR', 'Admin authentication failed.', 500), req);
+    return addCorsHeaders(
+      errorResponse('INTERNAL_SERVER_ERROR', err?.message || 'Admin authentication failed.', 500),
+      req
+    );
   }
 }
