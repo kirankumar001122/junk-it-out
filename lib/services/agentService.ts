@@ -2,8 +2,23 @@ import { db } from '../db';
 
 export async function getActiveAgents(serviceAreaName?: string) {
   const agents = await db.agent.findMany({
-    include: {
-      user: true,
+    select: {
+      id: true,
+      userId: true,
+      vehicleType: true,
+      vehicleNumber: true,
+      status: true,
+      currentLat: true,
+      currentLng: true,
+      rating: true,
+      serviceAreas: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+        },
+      },
       orders: {
         where: {
           status: { in: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WEIGHING'] },
@@ -53,8 +68,23 @@ export async function findEligibleAgentsForServiceArea(serviceAreaName?: string)
       where: {
         status: 'AVAILABLE',
       },
-      include: {
-        user: true,
+      select: {
+        id: true,
+        userId: true,
+        vehicleType: true,
+        vehicleNumber: true,
+        status: true,
+        currentLat: true,
+        currentLng: true,
+        rating: true,
+        serviceAreas: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+          },
+        },
       },
     });
 

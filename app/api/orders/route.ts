@@ -52,7 +52,26 @@ export async function GET(req: NextRequest) {
       where: whereClause,
       include: {
         customer: { include: { user: true } },
-        agent: { include: { user: true } },
+        agent: {
+          select: {
+            id: true,
+            userId: true,
+            vehicleType: true,
+            vehicleNumber: true,
+            status: true,
+            currentLat: true,
+            currentLng: true,
+            rating: true,
+            serviceAreas: true,
+            user: {
+              select: {
+                id: true,
+                name: true,
+                phone: true,
+              },
+            },
+          },
+        },
         address: true,
         items: { include: { category: true } },
         statusHistory: { orderBy: { timestamp: 'desc' } },
