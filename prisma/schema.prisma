@@ -1,79 +1,75 @@
-datasource db {
-  provider = "postgresql"
- url      = env("DATABASE_URL")
-}
-
 generator client {
   provider = "prisma-client-js"
 }
 
-model User {
-  id           String   @id @default(uuid())
-  phone        String   @unique
-  email        String?  @unique
-  name         String
-  passwordHash String?
-  role         String   @default("CUSTOMER") // CUSTOMER, AGENT, ADMIN, SUPER_ADMIN
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
 
-  customer           Customer?
-  agent              Agent?
-  admin              Admin?
+model User {
+  id                 String               @id @default(uuid())
+  phone              String               @unique
+  email              String?              @unique
+  name               String
+  passwordHash       String?
+  role               String               @default("CUSTOMER")
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
   addresses          Address[]
-  notifications      Notification[]
+  admin              Admin?
+  agent              Agent?
   auditLogs          AuditLog[]
+  customer           Customer?
+  notifications      Notification[]
   orderStatusChanges OrderStatusHistory[]
   weightRecords      WeightRecord[]
 }
 
 model Customer {
-  id           String   @id @default(uuid())
-  userId       String   @unique
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  referralCode String?  @unique
-  points       Int      @default(0)
-  createdAt    DateTime @default(now())
-
-  orders     Order[]
-  complaints Complaint[]
-  reviews    Review[]
-  settlements Settlement[]
+  id           String       @id @default(uuid())
+  userId       String       @unique
+  referralCode String?      @unique
+  points       Int          @default(0)
+  createdAt    DateTime     @default(now())
+  complaints   Complaint[]
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders       Order[]
+  reviews      Review[]
+  settlements  Settlement[]
 }
 
 model Agent {
-  id            String   @id @default(uuid())
-  userId        String   @unique
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  vehicleType   String   @default("Three-Wheeler Auto Loading")
-  vehicleNumber String   @default("KA-05-JK-1024")
-  status        String   @default("OFFLINE") // AVAILABLE, ASSIGNED, EN_ROUTE, ARRIVED, OFFLINE
-  currentLat    Float    @default(12.9166)
-  currentLng    Float    @default(77.5996)
-  rating        Float    @default(4.9)
-  serviceAreas  String   @default("JP Nagar, Jayanagar, Koramangala, Electronic City")
-  tokenVersion  Int      @default(1)
-  createdAt     DateTime @default(now())
-
-  orders    Order[]
-  locations AgentLocation[]
-  reviews   Review[]
+  id            String          @id @default(uuid())
+  userId        String          @unique
+  vehicleType   String          @default("Three-Wheeler Auto Loading")
+  vehicleNumber String          @default("KA-05-JK-1024")
+  status        String          @default("OFFLINE")
+  currentLat    Float           @default(12.9166)
+  currentLng    Float           @default(77.5996)
+  rating        Float           @default(4.9)
+  serviceAreas  String          @default("JP Nagar, Jayanagar, Koramangala, Electronic City")
+  tokenVersion  Int             @default(1)
+  createdAt     DateTime        @default(now())
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  locations     AgentLocation[]
+  orders        Order[]
+  reviews       Review[]
 }
 
 model Admin {
   id          String   @id @default(uuid())
   userId      String   @unique
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   department  String   @default("Operations")
   accessLevel String   @default("FULL")
   createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Address {
   id                 String   @id @default(uuid())
   userId             String
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  label              String   @default("Home") // Home, Work, Other
+  label              String   @default("Home")
   name               String
   phone              String
   houseNo            String
@@ -89,38 +85,36 @@ model Address {
   pickupInstructions String?
   isDefault          Boolean  @default(false)
   createdAt          DateTime @default(now())
-
-  orders Order[]
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders             Order[]
 }
 
 model ServiceArea {
-  id                String   @id @default(uuid())
-  name              String   @unique // e.g. JP Nagar, Electronic City
-  city              String   @default("Bengaluru")
-  status            String   @default("ACTIVE") // ACTIVE, INACTIVE, TEMPORARY_BLOCKED
-  etaMinutes        Int      @default(25)
-  basePickupCharge  Float    @default(49.0)
-  boundaryPolygon   String   // JSON Array of [lat, lng] points
-  centerLat         Float    @default(12.9166)
-  centerLng         Float    @default(77.5996)
-  pricingMultiplier Float    @default(1.0)
-  createdAt         DateTime @default(now())
-
-  pricingRules PricingRule[]
+  id                String        @id @default(uuid())
+  name              String        @unique
+  city              String        @default("Bengaluru")
+  status            String        @default("ACTIVE")
+  etaMinutes        Int           @default(25)
+  basePickupCharge  Float         @default(49.0)
+  boundaryPolygon   String
+  centerLat         Float         @default(12.9166)
+  centerLng         Float         @default(77.5996)
+  pricingMultiplier Float         @default(1.0)
+  createdAt         DateTime      @default(now())
+  pricingRules      PricingRule[]
 }
 
 model WasteCategory {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  description String
-  icon        String   @default("Trash2")
-  type        String   @default("RECYCLABLE_BUY") // RECYCLABLE_BUY (we pay customer) or WASTE_CHARGE (customer pays us)
-  pricePerKg  Float    @default(20.0) // Rate in INR per kg
-  minWeightKg Float    @default(1.0)
-  maxWeightKg Float    @default(500.0)
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-
+  id           String        @id @default(uuid())
+  name         String        @unique
+  description  String
+  icon         String        @default("Trash2")
+  type         String        @default("RECYCLABLE_BUY")
+  pricePerKg   Float         @default(20.0)
+  minWeightKg  Float         @default(1.0)
+  maxWeightKg  Float         @default(500.0)
+  active       Boolean       @default(true)
+  createdAt    DateTime      @default(now())
   orderItems   OrderItem[]
   pricingRules PricingRule[]
 }
@@ -128,151 +122,150 @@ model WasteCategory {
 model PricingRule {
   id              String        @id @default(uuid())
   categoryId      String
-  category        WasteCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   serviceAreaId   String?
-  serviceArea     ServiceArea?  @relation(fields: [serviceAreaId], references: [id], onDelete: SetNull)
   ratePerKg       Float
   pickupCharge    Float         @default(49.0)
   minPickupCharge Float         @default(49.0)
   urgentSurcharge Float         @default(0.0)
   createdAt       DateTime      @default(now())
+  category        WasteCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  serviceArea     ServiceArea?  @relation(fields: [serviceAreaId], references: [id])
 }
 
 model Order {
-  id                 String   @id @default(uuid())
-  orderNumber        String   @unique // JIO-YYYYMMDD-XXXXXX
+  id                 String               @id @default(uuid())
+  orderNumber        String               @unique
   customerId         String
-  customer           Customer @relation(fields: [customerId], references: [id])
   agentId            String?
-  agent              Agent?   @relation(fields: [agentId], references: [id])
   addressId          String
-  address            Address  @relation(fields: [addressId], references: [id])
-  pickupType         String   @default("ASAP") // ASAP or SCHEDULED
+  pickupType         String               @default("ASAP")
   scheduledSlot      String?
-  status             String   @default("BOOKING_RECEIVED") // BOOKING_RECEIVED, AGENT_BEING_ASSIGNED, AGENT_ASSIGNED, AGENT_ON_WAY, AGENT_ARRIVED, WASTE_VERIFICATION, WEIGHING, PICKUP_COMPLETED, SETTLEMENT_COMPLETED, CANCELLED
-  financialDirection String   @default("JUNKITOUT_PAYS") // CUSTOMER_PAYS or JUNKITOUT_PAYS
-  estimatedTotal     Float    @default(0.0)
-  actualTotal        Float    @default(0.0)
-  pickupCharge       Float    @default(49.0)
-  discountAmount     Float    @default(0.0)
-  finalAmount        Float    @default(0.0)
-  paymentStatus      String   @default("PENDING") // PENDING, INITIATED, AUTHORIZED, CAPTURED, FAILED, CANCELLED, REFUNDED, SETTLEMENT_PENDING, SETTLEMENT_COMPLETED
-  wastePhotos        String   @default("[]") // JSON Array of URLs
+  status             String               @default("BOOKING_RECEIVED")
+  financialDirection String               @default("JUNKITOUT_PAYS")
+  estimatedTotal     Float                @default(0.0)
+  actualTotal        Float                @default(0.0)
+  pickupCharge       Float                @default(49.0)
+  discountAmount     Float                @default(0.0)
+  finalAmount        Float                @default(0.0)
+  paymentStatus      String               @default("PENDING")
+  wastePhotos        String               @default("[]")
   cancellationReason String?
   notes              String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-
-  items         OrderItem[]
-  weightRecords WeightRecord[]
-  payments      Payment[]
-  statusHistory OrderStatusHistory[]
-  notifications Notification[]
-  complaints    Complaint[]
-  reviews       Review[]
-  invoices      Invoice[]
-  locations     AgentLocation[]
-  settlement    Settlement?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  locations          AgentLocation[]
+  complaints         Complaint[]
+  invoices           Invoice[]
+  notifications      Notification[]
+  address            Address              @relation(fields: [addressId], references: [id])
+  agent              Agent?               @relation(fields: [agentId], references: [id])
+  customer           Customer             @relation(fields: [customerId], references: [id])
+  items              OrderItem[]
+  statusHistory      OrderStatusHistory[]
+  payments           Payment[]
+  reviews            Review?
+  settlement         Settlement?
+  weightRecords      WeightRecord[]
 }
 
 model OrderItem {
   id              String        @id @default(uuid())
   orderId         String
-  order           Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
   categoryId      String
-  category        WasteCategory @relation(fields: [categoryId], references: [id])
   estimatedWeight Float         @default(5.0)
   actualWeight    Float?
   ratePerKg       Float         @default(20.0)
   subtotal        Float         @default(0.0)
+  category        WasteCategory @relation(fields: [categoryId], references: [id])
+  order           Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }
 
 model WeightRecord {
   id               String   @id @default(uuid())
   orderId          String
-  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   recordedByUserId String
-  recordedBy       User     @relation(fields: [recordedByUserId], references: [id])
   scalePhotoUrl    String?
-  weightJson       String   // JSON of items actual weights breakdown
+  weightJson       String
   notes            String?
   createdAt        DateTime @default(now())
+  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  recordedBy       User     @relation(fields: [recordedByUserId], references: [id])
 }
 
 model Payment {
   id             String   @id @default(uuid())
   orderId        String
-  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   amount         Float
-  direction      String   @default("JUNKITOUT_PAYS") // CUSTOMER_PAYS or JUNKITOUT_PAYS
+  direction      String   @default("JUNKITOUT_PAYS")
   gateway        String   @default("RAZORPAY")
   gatewayOrderId String?
   paymentId      String?
   signature      String?
-  status         String   @default("PENDING") // PENDING, INITIATED, AUTHORIZED, CAPTURED, FAILED, CANCELLED, REFUNDED, SETTLEMENT_PENDING, SETTLEMENT_COMPLETED
+  status         String   @default("PENDING")
   createdAt      DateTime @default(now())
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }
 
 model Settlement {
-  id             String   @id @default(uuid())
-  orderId        String   @unique
-  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  customerId     String
-  customer       Customer @relation(fields: [customerId], references: [id])
-  totalWeightKg  Float
-  amount         Float
-  breakdownJson  String
-  status         String   @default("PENDING") // PENDING, APPROVED, READY_FOR_PAYOUT, PAID
-  createdAt      DateTime @default(now())
-  approvedAt     DateTime?
-  paidAt         DateTime?
+  id            String    @id @default(uuid())
+  orderId       String    @unique
+  customerId    String
+  totalWeightKg Float
+  amount        Float
+  breakdownJson String
+  status        String    @default("PENDING")
+  createdAt     DateTime  @default(now())
+  approvedAt    DateTime?
+  paidAt        DateTime?
+  customer      Customer  @relation(fields: [customerId], references: [id])
+  order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }
 
 model AgentLocation {
   id        String   @id @default(uuid())
   agentId   String
-  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
   orderId   String?
-  order     Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
   lat       Float
   lng       Float
   speed     Float?   @default(0.0)
   timestamp DateTime @default(now())
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  order     Order?   @relation(fields: [orderId], references: [id])
 }
 
 model OrderStatusHistory {
   id              String   @id @default(uuid())
   orderId         String
-  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   oldStatus       String?
   newStatus       String
   changedByUserId String?
-  changedBy       User?    @relation(fields: [changedByUserId], references: [id])
   notes           String?
   timestamp       DateTime @default(now())
+  changedBy       User?    @relation(fields: [changedByUserId], references: [id])
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }
 
 model Notification {
   id                String   @id @default(uuid())
   userId            String
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   orderId           String?
-  order             Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  type              String   @default("WHATSAPP") // SMS, WHATSAPP, EMAIL
+  type              String   @default("WHATSAPP")
   recipient         String
   content           String
-  status            String   @default("SENT") // SENT, FAILED
+  status            String   @default("SENT")
   provider          String?  @default("FAST2SMS")
   providerRequestId String?
-  deliveryStatus    String?  @default("sent") // sent, delivered, read, failed
+  deliveryStatus    String?  @default("sent")
   statusDescription String?
   sentAt            DateTime @default(now())
+  order             Order?   @relation(fields: [orderId], references: [id])
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Coupon {
   id            String    @id @default(uuid())
   code          String    @unique
-  discountType  String    @default("FLAT") // FLAT or PERCENTAGE
+  discountType  String    @default("FLAT")
   discountValue Float     @default(50.0)
   minOrderValue Float     @default(100.0)
   maxDiscount   Float?    @default(100.0)
@@ -284,49 +277,49 @@ model Coupon {
 model Complaint {
   id              String   @id @default(uuid())
   orderId         String?
-  order           Order?   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   customerId      String
-  customer        Customer @relation(fields: [customerId], references: [id])
-  category        String   @default("WEIGHT_DISPUTE") // WEIGHT_DISPUTE, AGENT_BEHAVIOR, DELAY, PAYMENT
+  category        String   @default("WEIGHT_DISPUTE")
   description     String
   photoUrl        String?
-  status          String   @default("OPEN") // OPEN, ASSIGNED, INVESTIGATING, RESOLVED, CLOSED
+  status          String   @default("OPEN")
   resolutionNotes String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  customer        Customer @relation(fields: [customerId], references: [id])
+  order           Order?   @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }
 
 model Review {
   id         String   @id @default(uuid())
   orderId    String   @unique
-  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   customerId String
-  customer   Customer @relation(fields: [customerId], references: [id])
   agentId    String
-  agent      Agent    @relation(fields: [agentId], references: [id])
   rating     Int      @default(5)
   comment    String?
   createdAt  DateTime @default(now())
+  agent      Agent    @relation(fields: [agentId], references: [id])
+  customer   Customer @relation(fields: [customerId], references: [id])
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }
 
 model Invoice {
   id            String   @id @default(uuid())
-  invoiceNumber String   @unique // INV-YYYYMMDD-XXXXXX
+  invoiceNumber String   @unique
   orderId       String
-  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  pdfDataJson   String   // JSON string storing invoice breakdown
+  pdfDataJson   String
   totalAmount   Float
   createdAt     DateTime @default(now())
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }
 
 model AuditLog {
   id        String   @id @default(uuid())
   userId    String?
-  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   userName  String   @default("System")
   action    String
   oldValue  String?
   newValue  String?
   ipAddress String?  @default("127.0.0.1")
   timestamp DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
 }

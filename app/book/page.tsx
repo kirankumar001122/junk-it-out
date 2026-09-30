@@ -11,7 +11,6 @@ import {
   AlertTriangle,
   ArrowRight,
   ArrowLeft,
-  Ticket,
   CheckCircle2,
   Truck,
   Search,
@@ -38,6 +37,14 @@ const TIME_SLOTS = [
   { id: '16-17', label: '04:00 PM - 05:00 PM', startHour: 16 },
   { id: '18-19', label: '06:00 PM - 07:00 PM', startHour: 18 },
 ];
+
+// Small category images used in the booking cards.
+const CATEGORY_IMAGES: Record<string, string> = {
+  'E-Waste': '/categories/e-waste.png',
+  'Household Dry Waste': '/categories/household-waste.png',
+  'Paper & Cardboard': '/categories/paper-cardboard.jpg',
+  'Plastic Waste': '/categories/plastic-waste.jpg',
+};
 
 export default function BookingPage() {
   const router = useRouter();
@@ -90,7 +97,6 @@ export default function BookingPage() {
   const [selectedSlotId, setSelectedSlotId] = useState('16-17');
 
   // Step 3: Summary, Pricing & Confirmation
-  const [appliedCoupon, setAppliedCoupon] = useState<string | null>('WELCOME50');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successOrder, setSuccessOrder] = useState<any>(null);
@@ -194,24 +200,66 @@ export default function BookingPage() {
       .then((res) => res.json())
       .then((data) => {
         if (data.success && Array.isArray(data.data)) {
-          setCategories(data.data);
+          // Only these four services are available in the customer booking flow.
+          // The other categories remain in the database/API for existing data,
+          // but they are intentionally hidden from this UI.
+          const allowedCategoryNames = new Set([
+            'E-Waste',
+            'Household Dry Waste',
+            'Paper & Cardboard',
+            'Plastic Waste',
+          ]);
+
+          const allowedCategories = data.data.filter((category: any) =>
+            allowedCategoryNames.has(category.name?.trim())
+          );
+
+          setCategories(allowedCategories);
+
           const params = new URLSearchParams(window.location.search);
           const requestedCategory = params.get('category');
           const cartItems = params.get('cart') ? readPickupCart() : [];
-          const selectedCategory = data.data.find(
+
+          // Only allow a requested URL category if it belongs to the
+          // four currently supported customer services.
+          const selectedCategory = allowedCategories.find(
             (c: any) => c.id === requestedCategory || c.name === requestedCategory
           );
-          const defaultServiceCategory = data.data.find((c: any) => c.type === 'WASTE_CHARGE') || data.data[0];
+
+          // Always use an allowed category as the default.
+          const defaultServiceCategory =
+            allowedCategories.find((c: any) => c.name === 'E-Waste') ||
+            allowedCategories[0];
 
           if (cartItems.length > 0) {
             const validItems = cartItems
-              .filter((item) => data.data.some((c: any) => c.id === item.categoryId))
-              .map((item) => ({ categoryId: item.categoryId, estimatedWeight: Math.max(1, item.quantity || 1) }));
-            if (validItems.length > 0) setSelectedItems(validItems);
+              .filter((item) =>
+                allowedCategories.some((c: any) => c.id === item.categoryId)
+              )
+              .map((item) => ({
+                categoryId: item.categoryId,
+                estimatedWeight: Math.max(1, item.quantity || 1),
+              }));
+
+            if (validItems.length > 0) {
+              setSelectedItems(validItems);
+            } else if (selectedCategory) {
+              setSelectedItems([
+                { categoryId: selectedCategory.id, estimatedWeight: 1 },
+              ]);
+            } else if (defaultServiceCategory) {
+              setSelectedItems([
+                { categoryId: defaultServiceCategory.id, estimatedWeight: 1 },
+              ]);
+            }
           } else if (selectedCategory) {
-            setSelectedItems([{ categoryId: selectedCategory.id, estimatedWeight: 1 }]);
+            setSelectedItems([
+              { categoryId: selectedCategory.id, estimatedWeight: 1 },
+            ]);
           } else if (defaultServiceCategory) {
-            setSelectedItems([{ categoryId: defaultServiceCategory.id, estimatedWeight: 1 }]);
+            setSelectedItems([
+              { categoryId: defaultServiceCategory.id, estimatedWeight: 1 },
+            ]);
           }
         }
       })
@@ -296,14 +344,12 @@ export default function BookingPage() {
       }
     });
 
-    const discount = appliedCoupon === 'WELCOME50' ? 50 : 0;
-    const rawPayable = totalWasteItemsValue + baseCharge - discount;
+    const rawPayable = totalWasteItemsValue + baseCharge;
     const netPayable = Math.max(1, Math.round(rawPayable * 100) / 100);
 
     return {
       totalWasteItemsValue: Math.round(totalWasteItemsValue * 100) / 100,
       baseCharge,
-      discount,
       netAmount: netPayable,
       direction: 'CUSTOMER_PAYS' as const,
     };
@@ -403,7 +449,6 @@ export default function BookingPage() {
           items: selectedItems,
           pickupType,
           scheduledSlot: pickupType === 'SCHEDULED' ? formattedScheduledSlot : null,
-          couponCode: appliedCoupon,
           photos: [], // Photo upload removed per user requirement
           notes: instructions,
           financialDirection: 'CUSTOMER_PAYS',
@@ -662,7 +707,13 @@ export default function BookingPage() {
 
           {/* Simple Clean Category Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {categories.map((cat) => {
+            {categories
+              .filter((cat) =>
+                ['E-Waste', 'Household Dry Waste', 'Paper & Cardboard', 'Plastic Waste'].includes(
+                  cat.name?.trim()
+                )
+              )
+              .map((cat) => {
               const selectedItem = selectedItems.find((i) => i.categoryId === cat.id);
               const isSelected = Boolean(selectedItem);
               const quantity = selectedItem ? selectedItem.estimatedWeight : 0;
@@ -678,11 +729,21 @@ export default function BookingPage() {
                 >
                   <div className="flex items-center gap-3 min-w-0 pr-2">
                     <span
-                      className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg text-xs font-bold transition-colors ${
-                        isSelected ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 group-hover:bg-emerald-100 group-hover:text-emerald-700'
+                      className={`relative grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg border text-xs font-bold transition-colors ${
+                        isSelected
+                          ? 'border-emerald-500 bg-emerald-50'
+                          : 'border-slate-200 bg-slate-50 group-hover:border-emerald-200'
                       }`}
                     >
-                      <Sparkles className="h-4 w-4" />
+                      {CATEGORY_IMAGES[cat.name?.trim()] ? (
+                        <img
+                          src={CATEGORY_IMAGES[cat.name.trim()]}
+                          alt={cat.name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <Sparkles className="h-4 w-4 text-emerald-600" />
+                      )}
                     </span>
                     <div className="min-w-0">
                       <span className="block text-xs font-bold text-slate-900 truncate">{cat.name}</span>
@@ -1064,20 +1125,6 @@ export default function BookingPage() {
             </div>
           </div>
 
-          {/* PROMO COUPON BANNER */}
-          <div className="bg-emerald-50/60 p-3.5 rounded-xl border border-emerald-200/80 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Ticket className="w-4 h-4 text-emerald-600 shrink-0" />
-              <div>
-                <span className="font-bold text-xs text-slate-900 block">Promo Coupon Applied</span>
-                <span className="text-[11px] text-emerald-700 font-medium">WELCOME50 — ₹50 discount on pickup fee</span>
-              </div>
-            </div>
-            <span className="text-[10px] font-bold bg-emerald-600 text-white px-2.5 py-1 rounded-md">
-              APPLIED
-            </span>
-          </div>
-
           {/* FINANCIAL SUMMARY BOX */}
           <div className="bg-slate-900 text-white p-4 sm:p-5 rounded-xl space-y-2.5 shadow-sm border border-slate-800">
             <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800 pb-2">
@@ -1091,12 +1138,6 @@ export default function BookingPage() {
               <span>Pickup Service Charge:</span>
               <span>₹{estimate.baseCharge.toFixed(2)}</span>
             </div>
-            {estimate.discount > 0 && (
-              <div className="flex items-center justify-between text-xs text-emerald-400 font-medium">
-                <span>Coupon Discount (WELCOME50):</span>
-                <span>- ₹{estimate.discount.toFixed(2)}</span>
-              </div>
-            )}
             <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between text-sm font-bold">
               <span>Total Amount Payable:</span>
               <span className="text-lg text-emerald-400 font-extrabold">₹{estimate.netAmount.toFixed(2)}</span>
