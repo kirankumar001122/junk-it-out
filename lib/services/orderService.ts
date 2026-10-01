@@ -1,16 +1,34 @@
 import { db } from '../db';
-import { findOrCreateUserCustomer, saveCustomerAddress } from './customerService';
+import {
+  findOrCreateUserCustomer,
+  saveCustomerAddress,
+} from './customerService';
 import { checkGeofenceServiceability } from './serviceAreaService';
-import { findEligibleAgentsForServiceArea } from './agentService';
-import { broadcaster } from '../realtime';
 
-// In-memory Idempotency Store to prevent duplicate order placements on network retries
-const idempotencyStore = new Map<string, { orderId: string; responseData: any; timestamp: number }>();
-const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+// In-memory Idempotency Store to prevent duplicate order placements
+// on network retries.
+const idempotencyStore = new Map<
+  string,
+  {
+    orderId: string;
+    responseData: any;
+    timestamp: number;
+  }
+>();
+
+const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
 export function generateOrderNumber(): string {
-  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const randomHex = Math.random().toString(36).substring(2, 8).toUpperCase();
+  const dateStr = new Date()
+    .toISOString()
+    .slice(0, 10)
+    .replace(/-/g, '');
+
+  const randomHex = Math.random()
+    .toString(36)
+    .substring(2, 8)
+    .toUpperCase();
+
   return `JIO-${dateStr}-${randomHex}`;
 }
 
@@ -18,6 +36,7 @@ export async function createOrder(
   input: {
     phone: string;
     name: string;
+
     address: {
       label?: string;
       houseNo: string;
@@ -30,202 +49,363 @@ export async function createOrder(
       lng: number;
       googlePlaceId?: string | null;
     };
-    items: { categoryId: string; estimatedWeight: number }[];
+
+    items: {
+      categoryId: string;
+      estimatedWeight: number;
+    }[];
+
     pickupType?: 'ASAP' | 'SCHEDULED';
     scheduledSlot?: string | null;
     couponCode?: string | null;
     photos?: string[];
     notes?: string;
-    financialDirection?: 'CUSTOMER_PAYS' | 'JUNKITOUT_PAYS';
+    financialDirection?:
+      | 'CUSTOMER_PAYS'
+      | 'JUNKITOUT_PAYS';
   },
+
   idempotencyKey?: string | null,
-  authUser?: { userId: string; customerId?: string | null } | null
+
+  authUser?: {
+    userId: string;
+    customerId?: string | null;
+  } | null
 ) {
-  // 1. Idempotency Check
+  // ---------------------------------------------------------
+  // 1. IDEMPOTENCY CHECK
+  // ---------------------------------------------------------
+
   if (idempotencyKey) {
     const cached = idempotencyStore.get(idempotencyKey);
-    if (cached && Date.now() - cached.timestamp < IDEMPOTENCY_TTL_MS) {
-      console.log(`[IDEMPOTENCY] Returning existing order #${cached.orderId} for key ${idempotencyKey}`);
+
+    if (
+      cached &&
+      Date.now() - cached.timestamp <
+        IDEMPOTENCY_TTL_MS
+    ) {
+      console.log(
+        `[IDEMPOTENCY] Returning existing order #${cached.orderId}`
+      );
+
       return cached.responseData;
     }
   }
 
-  // 2. Validate Geofence Service Area
-  const geofence = await checkGeofenceServiceability(input.address.lat, input.address.lng, input.address.area);
+  // ---------------------------------------------------------
+  // 2. VALIDATE GEOFENCE / SERVICE AREA
+  // ---------------------------------------------------------
+
+  const geofence =
+    await checkGeofenceServiceability(
+      input.address.lat,
+      input.address.lng,
+      input.address.area
+    );
+
   if (!geofence.serviceable) {
-    throw new Error(geofence.message || "Sorry, we don't currently serve this location.");
+    throw new Error(
+      geofence.message ||
+        "Sorry, we don't currently serve this location."
+    );
   }
 
-  // 3. User & Customer Profile Lookup
+  // ---------------------------------------------------------
+  // 3. USER & CUSTOMER PROFILE
+  // ---------------------------------------------------------
+
   let user: any = null;
+
   if (authUser?.userId) {
     user = await db.user.findUnique({
-      where: { id: authUser.userId },
-      include: { customer: true },
+      where: {
+        id: authUser.userId,
+      },
+      include: {
+        customer: true,
+      },
     });
   }
 
   if (!user || !user.customer) {
-    user = await findOrCreateUserCustomer(input.phone, input.name);
+    user = await findOrCreateUserCustomer(
+      input.phone,
+      input.name
+    );
   }
 
   if (!user.customer) {
-    throw new Error('Could not initialize customer profile.');
+    throw new Error(
+      'Could not initialize customer profile.'
+    );
   }
 
-  // 4. Save Pickup Address
-  const savedAddress = await saveCustomerAddress(user.id, {
-    label: input.address.label || 'Home',
-    name: input.name,
-    phone: input.phone,
-    houseNo: input.address.houseNo,
-    building: input.address.building,
-    street: input.address.street,
-    area: input.address.area,
-    landmark: input.address.landmark,
-    pincode: input.address.pincode,
-    lat: input.address.lat,
-    lng: input.address.lng,
-    googlePlaceId: input.address.googlePlaceId || undefined,
-    isDefault: true,
-  });
+  // ---------------------------------------------------------
+  // 4. SAVE PICKUP ADDRESS
+  // ---------------------------------------------------------
 
-  // 5. Fetch Waste Categories & Compute Server-side Pricing
-  const categoryIds = input.items.map((i) => i.categoryId);
-  const dbCategories = await db.wasteCategory.findMany({
-    where: { id: { in: categoryIds } },
-  });
+  const savedAddress =
+    await saveCustomerAddress(user.id, {
+      label: input.address.label || 'Home',
+      name: input.name,
+      phone: input.phone,
+      houseNo: input.address.houseNo,
+      building: input.address.building,
+      street: input.address.street,
+      area: input.address.area,
+      landmark: input.address.landmark,
+      pincode: input.address.pincode,
+      lat: input.address.lat,
+      lng: input.address.lng,
+      googlePlaceId:
+        input.address.googlePlaceId ||
+        undefined,
+      isDefault: true,
+    });
+
+  // ---------------------------------------------------------
+  // 5. FETCH WASTE CATEGORIES & CALCULATE PRICE
+  // ---------------------------------------------------------
+
+  const categoryIds = input.items.map(
+    (item) => item.categoryId
+  );
+
+  const dbCategories =
+    await db.wasteCategory.findMany({
+      where: {
+        id: {
+          in: categoryIds,
+        },
+      },
+    });
 
   let totalWasteItemsValue = 0;
-  const basePickupCharge = geofence.zone?.basePickupCharge ?? 69.0;
 
-  const orderItemsData = input.items.map((item) => {
-    const cat = dbCategories.find((c) => c.id === item.categoryId);
-    const ratePerKg = cat ? cat.pricePerKg : 20.0;
-    const subtotal = item.estimatedWeight * ratePerKg;
-    totalWasteItemsValue += subtotal;
+  const basePickupCharge =
+    geofence.zone?.basePickupCharge ?? 69.0;
 
-    return {
-      categoryId: item.categoryId,
-      estimatedWeight: item.estimatedWeight,
-      ratePerKg,
-      subtotal,
-    };
-  });
+  const orderItemsData =
+    input.items.map((item) => {
+      const category = dbCategories.find(
+        (cat) => cat.id === item.categoryId
+      );
+
+      const ratePerKg =
+        category?.pricePerKg ?? 20.0;
+
+      const subtotal =
+        item.estimatedWeight * ratePerKg;
+
+      totalWasteItemsValue += subtotal;
+
+      return {
+        categoryId: item.categoryId,
+        estimatedWeight:
+          item.estimatedWeight,
+        ratePerKg,
+        subtotal,
+      };
+    });
+
+  // ---------------------------------------------------------
+  // 6. COUPON CALCULATION
+  // ---------------------------------------------------------
 
   let discountAmount = 0.0;
+
   if (input.couponCode) {
-    const coupon = await db.coupon.findUnique({
-      where: { code: input.couponCode.trim().toUpperCase() },
-    });
+    const coupon =
+      await db.coupon.findUnique({
+        where: {
+          code: input.couponCode
+            .trim()
+            .toUpperCase(),
+        },
+      });
+
     if (coupon && coupon.active) {
       if (coupon.discountType === 'FLAT') {
-        discountAmount = coupon.discountValue;
-      } else if (coupon.discountType === 'PERCENTAGE') {
-        discountAmount = (basePickupCharge + totalWasteItemsValue) * (coupon.discountValue / 100);
+        discountAmount =
+          coupon.discountValue;
+      } else if (
+        coupon.discountType === 'PERCENTAGE'
+      ) {
+        discountAmount =
+          (basePickupCharge +
+            totalWasteItemsValue) *
+          (coupon.discountValue / 100);
+
         if (coupon.maxDiscount) {
-          discountAmount = Math.min(discountAmount, coupon.maxDiscount);
+          discountAmount = Math.min(
+            discountAmount,
+            coupon.maxDiscount
+          );
         }
       }
-    } else if (input.couponCode.trim().toUpperCase() === 'WELCOME50') {
+    } else if (
+      input.couponCode
+        .trim()
+        .toUpperCase() === 'WELCOME50'
+    ) {
       discountAmount = 50.0;
     }
   }
 
-  const financialDirection: 'CUSTOMER_PAYS' = 'CUSTOMER_PAYS';
-  const rawPayable = totalWasteItemsValue + basePickupCharge - discountAmount;
-  const finalAmount = Math.max(1, Math.round(rawPayable));
+  // ---------------------------------------------------------
+  // 7. PAYMENT DIRECTION
+  // ---------------------------------------------------------
+  //
+  // Current customer booking flow is CUSTOMER_PAYS.
+  // Payment starts as PENDING.
+  //
+  // IMPORTANT:
+  // NO AGENT DISPATCH HAPPENS HERE.
+  //
 
-  const orderNumber = generateOrderNumber();
+  const financialDirection:
+    'CUSTOMER_PAYS' = 'CUSTOMER_PAYS';
 
-  // 6. Execute Prisma Database Transaction
-  const newOrder = await db.$transaction(async (tx) => {
-    const createdOrder = await tx.order.create({
-      data: {
-        orderNumber,
-        customerId: user.customer!.id,
-        addressId: savedAddress.id,
-        pickupType: input.pickupType || 'ASAP',
-        scheduledSlot: input.scheduledSlot || null,
-        status: 'BOOKING_RECEIVED',
-        financialDirection,
-        estimatedTotal: totalWasteItemsValue,
-        pickupCharge: basePickupCharge,
-        discountAmount,
-        finalAmount,
-        paymentStatus: 'PENDING',
-        wastePhotos: JSON.stringify(input.photos || []),
-        notes: input.notes || null,
-        items: {
-          create: orderItemsData,
-        },
-        statusHistory: {
-          create: {
-            oldStatus: null,
-            newStatus: 'BOOKING_RECEIVED',
-            changedByUserId: user.id,
-            notes: 'Order placed by customer via web platform.',
+  const rawPayable =
+    totalWasteItemsValue +
+    basePickupCharge -
+    discountAmount;
+
+  const finalAmount = Math.max(
+    1,
+    Math.round(rawPayable)
+  );
+
+  const orderNumber =
+    generateOrderNumber();
+
+  // ---------------------------------------------------------
+  // 8. CREATE ORDER
+  // ---------------------------------------------------------
+
+  const newOrder =
+    await db.$transaction(async (tx) => {
+      const createdOrder =
+        await tx.order.create({
+          data: {
+            orderNumber,
+
+            customerId:
+              user.customer!.id,
+
+            addressId:
+              savedAddress.id,
+
+            pickupType:
+              input.pickupType || 'ASAP',
+
+            scheduledSlot:
+              input.scheduledSlot || null,
+
+            status:
+              'BOOKING_RECEIVED',
+
+            financialDirection,
+
+            estimatedTotal:
+              totalWasteItemsValue,
+
+            pickupCharge:
+              basePickupCharge,
+
+            discountAmount,
+
+            finalAmount,
+
+            // IMPORTANT:
+            // Order starts unpaid.
+            paymentStatus:
+              'PENDING',
+
+            wastePhotos:
+              JSON.stringify(
+                input.photos || []
+              ),
+
+            notes:
+              input.notes || null,
+
+            items: {
+              create:
+                orderItemsData,
+            },
+
+            statusHistory: {
+              create: {
+                oldStatus: null,
+
+                newStatus:
+                  'BOOKING_RECEIVED',
+
+                changedByUserId:
+                  user.id,
+
+                notes:
+                  'Order placed by customer via web platform. Payment pending.',
+              },
+            },
           },
-        },
-      },
-      include: {
-        customer: { include: { user: true } },
-        address: true,
-        items: { include: { category: true } },
-        statusHistory: true,
-      },
+
+          include: {
+            customer: {
+              include: {
+                user: true,
+              },
+            },
+
+            address: true,
+
+            items: {
+              include: {
+                category: true,
+              },
+            },
+
+            statusHistory: true,
+          },
+        });
+
+      return createdOrder;
     });
 
-    return createdOrder;
-  });
+  // ---------------------------------------------------------
+  // 9. IMPORTANT
+  // ---------------------------------------------------------
+  //
+  // DO NOT DISPATCH TO AGENTS HERE.
+  //
+  // Razorpay payment must be completed and verified first.
+  //
+  // The dispatch now happens from:
+  //
+  // lib/payments/verification.ts
+  //
+  // after paymentStatus becomes CAPTURED.
+  // ---------------------------------------------------------
 
-  // 7. Service Area Agent Matching & Realtime Dispatch (Phase 2 Notification)
-  try {
-    const targetServiceArea = geofence.zone?.name || input.address.area;
-    const eligibleAgents = await findEligibleAgentsForServiceArea(targetServiceArea);
-    
-    // Exclude offline agents (only AVAILABLE agents are targeted)
-    const availableEligibleAgents = (eligibleAgents || []).filter(
-      (agent: any) => agent.status === 'AVAILABLE'
-    );
+  // ---------------------------------------------------------
+  // 10. STORE IDEMPOTENCY RESPONSE
+  // ---------------------------------------------------------
 
-    console.log(
-      `[DISPATCH] Order #${newOrder.orderNumber} placed for service area '${targetServiceArea}'. Available eligible agents count: ${availableEligibleAgents.length}`
-    );
-
-    if (availableEligibleAgents.length > 0) {
-      const targetAgentIds = availableEligibleAgents.map((a: any) => a.id);
-      const estimatedTotalWeight = input.items.reduce(
-        (sum, item) => sum + (Number(item.estimatedWeight) || 0),
-        0
-      );
-
-      const notificationPayload = {
-        type: 'NEW_PICKUP_AVAILABLE',
-        targetAgentIds,
-        orderId: newOrder.id,
-        orderNumber: newOrder.orderNumber,
-        serviceArea: targetServiceArea,
-        estimatedQuantity: `${estimatedTotalWeight.toFixed(1)} kg`,
-        itemsSummary: `${input.items.length} category item(s)`,
-        createdAt: newOrder.createdAt.toISOString(),
-      };
-
-      // Broadcast NEW_PICKUP_AVAILABLE event to SSE engine
-      broadcaster.broadcast('NEW_PICKUP_AVAILABLE', notificationPayload);
-    }
-  } catch (err) {
-    // Notification dispatch failure MUST NEVER rollback customer booking
-    console.warn('[DISPATCH ERROR] Safe notification dispatch notice:', err);
-  }
-
-  // 8. Store in Idempotency Map
   if (idempotencyKey) {
-    idempotencyStore.set(idempotencyKey, {
-      orderId: newOrder.id,
-      responseData: newOrder,
-      timestamp: Date.now(),
-    });
+    idempotencyStore.set(
+      idempotencyKey,
+      {
+        orderId:
+          newOrder.id,
+
+        responseData:
+          newOrder,
+
+        timestamp:
+          Date.now(),
+      }
+    );
   }
 
   return newOrder;
