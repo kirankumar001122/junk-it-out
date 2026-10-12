@@ -51,7 +51,15 @@ export async function GET(
       }
     }
 
-    return successResponse(order);
+    const locations = order.agentId
+      ? await db.agentLocation.findMany({
+          where: { orderId: order.id, agentId: order.agentId },
+          orderBy: { timestamp: 'desc' },
+          take: 1,
+        })
+      : [];
+
+    return successResponse({ ...order, locations });
   } catch (err: any) {
     console.error('Fetch order detail error:', err);
     return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to retrieve order details.', 500);
