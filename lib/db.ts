@@ -12,6 +12,10 @@ function getDatabaseUrl() {
   }
 
   const url = new URL(databaseUrl);
+  if (url.hostname.includes('pooler.supabase.com')) {
+    url.port = '6543';
+    url.searchParams.set('pgbouncer', 'true');
+  }
   url.searchParams.set('connection_limit', '1');
   return url.toString();
 }
