@@ -133,8 +133,6 @@ export default function InteractiveMap({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const overlaysRef = useRef<any[]>([]);
-  const callbacksRef = useRef({ onLocationSelect, onGoogleReady });
-  callbacksRef.current = { onLocationSelect, onGoogleReady };
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
@@ -152,10 +150,10 @@ export default function InteractiveMap({
           fullscreenControl: false,
         });
         mapRef.current.addListener('click', (event: any) =>
-          callbacksRef.current.onLocationSelect?.(event.latLng.lat(), event.latLng.lng())
+          onLocationSelect?.(event.latLng.lat(), event.latLng.lng())
         );
         setStatus('ready');
-        callbacksRef.current.onGoogleReady?.(maps);
+        onGoogleReady?.(maps);
       })
       .catch((reason) => {
         if (!cancelled) {
@@ -218,7 +216,7 @@ export default function InteractiveMap({
         draggable: item.type === 'PICKUP',
       });
       marker.addListener('dragend', (event: any) =>
-        callbacksRef.current.onLocationSelect?.(event.latLng.lat(), event.latLng.lng())
+        onLocationSelect?.(event.latLng.lat(), event.latLng.lng())
       );
       overlays.push(marker);
     });

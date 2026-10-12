@@ -70,20 +70,8 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
     try {
       const res = await fetch('/api/auth/me');
       const data = await res.json();
-      if (res.status === 401) {
-        setIsCustomer(false);
-        setUser(null);
-        setOtpError('');
-        return;
-      }
-      if (!res.ok || !data.success) {
-        setOtpError('We could not verify your session because the account service is temporarily unavailable. Please try again.');
-        return;
-      }
-
       const authenticatedCustomer = res.ok && data.success && data.data?.user?.role === 'CUSTOMER';
       if (authenticatedCustomer) {
-        setOtpError('');
         setIsCustomer(true);
         setUser(data.data.user);
         setPhone('');
@@ -100,8 +88,15 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
         setOtpStep('details');
         setOtpError('');
       }
+      console.log('[AUTH_CHECK] Customer session status:', { authenticatedCustomer, user: data.data?.user?.phone });
     } catch {
-      setOtpError('We could not reach the account service to verify your session. Please try again.');
+      setIsCustomer(false);
+      setUser(null);
+      setPhone('');
+      setName('');
+      setCode('');
+      setOtpStep('details');
+      setOtpError('');
     } finally {
       setCheckingAuth(false);
     }
@@ -158,6 +153,14 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.message || data.error?.message || 'Unable to send OTP. Please check mobile number.');
+      }
+
+      if (data.data?.isExisting && data.data?.existingName) {
+        setName(data.data.existingName);
+      } else if (!data.data?.isExisting && (!name || name.trim().length < 2)) {
+        setOtpError('Please enter your full name for registration.');
+        setOtpLoading(false);
+        return;
       }
 
       setOtpStep('code');

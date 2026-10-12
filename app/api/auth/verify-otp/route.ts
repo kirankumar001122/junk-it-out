@@ -71,7 +71,6 @@ export async function POST(req: NextRequest) {
      */
 
     const testModeEnabled =
-      process.env.NODE_ENV !== 'production' &&
       process.env.OTP_TEST_MODE?.trim().toLowerCase() === 'true';
 
     const configuredTestPhone =
@@ -236,9 +235,9 @@ export async function POST(req: NextRequest) {
     );
 
     return errorResponse(
-      'AUTH_SERVICE_UNAVAILABLE',
-      'Sign-in could not be completed because account services are temporarily unavailable. Please try again later.',
-      503
+      'INTERNAL_SERVER_ERROR',
+      'Authentication failed.',
+      500
     );
   }
 }

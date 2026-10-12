@@ -7,7 +7,6 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start",
-    "test:e2e": "node tests/e2e/run-isolated.mjs",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
     "db:seed:categories": "npx tsx prisma/seed-categories.ts",
@@ -32,7 +31,6 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.64.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^26.4.1",

@@ -26,9 +26,6 @@ import LocationSearchModal from '@/components/LocationSearchModal';
 import InteractiveMap, { loadGoogleMaps } from '@/components/InteractiveMap';
 import { readPickupCart } from '@/lib/pickupCart';
 import { getSelectedLocation, setSelectedLocation, LOCATION_CHANGE_EVENT } from '@/lib/selectedLocation';
-import type { SelectedLocationData } from '@/lib/selectedLocation';
-import { buildBookingAddressPayload, formatPickupAddress, resolvePickupAddressAfterPinMove } from '@/lib/address';
-import { getPreferredSavedAddress } from '@/lib/customerAddresses';
 
 // Standard 1-hour pickup time slots
 const TIME_SLOTS = [
@@ -49,24 +46,6 @@ const CATEGORY_IMAGES: Record<string, string> = {
   'Plastic Waste': '/categories/plastic-waste.jpg',
 };
 
-async function fetchCheckoutRequest(input: RequestInfo | URL, init: RequestInit) {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 20000);
-
-  try {
-    const response = await fetch(input, { ...init, signal: controller.signal });
-    const data = await response.json().catch(() => null);
-    return { response, data };
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error('Payment setup timed out. Please check your connection and try again.');
-    }
-    throw error;
-  } finally {
-    window.clearTimeout(timeout);
-  }
-}
-
 export default function BookingPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
@@ -77,22 +56,17 @@ export default function BookingPage() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [isCustomer, setIsCustomer] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
-  const [authCheckError, setAuthCheckError] = useState('');
 
   // Location & Address State (Initialized dynamically from selectedLocation helper)
   const [area, setArea] = useState<string>('');
   const [fullAddress, setFullAddress] = useState<string>('');
-  const [addressSource, setAddressSource] = useState<SelectedLocationData['addressSource']>('reverse-geocoded');
   const [lat, setLat] = useState<number>(12.9716);
   const [lng, setLng] = useState<number>(77.5946);
   const [locating, setLocating] = useState(false);
   const [geofenceResult, setGeofenceResult] = useState<any>(null);
   const [locationStatusMsg, setLocationStatusMsg] = useState<string | null>(null);
   const [placeId, setPlaceId] = useState<string | null>(null);
-  const [addressVerified, setAddressVerified] = useState(false);
   const [locationSearchModalOpen, setLocationSearchModalOpen] = useState(false);
-  const [savedAddresses, setSavedAddresses] = useState<any[]>([]);
-  const [selectedSavedAddressId, setSelectedSavedAddressId] = useState<string | null>(null);
 
   // Map Card Search Input & Predictions
   const [mapSearchQuery, setMapSearchQuery] = useState('');
@@ -101,10 +75,6 @@ export default function BookingPage() {
 
   const autocompleteServiceRef = useRef<any>(null);
   const geocoderRef = useRef<any>(null);
-  const mapLocationRequestRef = useRef(0);
-  const razorpayScriptPromiseRef = useRef<Promise<boolean> | null>(null);
-  const checkoutInProgressRef = useRef(false);
-  const writingLocationRef = useRef(false);
 
   // Address Details & Labels
   const [addressLabel, setAddressLabel] = useState<'Home' | 'Work' | 'Other'>('Home');
@@ -130,7 +100,6 @@ export default function BookingPage() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successOrder, setSuccessOrder] = useState<any>(null);
-  const [paymentPendingOrder, setPaymentPendingOrder] = useState<any>(null);
 
   // Idempotency Protection Ref
   const idempotencyKeyRef = useRef<string>('');
@@ -158,73 +127,43 @@ export default function BookingPage() {
     return 'Customer';
   };
 
-  const applyLocationData = (data: SelectedLocationData, persist = false) => {
-    setArea(data.area || '');
-    setFullAddress(data.address || '');
-    setAddressSource(data.addressSource || 'reverse-geocoded');
-    setLat(data.lat);
-    setLng(data.lng);
-    setPlaceId(data.placeId || null);
-    setHouseNo(data.houseNo || '');
-    setBuilding(data.building || '');
-    setStreet(data.street || '');
-    setLandmark(data.landmark || '');
-    setPincode(data.pincode || '');
-    setAddressVerified(data.addressVerified ?? true);
-    setSelectedSavedAddressId(data.savedAddressId || null);
-    setLocationStatusMsg(data.addressVerified === false
-      ? data.addressSource === 'service-zone'
-        ? 'A service zone is not a complete pickup address. Search for a specific address or choose a saved address before booking.'
-        : 'The pin moved, but its address could not be verified. Move it again or choose an address before booking.'
-      : null);
-    setGeofenceResult({
-      serviceable: data.serviceable,
-      zone: data.zoneName ? { name: data.zoneName } : undefined,
-    });
-    if (persist) {
-      writingLocationRef.current = true;
-      try {
-        setSelectedLocation(data);
-      } finally {
-        writingLocationRef.current = false;
-      }
-    }
-  };
-
   // Load location from centralized helper & check saved addresses
   const loadLocationFromStore = async () => {
     const stored = getSelectedLocation();
-    let addresses: any[] = [];
+    if (stored && stored.area) {
+      setArea(stored.area);
+      setFullAddress(stored.address);
+      setLat(stored.lat);
+      setLng(stored.lng);
+      if (stored.placeId) setPlaceId(stored.placeId);
+      if (stored.street) setStreet(stored.street);
+      if (stored.pincode) setPincode(stored.pincode);
+      setGeofenceResult({
+        serviceable: stored.serviceable,
+        zone: stored.zoneName ? { name: stored.zoneName } : undefined,
+      });
+      await runGeofenceCheck(stored.lat, stored.lng);
+      return;
+    }
+
+    // Try fetching saved customer default address if logged in
     try {
       const res = await fetch('/api/customer/addresses');
       const data = await res.json();
       if (res.ok && data.success && Array.isArray(data.data) && data.data.length > 0) {
-        addresses = data.data;
+        const addr = data.data[0];
+        const formatted = `${addr.houseNo ? `${addr.houseNo}, ` : ''}${addr.street ? `${addr.street}, ` : ''}${addr.area}, Bengaluru`;
+        setArea(addr.area);
+        setFullAddress(formatted);
+        setLat(addr.lat);
+        setLng(addr.lng);
+        if (addr.street) setStreet(addr.street);
+        if (addr.pincode) setPincode(addr.pincode);
+
+        // Verify serviceability of saved address
+        await runGeofenceCheck(addr.lat, addr.lng);
       }
     } catch {}
-    setSavedAddresses(addresses);
-
-    if (stored?.savedAddressId) {
-      const storedAddress = addresses.find((address) => address.id === stored.savedAddressId);
-      if (storedAddress) {
-        await selectSavedAddress(storedAddress);
-        return;
-      }
-    }
-    if (stored && stored.addressSource !== 'saved' && stored.area) {
-      applyLocationData(stored);
-      await runGeofenceCheck(stored.lat, stored.lng);
-      return;
-    }
-    const preferred = getPreferredSavedAddress(addresses);
-    if (preferred) {
-      await selectSavedAddress(preferred);
-      return;
-    }
-    if (stored?.area) {
-      applyLocationData(stored);
-      await runGeofenceCheck(stored.lat, stored.lng);
-    }
   };
 
   const checkAuth = async () => {
@@ -233,21 +172,20 @@ export default function BookingPage() {
       const res = await fetch('/api/auth/me');
       const data = await res.json();
       if (res.ok && data?.success && data?.data?.user?.role === 'CUSTOMER') {
-        setAuthCheckError('');
         setIsCustomer(true);
         setPhone(data.data.user.phone || '');
         setName(getDisplayName(data.data.user));
-      } else if (res.status === 401 || (res.ok && data?.success)) {
-        setAuthCheckError('');
+      } else {
         setIsCustomer(false);
         setPhone('');
         setName('');
         setLoginOpen(true);
-      } else {
-        setAuthCheckError('We could not verify your session because the account service is temporarily unavailable. Please try again.');
       }
     } catch {
-      setAuthCheckError('We could not reach the account service to verify your session. Please try again.');
+      setIsCustomer(false);
+      setPhone('');
+      setName('');
+      setLoginOpen(true);
     } finally {
       setCheckingAuth(false);
     }
@@ -328,7 +266,6 @@ export default function BookingPage() {
       .catch(() => {});
 
     const handleLocUpdate = () => {
-      if (writingLocationRef.current) return;
       loadLocationFromStore();
     };
 
@@ -341,7 +278,7 @@ export default function BookingPage() {
     };
   }, []);
 
-  const runGeofenceCheck = async (targetLat: number, targetLng: number, updateState = true) => {
+  const runGeofenceCheck = async (targetLat: number, targetLng: number) => {
     try {
       const res = await fetch('/api/service-areas/check', {
         method: 'POST',
@@ -350,14 +287,17 @@ export default function BookingPage() {
       });
       const data = await res.json();
       if (data.success && data.data?.serviceable) {
-        if (updateState) setGeofenceResult(data.data);
+        setGeofenceResult(data.data);
+        if (data.data.zone?.name) {
+          setArea(data.data.zone.name);
+        }
         return data.data;
       } else {
         const result = {
           serviceable: false,
           message: data.data?.message || data.message || "We don't currently serve this location. Please select a location in Bengaluru.",
         };
-        if (updateState) setGeofenceResult(result);
+        setGeofenceResult(result);
         return result;
       }
     } catch (e) {
@@ -365,31 +305,9 @@ export default function BookingPage() {
         serviceable: false,
         message: 'Unable to verify service area. Please check network connection.',
       };
-      if (updateState) setGeofenceResult(result);
+      setGeofenceResult(result);
       return result;
     }
-  };
-
-  const selectSavedAddress = async (addr: any) => {
-    const formatted = formatPickupAddress(addr);
-    applyLocationData({
-      address: formatted,
-      addressSource: 'saved',
-      area: addr.area || '',
-      lat: Number(addr.lat),
-      lng: Number(addr.lng),
-      placeId: addr.googlePlaceId || undefined,
-      houseNo: addr.houseNo || '',
-      building: addr.building || '',
-      street: addr.street || '',
-      landmark: addr.landmark || '',
-      pincode: addr.pincode || '',
-      savedAddressId: addr.id,
-      serviceable: true,
-      addressVerified: true,
-    }, true);
-    setAddressLabel(addr.label === 'Work' || addr.label === 'Other' ? addr.label : 'Home');
-    await runGeofenceCheck(Number(addr.lat), Number(addr.lng));
   };
 
   const toggleCategory = (catId: string) => {
@@ -445,59 +363,39 @@ export default function BookingPage() {
   const formattedScheduledSlot = `${curDateObj.dayLabel} (${curDateObj.dateStr}), ${curSlotObj.label}`;
 
   function loadRazorpayScript(): Promise<boolean> {
-    if (typeof window !== 'undefined' && (window as any).Razorpay) return Promise.resolve(true);
-    if (razorpayScriptPromiseRef.current) return razorpayScriptPromiseRef.current;
-
-    const promise = new Promise<boolean>((resolve) => {
-      const scriptId = 'razorpay-checkout-script';
-      const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
-      const script = existing || document.createElement('script');
-      let settled = false;
-      const timeout = window.setTimeout(() => finish(false), 15000);
-      const finish = (loaded: boolean) => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(timeout);
-        if (loaded) script.dataset.loaded = 'true';
-        else if (script.parentElement) script.remove();
-        razorpayScriptPromiseRef.current = null;
-        resolve(loaded);
-      };
-
-      if (existing?.dataset.loaded === 'true') {
-        finish(Boolean((window as any).Razorpay));
+    return new Promise((resolve) => {
+      if (typeof window !== 'undefined' && (window as any).Razorpay) {
+        resolve(true);
         return;
       }
-
-      script.addEventListener('load', () => finish(Boolean((window as any).Razorpay)), { once: true });
-      script.addEventListener('error', () => finish(false), { once: true });
-      if (!existing) {
-        script.id = scriptId;
-        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-        script.async = true;
-        document.body.appendChild(script);
+      const scriptId = 'razorpay-checkout-script';
+      const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
+      if (existing) {
+        if ((window as any).Razorpay) {
+          resolve(true);
+          return;
+        }
+        existing.addEventListener('load', () => resolve(true), { once: true });
+        existing.addEventListener('error', () => resolve(false), { once: true });
+        return;
       }
+      const script = document.createElement('script');
+      script.id = scriptId;
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
     });
-
-    razorpayScriptPromiseRef.current = promise;
-    return promise;
   }
 
   // Preload Razorpay checkout SDK as soon as booking page mounts to ensure zero-delay checkout opening
   useEffect(() => {
-    loadRazorpayScript()
-      .then((loaded) => {
-        if (!loaded) setErrorMsg('Razorpay Checkout could not load. Check your connection and try again.');
-      })
-      .catch((error: any) => {
-        setErrorMsg(error?.message || 'Razorpay Checkout could not load. Check your connection and try again.');
-      });
+    loadRazorpayScript().catch(() => {});
   }, []);
 
   // Master Customer Booking & Razorpay Payment Handler
   const handleConfirmOrder = async () => {
-    if (checkoutInProgressRef.current) return;
-
     if (!isCustomer) {
       setLoginOpen(true);
       setErrorMsg('Authentication is required. Please log in with mobile OTP to complete your booking.');
@@ -506,11 +404,6 @@ export default function BookingPage() {
 
     if (!area || !geofenceResult?.serviceable) {
       setErrorMsg(geofenceResult?.message || 'Please select a valid pickup location in Bengaluru before confirming.');
-      return;
-    }
-
-    if (!addressVerified) {
-      setErrorMsg('Please choose or verify the pickup address for the selected map pin before confirming.');
       return;
     }
 
@@ -524,7 +417,6 @@ export default function BookingPage() {
       idempotencyKeyRef.current = `booking-${phone.replace(/[\s+]/g, '')}-${Date.now()}`;
     }
 
-    checkoutInProgressRef.current = true;
     setLoading(true);
     setErrorMsg('');
 
@@ -533,7 +425,7 @@ export default function BookingPage() {
 
     try {
       // 1. Create order on server (CUSTOMER_PAYS)
-      const { response: res, data } = await fetchCheckoutRequest('/api/orders', {
+      const res = await fetch('/api/orders', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -542,19 +434,18 @@ export default function BookingPage() {
         body: JSON.stringify({
           phone,
           name,
-          address: buildBookingAddressPayload({
+          address: {
             label: addressLabel || 'Home',
-            houseNo,
-            building,
-            street,
+            houseNo: houseNo || area || 'Pickup Location',
+            building: building || undefined,
+            street: street || area || 'Main Road',
             area,
-            fullAddress,
-            landmark,
-            pincode,
+            landmark: landmark || undefined,
+            pincode: pincode || '560001',
             lat,
             lng,
-            placeId,
-          }),
+            googlePlaceId: placeId,
+          },
           items: selectedItems,
           pickupType,
           scheduledSlot: pickupType === 'SCHEDULED' ? formattedScheduledSlot : null,
@@ -564,50 +455,38 @@ export default function BookingPage() {
         }),
       });
 
-      if (!res.ok || !data?.success) {
-        checkoutInProgressRef.current = false;
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
         setLoading(false);
-        setErrorMsg(data?.error?.message || data?.message || 'Failed to place order. Please verify your details and try again.');
+        setErrorMsg(data.message || 'Failed to place order. Please verify your details and try again.');
         return;
       }
 
       const orderData = data.data;
 
       // 2. Initialize Razorpay Payment Order
-      const { response: payRes, data: payData } = await fetchCheckoutRequest('/api/payments/create', {
+      const payRes = await fetch('/api/payments/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderId: orderData.id }),
       });
 
-      if (!payRes.ok || !payData?.success) {
-        checkoutInProgressRef.current = false;
+      const payData = await payRes.json();
+      if (!payRes.ok || !payData.success) {
         setLoading(false);
-        setErrorMsg(payData?.message || 'Failed to initialize Razorpay payment order.');
+        setErrorMsg(payData.message || 'Failed to initialize Razorpay payment order.');
         return;
       }
 
       const scriptLoaded = await scriptPromise;
       if (!scriptLoaded) {
-        checkoutInProgressRef.current = false;
         setLoading(false);
         setErrorMsg('Failed to load Razorpay payment SDK. Please check your network connection.');
         return;
       }
 
       const razorpayConfig = payData.data;
-      if (
-        !razorpayConfig?.key ||
-        !razorpayConfig?.gatewayOrderId ||
-        !Number.isFinite(Number(razorpayConfig.amount)) ||
-        Number(razorpayConfig.amount) <= 0 ||
-        razorpayConfig.currency !== 'INR'
-      ) {
-        checkoutInProgressRef.current = false;
-        setLoading(false);
-        setErrorMsg('Razorpay returned an incomplete checkout order. Please try again.');
-        return;
-      }
 
       const options = {
         key: razorpayConfig.key,
@@ -617,22 +496,10 @@ export default function BookingPage() {
         description: razorpayConfig.description || `Pickup Order #${orderData.orderNumber}`,
         image: typeof window !== 'undefined' ? `${window.location.origin}/logo.png` : '/logo.png',
         order_id: razorpayConfig.gatewayOrderId,
-        config: {
-          display: {
-            blocks: {
-              upiQr: {
-                name: 'Pay using UPI QR',
-                instruments: [{ method: 'upi', flows: ['qr'] }],
-              },
-            },
-            sequence: ['block.upiQr'],
-            preferences: { show_default_blocks: true },
-          },
-        },
         handler: async function (response: any) {
           setLoading(true);
           try {
-            const { response: verifyRes, data: verifyData } = await fetchCheckoutRequest('/api/payments/verify', {
+            const verifyRes = await fetch('/api/payments/verify', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -643,26 +510,19 @@ export default function BookingPage() {
               }),
             });
 
-            checkoutInProgressRef.current = false;
+            const verifyData = await verifyRes.json();
             setLoading(false);
 
-            const verifiedStatus = verifyData?.data?.status;
-
-            if (verifyRes.ok && verifyData?.success && verifiedStatus === 'CAPTURED') {
+            if (verifyRes.ok && verifyData.success) {
               setSuccessOrder({
                 ...orderData,
-                paymentStatus: verifiedStatus,
-              });
-            } else if (verifyRes.ok && verifyData?.success && verifiedStatus === 'AUTHORIZED') {
-              setPaymentPendingOrder({
-                ...orderData,
-                paymentStatus: verifiedStatus,
+                paymentStatus: 'CAPTURED',
+                status: 'BOOKING_RECEIVED',
               });
             } else {
-              setErrorMsg(verifyData?.message || 'Payment verification failed server-side. Your booking has not been confirmed.');
+              setErrorMsg(verifyData.message || 'Payment verification failed server-side. Your booking has not been confirmed.');
             }
           } catch {
-            checkoutInProgressRef.current = false;
             setLoading(false);
             setErrorMsg('Network error verifying payment. Please check your order in My Pickups.');
           }
@@ -676,7 +536,6 @@ export default function BookingPage() {
         },
         modal: {
           ondismiss: function () {
-            checkoutInProgressRef.current = false;
             setLoading(false);
             setErrorMsg('Payment process was cancelled. Your booking has not been confirmed.');
           },
@@ -685,55 +544,19 @@ export default function BookingPage() {
 
       const rzp = new (window as any).Razorpay(options);
       rzp.on('payment.failed', function (response: any) {
-        checkoutInProgressRef.current = false;
         setLoading(false);
         setErrorMsg(`Payment failed: ${response?.error?.description || 'Transaction declined.'} Your booking has not been confirmed.`);
       });
 
       // Open Razorpay Checkout (BEFORE confirming booking)
       rzp.open();
-      checkoutInProgressRef.current = false;
     } catch (err: any) {
-      checkoutInProgressRef.current = false;
       setLoading(false);
-      setErrorMsg(err?.message || 'Unable to prepare or open Razorpay checkout. Please try again.');
+      setErrorMsg('Network error while processing booking request. Please try again.');
     }
   };
 
-  if (paymentPendingOrder) {
-    return (
-      <div className="max-w-2xl mx-auto px-4 py-10">
-        <div className="bg-white rounded-2xl p-6 sm:p-10 shadow-xl border border-slate-200 text-center space-y-5 animate-scale-in">
-          <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mx-auto border border-amber-100">
-            <CreditCard className="w-9 h-9" />
-          </div>
-          <div className="space-y-1.5">
-            <span className="text-[11px] font-bold text-amber-800 bg-amber-50 px-3 py-1 rounded-full uppercase tracking-wider border border-amber-200">
-              Payment Processing
-            </span>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight mt-1">Payment Authorized</h1>
-            <p className="text-xs font-mono font-bold text-slate-500">Order ID: #{paymentPendingOrder.orderNumber}</p>
-          </div>
-          <p className="text-sm text-slate-600 leading-relaxed">
-            Razorpay has authorized your payment, but it has not been captured yet. Your pickup will be confirmed and appear in My Pickups after payment capture is confirmed.
-          </p>
-          <div className="inline-flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
-            Payment status: {paymentPendingOrder.paymentStatus}
-          </div>
-          <div>
-            <Link
-              href="/"
-              className="inline-flex bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-6 py-3 rounded-xl uppercase tracking-wider"
-            >
-              Back to Home
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // SUCCESS CONFIRMATION SCREEN (ONLY shown AFTER server-confirmed capture)
+  // SUCCESS CONFIRMATION SCREEN (ONLY shown AFTER verified Razorpay payment)
   if (successOrder) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-10">
@@ -782,7 +605,7 @@ export default function BookingPage() {
             <div className="flex items-center justify-between">
               <span className="text-slate-600 font-bold">Payment Status:</span>
               <span className="font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md text-[11px]">
-                {successOrder.paymentStatus}
+                ✓ Verified via Razorpay
               </span>
             </div>
           </div>
@@ -869,12 +692,6 @@ export default function BookingPage() {
         <div className="mb-6 p-3.5 bg-rose-50 border border-rose-200 text-rose-900 rounded-xl text-xs font-medium flex items-center gap-2.5 animate-scale-in">
           <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
           <span>{errorMsg}</span>
-        </div>
-      )}
-
-      {authCheckError && (
-        <div className="mb-6 p-3.5 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs font-medium">
-          {authCheckError}
         </div>
       )}
 
@@ -1022,26 +839,6 @@ export default function BookingPage() {
               </button>
             </div>
 
-            {isCustomer && savedAddresses.length > 0 && (
-              <div className="space-y-2" aria-label="Saved pickup addresses">
-                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Use a saved address</p>
-                <div className="flex flex-wrap gap-2">
-                  {savedAddresses.map((address) => (
-                    <button
-                      key={address.id}
-                      type="button"
-                      data-testid={`saved-address-${address.id}`}
-                      aria-pressed={selectedSavedAddressId === address.id}
-                      onClick={() => void selectSavedAddress(address)}
-                      className={`rounded-lg border px-3 py-2 text-xs font-semibold ${selectedSavedAddressId === address.id ? 'border-emerald-600 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700'}`}
-                    >
-                      {address.label || 'Saved'}{address.isDefault ? ' · Default' : ''} — {address.area}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {area && geofenceResult?.serviceable ? (
               <div className="bg-emerald-50/50 border border-emerald-200/80 p-3.5 rounded-xl space-y-1.5">
                 <div className="flex items-center gap-2">
@@ -1103,74 +900,25 @@ export default function BookingPage() {
                   type: 'PICKUP',
                 },
               ]}
-              onGoogleReady={(maps) => {
-                geocoderRef.current = new maps.Geocoder();
-              }}
               onLocationSelect={async (newLat, newLng) => {
-                const requestId = ++mapLocationRequestRef.current;
                 setLat(newLat);
                 setLng(newLng);
-                setAddressVerified(false);
-                setLocationStatusMsg('Verifying the address at the selected pin…');
-                const [check, geocode] = await Promise.all([
-                  runGeofenceCheck(newLat, newLng, false),
-                  new Promise<any>((resolve) => {
-                    if (!geocoderRef.current) return resolve(null);
-                    geocoderRef.current.geocode(
-                      { location: { lat: newLat, lng: newLng } },
-                      (results: any[], status: string) => resolve(status === 'OK' ? results?.[0] : null)
-                    );
-                  }),
-                ]);
-                if (requestId !== mapLocationRequestRef.current) return;
-                setGeofenceResult(check);
-                const components = geocode?.address_components || [];
-                const component = (type: string) => components.find((item: any) => item.types?.includes(type))?.long_name || '';
-                const formatted = geocode?.formatted_address?.trim();
-                const useful = Boolean(
-                  formatted &&
-                    ['street_number', 'route', 'premise', 'subpremise', 'sublocality', 'sublocality_level_1', 'neighborhood', 'locality', 'postal_code']
-                      .some((type) => component(type))
-                );
-                const resolvedAddress = resolvePickupAddressAfterPinMove({
-                  address: fullAddress,
-                  addressSource,
-                  geocodedAddress: formatted,
-                  geocodeUseful: useful,
-                });
-                const updated: SelectedLocationData = {
-                  address: resolvedAddress.address,
-                  addressSource: resolvedAddress.addressSource,
-                  area: useful ? (component('sublocality_level_1') || component('neighborhood') || component('locality') || area || 'Bengaluru') : area,
+                const check = await runGeofenceCheck(newLat, newLng);
+                const locData = {
+                  address: fullAddress || `${area}, Bengaluru`,
+                  area: check?.zone?.name || area || 'Bengaluru',
                   lat: newLat,
                   lng: newLng,
-                  placeId: useful ? (geocode.place_id || undefined) : placeId || undefined,
-                  houseNo: useful && !resolvedAddress.keepConfirmedAddress ? component('street_number') || houseNo : houseNo,
-                  building: useful && !resolvedAddress.keepConfirmedAddress ? (component('premise') || component('subpremise') || building) : building,
-                  street: useful && !resolvedAddress.keepConfirmedAddress ? (component('route') || component('neighborhood') || street) : street,
-                  landmark: useful && !resolvedAddress.keepConfirmedAddress ? (component('point_of_interest') || landmark) : landmark,
-                  pincode: useful && !resolvedAddress.keepConfirmedAddress ? component('postal_code') || pincode : pincode,
                   serviceable: Boolean(check?.serviceable),
                   zoneName: check?.zone?.name,
-                  addressVerified: useful,
                 };
-                applyLocationData(updated, true);
-                setLocationStatusMsg(useful
-                  ? resolvedAddress.keepConfirmedAddress
-                    ? 'Map pin updated. Your selected pickup address is preserved; search for another address if the pickup address should change.'
-                    : null
-                  : 'The pin moved but its address could not be verified. Your previous address is retained; choose an address or move the pin again before booking.');
+                setSelectedLocation(locData);
               }}
               className="h-56 sm:h-64 w-full rounded-xl overflow-hidden shadow-xs border border-slate-200"
             />
             <p className="text-[10px] text-slate-500 font-medium flex items-center gap-1">
               📍 Drag marker or tap anywhere on map to fine-tune your doorstep pickup pin
             </p>
-            {locationStatusMsg && (
-              <p role="status" className="text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                {locationStatusMsg}
-              </p>
-            )}
           </div>
 
           {/* DISPATCH MODE SELECTOR (ASAP vs SCHEDULED) */}
@@ -1292,14 +1040,10 @@ export default function BookingPage() {
               Back
             </button>
             <button
-              disabled={!area || !geofenceResult?.serviceable || !addressVerified}
+              disabled={!area || !geofenceResult?.serviceable}
               onClick={() => {
                 if (!area || !geofenceResult?.serviceable) {
                   setErrorMsg('Please select a pickup location before proceeding.');
-                  return;
-                }
-                if (!addressVerified) {
-                  setErrorMsg(locationStatusMsg || 'Please select a confirmed full pickup address before proceeding.');
                   return;
                 }
                 setErrorMsg('');
@@ -1400,18 +1144,13 @@ export default function BookingPage() {
             </div>
           </div>
 
-          <button
-            type="button"
-            disabled={loading}
-            onClick={handleConfirmOrder}
-            className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex items-center justify-between text-xs w-full text-left hover:border-emerald-400 hover:bg-emerald-50 disabled:opacity-60 disabled:cursor-wait transition-colors"
-          >
+          <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
             <span className="text-slate-600 font-medium">Payment Method:</span>
             <span className="font-bold text-slate-900 flex items-center gap-1.5">
               <CreditCard className="w-4 h-4 text-emerald-600" />
-              Razorpay Checkout (UPI QR / UPI / Cards / NetBanking)
+              Razorpay Checkout (UPI / Cards / NetBanking)
             </span>
-          </button>
+          </div>
 
           {/* ACTION BUTTONS */}
           <div className="flex flex-col gap-2 pt-2">
@@ -1464,7 +1203,19 @@ export default function BookingPage() {
         onClose={() => setLocationSearchModalOpen(false)}
         currentArea={area || 'Select delivery location'}
         onSelectLocation={(data) => {
-          applyLocationData(data, true);
+          setSelectedLocation(data);
+          setArea(data.area);
+          setLat(data.lat);
+          setLng(data.lng);
+          if (data.placeId) setPlaceId(data.placeId);
+          if (data.houseNo) setHouseNo(data.houseNo);
+          if (data.street) setStreet(data.street);
+          if (data.pincode) setPincode(data.pincode);
+          setFullAddress(data.address || `${data.area}, Bengaluru`);
+          setGeofenceResult({
+            serviceable: data.serviceable,
+            zone: data.zoneName ? { name: data.zoneName } : undefined,
+          });
           setLocationSearchModalOpen(false);
         }}
       />

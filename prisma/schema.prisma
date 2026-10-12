@@ -72,7 +72,6 @@ model Address {
   label              String   @default("Home")
   name               String
   phone              String
-  formattedAddress   String?
   houseNo            String
   building           String?
   street             String

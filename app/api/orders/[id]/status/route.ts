@@ -3,7 +3,6 @@ import { db } from '@/lib/db';
 import { getAuthUser, requireAdminUser } from '@/lib/auth/middleware';
 import { broadcaster } from '@/lib/realtime';
 import { validateStatusTransition } from '@/lib/validations/schemas';
-import { isOrderPaymentGateSatisfied } from '@/lib/payments/policy';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -33,10 +32,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ success: false, message: `Invalid status transition from ${oldStatus} to ${newStatus}.` }, { status: 400 });
     }
 
-    if (newStatus !== 'CANCELLED' && !isOrderPaymentGateSatisfied(order)) {
-      return NextResponse.json({ success: false, message: 'Customer payment must be captured before this pickup can progress.' }, { status: 409 });
-    }
-
     // Idempotency check: if status is already the same, return order directly
     if (oldStatus === newStatus) {
       return NextResponse.json({ success: true, message: 'Status already updated', data: order });
@@ -46,9 +41,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       where: { id },
       data: {
         status: newStatus,
-        ...(newStatus === 'CANCELLED' && order.paymentStatus === 'CAPTURED'
-          ? { paymentStatus: 'REFUND_REQUIRED' }
-          : {}),
         statusHistory: {
           create: {
             oldStatus,

@@ -1,8 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { broadcaster } from '@/lib/realtime';
-import { db } from '@/lib/db';
-import { canReceiveAgentEvent, isAgentPickupTarget } from '@/lib/realtime/accessPolicy';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +17,6 @@ export async function GET(req: NextRequest) {
 
   const agentId = authUser.agentId;
   const encoder = new TextEncoder();
-  let unsubscribe = () => {};
 
   const customStream = new ReadableStream({
     start(controller) {
@@ -29,27 +26,29 @@ export async function GET(req: NextRequest) {
       );
 
       // 2. Subscribe to realtime broadcaster
-      unsubscribe = broadcaster.subscribe((eventData) => {
+      const unsubscribe = broadcaster.subscribe((eventData) => {
         try {
           const payload = eventData.payload;
-          if (!canReceiveAgentEvent(eventData.event)) return;
+
+          // Event Targeting logic:
+          // For NEW_PICKUP_AVAILABLE, check if this agent is in targetAgentIds
           if (eventData.event === 'NEW_PICKUP_AVAILABLE') {
-            if (!isAgentPickupTarget(agentId, payload?.targetAgentIds)) {
-              return;
+            const targetIds: string[] = payload?.targetAgentIds || [];
+            if (!targetIds.includes(agentId)) {
+              return; // Ignore event if agent is not targeted/eligible
             }
-          } else {
-            const orderId = payload?.orderId || payload?.order?.id || payload?.id;
-            if (eventData.event === 'AGENT_LOCATION_UPDATED' && payload?.agentId === agentId) {
-              // An agent may receive its own location acknowledgement.
-            } else {
-              if (!orderId) return;
-              void db.order.findUnique({ where: { id: orderId }, select: { agentId: true } }).then((order) => {
-                if (order?.agentId !== agentId) return;
-                controller.enqueue(encoder.encode(`event: ${eventData.event}\ndata: ${JSON.stringify(payload)}\n\n`));
-              }).catch(() => {});
+          } else if (
+            ['ORDER_UPDATED', 'ORDER_ACCEPTED', 'AGENT_STARTED', 'AGENT_ARRIVED', 'ORDER_COMPLETED'].includes(
+              eventData.event
+            )
+          ) {
+            // For active order status changes, ensure event is assigned to this agent
+            if (payload?.agentId && payload.agentId !== agentId) {
               return;
             }
           }
+
+          // Forward event to authenticated agent client
           controller.enqueue(
             encoder.encode(`event: ${eventData.event}\ndata: ${JSON.stringify(payload)}\n\n`)
           );
@@ -59,8 +58,10 @@ export async function GET(req: NextRequest) {
       });
 
       // 3. Clean up subscription when stream closes
+      return () => {
+        unsubscribe();
+      };
     },
-    cancel() { unsubscribe(); },
   });
 
   return new Response(customStream, {

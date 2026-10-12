@@ -94,8 +94,10 @@ export default function CustomerOtpLogin({
         );
       }
 
-      // Do not reveal whether a phone has an account before OTP verification.
-      if (!name || name.trim().length < 2) {
+      // Existing customer name
+      if (data.data?.isExisting && data.data?.existingName) {
+        setName(data.data.existingName);
+      } else if (!name || name.trim().length < 2) {
         setName('Customer');
       }
 

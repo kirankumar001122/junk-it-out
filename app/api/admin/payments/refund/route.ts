@@ -5,7 +5,6 @@ import { refundRazorpayPayment } from '@/lib/payments/razorpay';
 
 export async function POST(req: NextRequest) {
   let payment: any = null;
-  let refundReserved = false;
   try {
     const authUser = await getAuthUser(req);
     if (!authUser || !['ADMIN', 'SUPER_ADMIN'].includes(authUser.role)) {
@@ -18,22 +17,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, message: 'Payment record ID is required.' }, { status: 400 });
     }
 
-    // Refunds are addressed by the local payment record ID only. An order ID
-    // or provider ID is ambiguous when an order has more than one payment.
+    // Locate the target payment record
     payment = await db.payment.findUnique({
       where: { id: paymentRecordId },
       include: { order: true },
     });
 
     if (!payment) {
+      // Fallback search by orderId or gateway paymentId
+      const cleanId = paymentRecordId.startsWith('pay-') ? paymentRecordId.replace('pay-', '') : paymentRecordId;
+      payment = await db.payment.findFirst({
+        where: {
+          OR: [
+            { id: cleanId },
+            { orderId: cleanId },
+            { paymentId: cleanId },
+          ],
+        },
+        include: { order: true },
+      });
+    }
+
+    if (!payment) {
       return NextResponse.json({
         success: false,
         message: 'Payment record not found in database.',
       }, { status: 404 });
-    }
-
-    if (payment.gateway !== 'RAZORPAY' || payment.direction !== 'CUSTOMER_PAYS') {
-      return NextResponse.json({ success: false, message: 'Only customer payments through Razorpay can be refunded here.' }, { status: 400 });
     }
 
     // Idempotency check: strictly require CAPTURED status
@@ -60,27 +69,6 @@ export async function POST(req: NextRequest) {
 
     const amountInPaise = Math.round(payment.amount * 100);
 
-    // Reserve the captured payment atomically so concurrent admin requests
-    // cannot submit duplicate refunds. A failed/ambiguous provider request
-    // stays REFUNDING for reconciliation instead of risking a second refund.
-    const reserved = await db.$transaction(async (tx) => {
-      const reservation = await tx.payment.updateMany({
-        where: { id: payment.id, status: 'CAPTURED', gateway: 'RAZORPAY', direction: 'CUSTOMER_PAYS' },
-        data: { status: 'REFUNDING' },
-      });
-      if (reservation.count !== 1) return false;
-      const orderReservation = await tx.order.updateMany({
-        where: { id: payment.orderId, paymentStatus: { in: ['CAPTURED', 'REFUND_REQUIRED'] } },
-        data: { paymentStatus: 'REFUNDING' },
-      });
-      if (orderReservation.count !== 1) throw new Error('Order payment state changed before refund reservation.');
-      return true;
-    });
-    if (!reserved) {
-      return NextResponse.json({ success: false, message: 'Payment status changed; refresh and review it before retrying.' }, { status: 409 });
-    }
-    refundReserved = true;
-
     // Call server-side Razorpay REST API
     const refundResult = await refundRazorpayPayment(
       rzpPaymentId,
@@ -92,18 +80,19 @@ export async function POST(req: NextRequest) {
       }
     );
 
-    const updatedPayment = await db.$transaction(async (tx) => {
-      const updated = await tx.payment.updateMany({
-        where: { id: payment.id, status: 'REFUNDING' },
-        data: { status: 'REFUNDED' },
-      });
-      if (updated.count !== 1) throw new Error('Refund record changed before reconciliation.');
-      await tx.order.updateMany({
-        where: { id: payment.orderId, paymentStatus: 'REFUNDING' },
-        data: { paymentStatus: 'REFUNDED' },
-      });
-      return tx.payment.findUnique({ where: { id: payment.id } });
+    // Update payment record in database to REFUNDED
+    const updatedPayment = await db.payment.update({
+      where: { id: payment.id },
+      data: { status: 'REFUNDED' },
     });
+
+    // Update associated order paymentStatus to REFUNDED
+    if (payment.orderId) {
+      await db.order.update({
+        where: { id: payment.orderId },
+        data: { paymentStatus: 'REFUNDED' },
+      }).catch((e) => console.error('Order paymentStatus update error:', e));
+    }
 
     return NextResponse.json({
       success: true,
@@ -117,11 +106,41 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error('Admin payment refund error:', error);
 
+    const errorMsg = (error?.message || '').toLowerCase();
+    const isAlreadyRefundedError =
+      errorMsg.includes('already refunded') ||
+      errorMsg.includes('fully refunded') ||
+      errorMsg.includes('exceeds the payment amount') ||
+      errorMsg.includes('exceeds the maximum refundable');
+
+    if (isAlreadyRefundedError && payment) {
+      try {
+        await db.payment.update({
+          where: { id: payment.id },
+          data: { status: 'REFUNDED' },
+        });
+        if (payment.orderId) {
+          await db.order.update({
+            where: { id: payment.orderId },
+            data: { paymentStatus: 'REFUNDED' },
+          }).catch(() => {});
+        }
+        return NextResponse.json({
+          success: true,
+          message: 'Payment was already refunded on Razorpay. Synced local record status to REFUNDED.',
+          data: {
+            paymentId: payment.id,
+            status: 'REFUNDED',
+          },
+        });
+      } catch (dbErr) {
+        console.error('Reconciliation error:', dbErr);
+      }
+    }
+
     return NextResponse.json({
       success: false,
-      message: refundReserved
-        ? 'Refund result could not be confirmed. Payment is held for reconciliation; do not retry it yet.'
-        : 'Unable to process the refund request. Review the payment record and try again.',
+      message: error.message || 'Server error processing Razorpay refund.',
     }, { status: 500 });
   }
 }

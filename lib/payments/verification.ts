@@ -9,8 +9,18 @@ import {
 } from '@/lib/services/agentService';
 
 import { broadcaster } from '@/lib/realtime';
-import { verifyAndRecordPaymentCore } from './verificationCore';
-export { PaymentVerificationError } from './verificationCore';
+
+export class PaymentVerificationError extends Error {
+  statusCode: number;
+
+  constructor(
+    message: string,
+    statusCode = 400
+  ) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
 
 // =========================================================
 // DISPATCH PAID ORDER TO AGENTS
@@ -71,8 +81,7 @@ async function dispatchPaidOrderToAgents(
     // -------------------------------------------------------
 
     if (
-      order.paymentStatus !== 'CAPTURED' ||
-      ['CANCELLED', 'PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'].includes(order.status)
+      order.paymentStatus !== 'CAPTURED'
     ) {
       console.log(
         `[DISPATCH] Order #${order.orderNumber} not dispatched because paymentStatus is ${order.paymentStatus}.`
@@ -219,17 +228,293 @@ async function dispatchPaidOrderToAgents(
   }
 }
 
-export async function verifyAndRecordPayment(input: {
-  orderId?: string;
-  razorpayOrderId: string;
-  razorpayPaymentId: string;
-  razorpaySignature: string;
-  customerId?: string | null;
-}) {
-  return verifyAndRecordPaymentCore(input, {
-    store: db,
-    verifySignature: verifyRazorpayPaymentSignature,
-    fetchPayment: fetchRazorpayPayment,
-    dispatchPaidOrder: dispatchPaidOrderToAgents,
-  });
+// =========================================================
+// VERIFY AND RECORD PAYMENT
+// =========================================================
+
+export async function verifyAndRecordPayment(
+  input: {
+    orderId?: string;
+
+    razorpayOrderId: string;
+
+    razorpayPaymentId: string;
+
+    razorpaySignature: string;
+
+    customerId?: string | null;
+  }
+) {
+  // -------------------------------------------------------
+  // 1. FIND PAYMENT ATTEMPT
+  // -------------------------------------------------------
+
+  const payment =
+    await db.payment.findFirst({
+      where: {
+        ...(input.orderId
+          ? {
+              orderId:
+                input.orderId,
+            }
+          : {}),
+
+        gatewayOrderId:
+          input.razorpayOrderId,
+
+        direction:
+          'CUSTOMER_PAYS',
+      },
+
+      include: {
+        order: true,
+      },
+    });
+
+  // -------------------------------------------------------
+  // 2. PAYMENT MUST EXIST
+  // -------------------------------------------------------
+
+  if (!payment) {
+    throw new PaymentVerificationError(
+      'Payment attempt not found.',
+      404
+    );
+  }
+
+  // -------------------------------------------------------
+  // 3. CUSTOMER OWNERSHIP CHECK
+  // -------------------------------------------------------
+
+  if (
+    input.customerId &&
+    payment.order.customerId !==
+      input.customerId
+  ) {
+    throw new PaymentVerificationError(
+      'You are not authorized to verify this payment.',
+      403
+    );
+  }
+
+  // -------------------------------------------------------
+  // 4. PREVENT PAYMENT ID REUSE
+  // -------------------------------------------------------
+
+  const reusedPayment =
+    await db.payment.findFirst({
+      where: {
+        paymentId:
+          input.razorpayPaymentId,
+
+        id: {
+          not: payment.id,
+        },
+      },
+    });
+
+  if (reusedPayment) {
+    throw new PaymentVerificationError(
+      'Razorpay payment ID has already been used.',
+      409
+    );
+  }
+
+  // -------------------------------------------------------
+  // 5. ALREADY CAPTURED
+  // -------------------------------------------------------
+
+  if (
+    payment.status === 'CAPTURED' &&
+    payment.paymentId ===
+      input.razorpayPaymentId
+  ) {
+    return {
+      id: payment.id,
+
+      orderId:
+        payment.orderId,
+
+      status:
+        payment.status,
+    };
+  }
+
+  // -------------------------------------------------------
+  // 6. VERIFY RAZORPAY SIGNATURE
+  // -------------------------------------------------------
+
+  const validSignature =
+    verifyRazorpayPaymentSignature(
+      input.razorpayOrderId,
+      input.razorpayPaymentId,
+      input.razorpaySignature
+    );
+
+  if (!validSignature) {
+    throw new PaymentVerificationError(
+      'Invalid Razorpay payment signature.',
+      400
+    );
+  }
+
+  // -------------------------------------------------------
+  // 7. FETCH PAYMENT FROM RAZORPAY
+  // -------------------------------------------------------
+
+  const providerPayment =
+    await fetchRazorpayPayment(
+      input.razorpayPaymentId
+    );
+
+  // -------------------------------------------------------
+  // 8. VERIFY PAYMENT DETAILS
+  // -------------------------------------------------------
+
+  if (
+    providerPayment.id !==
+      input.razorpayPaymentId ||
+
+    providerPayment.order_id !==
+      input.razorpayOrderId ||
+
+    providerPayment.currency !==
+      'INR' ||
+
+    providerPayment.amount !==
+      Math.round(
+        Number(payment.amount) * 100
+      )
+  ) {
+    throw new PaymentVerificationError(
+      'Razorpay payment does not match the expected order amount.',
+      400
+    );
+  }
+
+  // -------------------------------------------------------
+  // 9. DETERMINE PAYMENT STATUS
+  // -------------------------------------------------------
+
+  let localStatus:
+    | 'CAPTURED'
+    | 'AUTHORIZED'
+    | null = null;
+
+  if (
+    providerPayment.status ===
+    'captured'
+  ) {
+    localStatus =
+      'CAPTURED';
+  } else if (
+    providerPayment.status ===
+    'authorized'
+  ) {
+    localStatus =
+      'AUTHORIZED';
+  }
+
+  // -------------------------------------------------------
+  // 10. PAYMENT MUST BE AUTHORIZED OR CAPTURED
+  // -------------------------------------------------------
+
+  if (!localStatus) {
+    throw new PaymentVerificationError(
+      `Razorpay payment is not authorized or captured (${providerPayment.status}).`,
+      400
+    );
+  }
+
+  // -------------------------------------------------------
+  // 11. UPDATE PAYMENT + ORDER
+  // -------------------------------------------------------
+
+  const result =
+    await db.$transaction(
+      async (tx) => {
+        // -----------------------------------------------
+        // UPDATE PAYMENT
+        // -----------------------------------------------
+
+        const updatedPayment =
+          await tx.payment.update({
+            where: {
+              id: payment.id,
+            },
+
+            data: {
+              paymentId:
+                input.razorpayPaymentId,
+
+              signature:
+                input.razorpaySignature,
+
+              status:
+                localStatus,
+            },
+          });
+
+        // -----------------------------------------------
+        // UPDATE ORDER PAYMENT STATUS
+        // -----------------------------------------------
+
+        const updatedOrder =
+          await tx.order.update({
+            where: {
+              id: payment.orderId,
+            },
+
+            data: {
+              paymentStatus:
+                localStatus,
+            },
+          });
+
+        return {
+          payment:
+            updatedPayment,
+
+          order:
+            updatedOrder,
+        };
+      }
+    );
+
+  // -------------------------------------------------------
+  // 12. DISPATCH ONLY AFTER CAPTURED
+  // -------------------------------------------------------
+  //
+  // AUTHORIZED:
+  //     No agent notification.
+  //
+  // CAPTURED:
+  //     Agent notification is sent.
+  //
+  // PENDING / FAILED:
+  //     This code never reaches dispatch.
+  // -------------------------------------------------------
+
+  if (
+    localStatus === 'CAPTURED'
+  ) {
+    await dispatchPaidOrderToAgents(
+      result.order.id
+    );
+  }
+
+  // -------------------------------------------------------
+  // 13. RETURN PAYMENT RESULT
+  // -------------------------------------------------------
+
+  return {
+    id:
+      result.payment.id,
+
+    orderId:
+      result.order.id,
+
+    status:
+      result.payment.status,
+  };
 }

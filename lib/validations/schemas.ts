@@ -44,12 +44,10 @@ export function validateCreateOrderInput(body: any): { valid: boolean; error?: s
   }
 
   const { houseNo, street, area, lat, lng } = body.address;
-  if (body.address.formattedAddress !== undefined && typeof body.address.formattedAddress !== 'string') {
-    return { valid: false, error: 'Formatted pickup address must be a string.' };
-  }
-  const hasFormattedAddress = typeof body.address.formattedAddress === 'string' && body.address.formattedAddress.trim().length > 0;
-  if (!hasFormattedAddress || typeof area !== 'string' || !area.trim()) {
-    return { valid: false, error: 'A confirmed full pickup address and service area are required.' };
+  const effectiveHouseNo = houseNo || body.address.formattedAddress || area;
+  const effectiveStreet = street || body.address.formattedAddress || area;
+  if (!effectiveHouseNo || !effectiveStreet || !area) {
+    return { valid: false, error: 'Pickup area or address is required in address.' };
   }
 
   if (!validateCoordinates(lat, lng)) {

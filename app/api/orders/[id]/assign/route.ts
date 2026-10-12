@@ -4,7 +4,6 @@ import { getAuthUser, requireAdminUser } from '@/lib/auth/middleware';
 import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
-import { isOrderPaymentGateSatisfied } from '@/lib/payments/policy';
 
 export async function POST(
   req: NextRequest,
@@ -30,10 +29,6 @@ export async function POST(
 
     if (!order) {
       return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
-    }
-
-    if (!isOrderPaymentGateSatisfied(order)) {
-      return errorResponse('PAYMENT_REQUIRED', 'Customer payment must be captured before this pickup can be assigned.', 409);
     }
 
     const agent = await db.agent.findUnique({

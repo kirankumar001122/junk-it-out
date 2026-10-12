@@ -13,13 +13,23 @@ import {
 } from 'lucide-react';
 import { BENGALURU_ZONES } from '@/lib/geofence';
 import { loadGoogleMaps } from '@/components/InteractiveMap';
-import type { SelectedLocationData } from '@/lib/selectedLocation';
-import { preserveConfirmedPickupAddress } from '@/lib/address';
+import { setSelectedLocation } from '@/lib/selectedLocation';
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  onSelectLocation: (locationData: SelectedLocationData) => void;
+  onSelectLocation: (locationData: {
+    address: string;
+    area: string;
+    lat: number;
+    lng: number;
+    placeId?: string;
+    houseNo?: string;
+    street?: string;
+    pincode?: string;
+    serviceable: boolean;
+    zoneName?: string;
+  }) => void;
   currentArea?: string;
 };
 
@@ -241,10 +251,7 @@ export default function LocationSearchModal({
             if (status === 'OK' && results?.[0]?.geometry?.location) {
               const targetLat = results[0].geometry.location.lat();
               const targetLng = results[0].geometry.location.lng();
-              const formattedAddress = preserveConfirmedPickupAddress(
-                prediction.description,
-                results[0].formatted_address
-              );
+              const formattedAddress = results[0].formatted_address || prediction.description;
 
               const components = results[0].address_components || [];
               const valueFor = (type: string) =>
@@ -256,26 +263,21 @@ export default function LocationSearchModal({
                 'Bengaluru';
               const streetName = valueFor('route') || valueFor('neighborhood') || '';
               const postalCode = valueFor('postal_code') || '';
-              const houseNumber = valueFor('street_number');
-              const buildingName = valueFor('premise') || valueFor('subpremise');
 
               const check = await checkServiceability(targetLat, targetLng);
               if (check.serviceable) {
                 const locData = {
                   address: formattedAddress,
-                  addressSource: 'places' as const,
                   area: areaName,
                   lat: targetLat,
                   lng: targetLng,
                   placeId: prediction.place_id,
-                  houseNo: houseNumber,
-                  building: buildingName,
                   street: streetName,
                   pincode: postalCode,
                   serviceable: true,
                   zoneName: check.zoneName,
-                  addressVerified: true,
                 };
+                setSelectedLocation(locData);
                 onSelectLocation(locData);
                 onClose();
               } else {
@@ -314,21 +316,13 @@ export default function LocationSearchModal({
       if (check.serviceable) {
         const locData = {
           address: `${zone.name}, Bengaluru`,
-          addressSource: 'service-zone' as const,
           area: zone.name,
           lat,
           lng,
-          placeId: undefined,
-          houseNo: '',
-          building: '',
-          street: '',
-          landmark: '',
-          pincode: '',
           serviceable: true,
           zoneName: check.zoneName || zone.name,
-          // A service-zone center identifies an area, not a confirmed doorstep.
-          addressVerified: false,
         };
+        setSelectedLocation(locData);
         onSelectLocation(locData);
         onClose();
       } else {
@@ -374,31 +368,21 @@ export default function LocationSearchModal({
                     const areaName = valueFor('sublocality_level_1') || valueFor('locality') || 'Bengaluru';
                     const streetName = valueFor('route') || '';
                     const postalCode = valueFor('postal_code') || '';
-                    const houseNumber = valueFor('street_number');
-                    const buildingName = valueFor('premise') || valueFor('subpremise');
-
-                    if (!formattedAddress || formattedAddress.startsWith('GPS (')) {
-                      setServiceError('Unable to find a street address for your current location. Search for an address or select a service zone.');
-                      return;
-                    }
 
                     const check = await checkServiceability(userLat, userLng);
                     if (check.serviceable) {
                       const locData = {
                         address: formattedAddress,
-                        addressSource: 'reverse-geocoded' as const,
                         area: areaName,
                         lat: userLat,
                         lng: userLng,
                         placeId: res.place_id,
-                        houseNo: houseNumber,
-                        building: buildingName,
                         street: streetName,
                         pincode: postalCode,
                         serviceable: true,
                         zoneName: check.zoneName,
-                        addressVerified: true,
                       };
+                      setSelectedLocation(locData);
                       onSelectLocation(locData);
                       onClose();
                     } else {
@@ -407,7 +391,23 @@ export default function LocationSearchModal({
                       );
                     }
                   } else {
-                    setServiceError('Unable to find a street address for your current location. Search for an address or select a service zone.');
+                    const check = await checkServiceability(userLat, userLng);
+                    if (check.serviceable) {
+                      const locData = {
+                        address: `Near (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`,
+                        area: 'Bengaluru',
+                        lat: userLat,
+                        lng: userLng,
+                        serviceable: true,
+                      };
+                      setSelectedLocation(locData);
+                      onSelectLocation(locData);
+                      onClose();
+                    } else {
+                      setServiceError(
+                        "We're not serving this location yet. Please select a location within Bengaluru."
+                      );
+                    }
                   }
                 } finally {
                   setLoadingGeolocate(false);
@@ -415,8 +415,24 @@ export default function LocationSearchModal({
               }
             );
           } else {
+            const check = await checkServiceability(userLat, userLng);
             setLoadingGeolocate(false);
-            setServiceError('Location reverse geocoding is unavailable. Search for an address or select a service zone.');
+            if (check.serviceable) {
+              const locData = {
+                address: `GPS (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`,
+                area: 'Bengaluru',
+                lat: userLat,
+                lng: userLng,
+                serviceable: true,
+              };
+              setSelectedLocation(locData);
+              onSelectLocation(locData);
+              onClose();
+            } else {
+              setServiceError(
+                "We're not serving this location yet. Please select a location within Bengaluru."
+              );
+            }
           }
         } catch (e) {
           setLoadingGeolocate(false);

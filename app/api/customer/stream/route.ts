@@ -1,9 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { broadcaster } from '@/lib/realtime';
-import { db } from '@/lib/db';
-import { canReceiveCustomerEvent } from '@/lib/realtime/accessPolicy';
-import { isCustomerStreamRole } from '@/lib/customerAddresses';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,7 +8,7 @@ export async function GET(req: NextRequest) {
   const authUser = await getAuthUser(req);
 
   // Security: Reject unauthenticated users
-  if (!authUser || !isCustomerStreamRole(authUser.role, authUser.userId)) {
+  if (!authUser || !authUser.userId) {
     return new Response(JSON.stringify({ success: false, error: 'Authentication required for customer notification stream.' }), {
       status: 401,
       headers: { 'Content-Type': 'application/json' },
@@ -21,7 +18,6 @@ export async function GET(req: NextRequest) {
   const customerId = authUser.customerId;
   const userId = authUser.userId;
   const encoder = new TextEncoder();
-  let unsubscribe = () => {};
 
   const customStream = new ReadableStream({
     start(controller) {
@@ -31,25 +27,39 @@ export async function GET(req: NextRequest) {
       );
 
       // 2. Subscribe to realtime broadcaster with server-side ownership enforcement
-      unsubscribe = broadcaster.subscribe((eventData) => {
+      const unsubscribe = broadcaster.subscribe((eventData) => {
         try {
           const payload = eventData.payload;
 
-          if (!canReceiveCustomerEvent(eventData.event)) return;
-          const orderId = payload?.orderId || payload?.order?.id || payload?.id;
-          if (!orderId) return;
-          void db.order.findUnique({ where: { id: orderId }, select: { customerId: true, customer: { select: { userId: true } } } }).then((order) => {
-            if (!order || (order.customerId !== customerId && order.customer.userId !== userId)) return;
-            controller.enqueue(encoder.encode(`event: ${eventData.event}\ndata: ${JSON.stringify(payload)}\n\n`));
-          }).catch(() => {});
+          // Server-side Ownership Security:
+          // A customer MUST ONLY receive events for orders belonging to their profile/userId.
+          if (['AGENT_ASSIGNED', 'ORDER_UPDATED', 'ORDER_ACCEPTED'].includes(eventData.event)) {
+            const eventCustomerId = payload?.customerId || payload?.order?.customerId;
+            const eventUserId = payload?.userId || payload?.order?.customer?.userId;
+
+            const isOwner =
+              (customerId && eventCustomerId === customerId) ||
+              (userId && eventUserId === userId);
+
+            if (!isOwner) {
+              return; // Suppress notification for other customers
+            }
+          }
+
+          // Forward event to authenticated customer client
+          controller.enqueue(
+            encoder.encode(`event: ${eventData.event}\ndata: ${JSON.stringify(payload)}\n\n`)
+          );
         } catch (err) {
           console.error('[CUSTOMER SSE] Stream dispatch error:', err);
         }
       });
 
       // 3. Clean up subscription on stream close
+      return () => {
+        unsubscribe();
+      };
     },
-    cancel() { unsubscribe(); },
   });
 
   return new Response(customStream, {

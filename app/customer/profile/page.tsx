@@ -9,7 +9,6 @@ import {
   Mail,
   MapPin,
   Package,
-  History,
   Ticket,
   AlertCircle,
   LogOut,
@@ -29,25 +28,15 @@ export default function CustomerProfilePage() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutSuccess, setLogoutSuccess] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
-  const [authCheckError, setAuthCheckError] = useState('');
 
   const fetchAuthUser = useCallback(async () => {
     setCheckingAuth(true);
     try {
       const res = await fetch('/api/auth/me');
       const data = await res.json();
-      if (res.status === 401) {
-        setAuthCheckError('');
-        setUser(null);
-        setIsCustomer(false);
-        return;
-      }
-      if (!res.ok || !data.success) {
-        setAuthCheckError('We could not verify your session because the account service is temporarily unavailable. Please try again.');
-        return;
-      }
-      setAuthCheckError('');
+      console.log('[PROFILE] Auth user response:', data);
       if (res.ok && data.success && data.data?.user?.role === 'CUSTOMER') {
+        console.log('[PROFILE] Setting user with name:', data.data.user.name);
         setUser(data.data.user);
         setIsCustomer(true);
       } else {
@@ -55,7 +44,8 @@ export default function CustomerProfilePage() {
         setIsCustomer(false);
       }
     } catch {
-      setAuthCheckError('We could not reach the account service to verify your session. Please try again.');
+      setUser(null);
+      setIsCustomer(false);
     } finally {
       setCheckingAuth(false);
     }
@@ -72,8 +62,7 @@ export default function CustomerProfilePage() {
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
-      const response = await fetch('/api/auth/logout', { method: 'POST' });
-      if (!response.ok) throw new Error('Logout request failed.');
+      await fetch('/api/auth/logout', { method: 'POST' });
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('jio_auth_change'));
       }
@@ -82,7 +71,6 @@ export default function CustomerProfilePage() {
       setIsCustomer(false);
       setLogoutSuccess(true);
     } catch (e) {
-      setAuthCheckError('Logout could not be confirmed. Your session is still shown until the server confirms it ended.');
       console.error('Logout error:', e);
     } finally {
       setLoggingOut(false);
@@ -110,8 +98,7 @@ export default function CustomerProfilePage() {
     {
       title: 'My Orders & Addresses',
       items: [
-        { label: 'My Pickups', href: '/my-pickups', icon: Package },
-        { label: 'Pickup History', href: '/customer/history', icon: History },
+        { label: 'My Pickups & Order History', href: '/my-pickups', icon: Package },
         { label: 'Saved Addresses (Home, Work)', href: '/customer/addresses', icon: MapPin },
         { label: 'Offers & Coupons', href: '/customer/coupons', icon: Ticket },
       ],
@@ -136,17 +123,6 @@ export default function CustomerProfilePage() {
   }
 
   if (!isCustomer || !user) {
-    if (authCheckError) {
-      return (
-        <div className="max-w-xl mx-auto px-4 py-12">
-          <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl p-5 space-y-3">
-            <h1 className="text-base font-bold">Account status unavailable</h1>
-            <p className="text-sm">{authCheckError}</p>
-            <button onClick={() => fetchAuthUser()} className="text-sm font-bold underline">Try again</button>
-          </div>
-        </div>
-      );
-    }
     return (
       <div className="max-w-xl mx-auto px-4 py-12 space-y-6">
         {logoutSuccess && (
@@ -187,9 +163,6 @@ export default function CustomerProfilePage() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
-      {authCheckError && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-xs">{authCheckError}</div>
-      )}
       {/* PROFILE HEADER CARD */}
       <div className="bg-slate-900 text-white rounded-3xl p-6 shadow-xl relative overflow-hidden">
         <div className="flex items-center gap-4">

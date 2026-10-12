@@ -1,11 +1,8 @@
 import { NextRequest } from 'next/server';
-import type { Prisma } from '@prisma/client';
 import { createOrder } from '@/lib/services/orderService';
 import { validateCreateOrderInput } from '@/lib/validations/schemas';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { db } from '@/lib/db';
-import { LEGACY_ADDRESS_SELECT } from '@/lib/services/customerService';
-import { readWithFormattedAddressFallback } from '@/lib/orders/readWithFormattedAddressFallback';
 import {
   successResponse,
   errorResponse,
@@ -77,10 +74,6 @@ export async function GET(req: NextRequest) {
         'Authentication required to view orders.',
         401
       );
-    }
-
-    if (!['CUSTOMER', 'AGENT', 'ADMIN', 'SUPER_ADMIN'].includes(authUser.role)) {
-      return errorResponse('FORBIDDEN', 'You are not authorized to view orders.', 403);
     }
 
     const { searchParams } =
@@ -175,9 +168,11 @@ export async function GET(req: NextRequest) {
     //
     // =====================================================
 
-    const orderQuery = {
-      where: whereClause,
-      include: {
+    const orders =
+      await db.order.findMany({
+        where: whereClause,
+
+        include: {
           customer: {
             include: {
               user: true,
@@ -219,31 +214,14 @@ export async function GET(req: NextRequest) {
               timestamp: 'desc',
             },
           },
-
-          settlement: true,
-      },
-      orderBy: {
-        createdAt: 'desc' as const,
-      },
-      take: limit,
-    } satisfies Prisma.OrderFindManyArgs;
-
-    const orders = await readWithFormattedAddressFallback(
-      () => db.order.findMany(orderQuery),
-      () => db.order.findMany({
-        ...orderQuery,
-        include: {
-          ...orderQuery.include,
-          address: { select: LEGACY_ADDRESS_SELECT },
         },
-      }),
-      (legacyOrders) => legacyOrders.map((order) => ({
-        ...order,
-        address: order.address
-          ? { ...order.address, formattedAddress: null }
-          : null,
-      }))
-    );
+
+        orderBy: {
+          createdAt: 'desc',
+        },
+
+        take: limit,
+      });
 
     return successResponse(
       orders

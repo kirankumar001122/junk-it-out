@@ -122,12 +122,6 @@ export default function OrderTrackingPage() {
     };
   }, [id]);
 
-  useEffect(() => {
-    if (order && order.financialDirection === 'CUSTOMER_PAYS' && order.paymentStatus !== 'CAPTURED') {
-      loadRazorpayScript().catch(() => {});
-    }
-  }, [order]);
-
   if (loading) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
@@ -237,6 +231,12 @@ export default function OrderTrackingPage() {
       document.body.appendChild(script);
     });
   };
+
+  useEffect(() => {
+    if (order && order.financialDirection === 'CUSTOMER_PAYS' && order.paymentStatus !== 'CAPTURED') {
+      loadRazorpayScript().catch(() => {});
+    }
+  }, [order]);
 
   const handlePayNow = async () => {
     try {

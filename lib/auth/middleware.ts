@@ -1,19 +1,28 @@
 import { NextRequest } from 'next/server';
 import { verifyToken, JwtPayload } from './jwt';
 import { db } from '../db';
-import { isAdminPrincipal } from './accessPolicy';
-import { validateAgentTokenVersion } from './agentTokenVersion';
 
 async function validatePayload(payload: JwtPayload | null): Promise<JwtPayload | null> {
   if (!payload) return null;
 
-  return validateAgentTokenVersion(payload, async (agentId) => {
-    const agent = await db.agent.findUnique({
-      where: { id: agentId },
-      select: { tokenVersion: true } as any,
-    });
-    return agent ? (agent as any).tokenVersion ?? 1 : null;
-  });
+  if (payload.role === 'AGENT' && payload.agentId) {
+    try {
+      const agent = await db.agent.findUnique({
+        where: { id: payload.agentId },
+        select: { tokenVersion: true } as any,
+      });
+      if (!agent) return null;
+      const currentDbVersion = (agent as any).tokenVersion ?? 1;
+      const tokenVersion = payload.tokenVersion ?? 1;
+      if (tokenVersion < currentDbVersion) {
+        return null;
+      }
+    } catch (e) {
+      console.error('Agent token version check error:', e);
+    }
+  }
+
+  return payload;
 }
 
 export async function getAuthUser(req: NextRequest): Promise<JwtPayload | null> {
@@ -42,7 +51,7 @@ export function hasRole(user: JwtPayload | null, allowedRoles: string[]): boolea
 }
 
 export function isAdminRole(user: JwtPayload | null): boolean {
-  return Boolean(user && isAdminPrincipal(user.role));
+  return hasRole(user, ['ADMIN', 'SUPER_ADMIN']);
 }
 
 export function requireAdminUser(user: JwtPayload | null): JwtPayload | null {
