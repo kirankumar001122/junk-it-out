@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import {
   Package,
@@ -20,6 +20,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import CustomerOtpLogin from '@/components/CustomerOtpLogin';
+import { readCustomerPickupsResponse } from '@/lib/customerPickupsResponse';
 
 export default function MyPickupsPage() {
   const [orders, setOrders] = useState<any[]>([]);
@@ -27,36 +28,56 @@ export default function MyPickupsPage() {
   const [activeTab, setActiveTab] = useState<'ALL' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED'>('ALL');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [unauthenticated, setUnauthenticated] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const [agentNotice, setAgentNotice] = useState<any | null>(null);
+  const requestInFlight = useRef(false);
+  const mounted = useRef(false);
 
   const fetchOrders = async () => {
-    setLoading(true);
-    setErrorMsg(null);
-    setUnauthenticated(false);
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
+    if (!mounted.current) setLoading(true);
     try {
-      const res = await fetch('/api/orders');
-      const data = await res.json();
-      if (res.status === 401 || (!data.success && data.message?.includes('Authentication required'))) {
+      const res = await fetch('/api/orders', { credentials: 'same-origin' });
+      const result = await readCustomerPickupsResponse(res);
+      if (!mounted.current) return;
+
+      if (result.kind === 'unauthenticated') {
+        setSessionReady(true);
         setUnauthenticated(true);
         setOrders([]);
-      } else if (data.success) {
-        setOrders(data.data || []);
+        setErrorMsg(null);
+      } else if (result.kind === 'orders') {
+        setSessionReady(true);
+        setUnauthenticated(false);
+        setOrders(result.orders);
+        setErrorMsg(null);
       } else {
-        setErrorMsg(data.message || 'Failed to load your pickup history.');
+        setErrorMsg(result.message);
       }
     } catch (e: any) {
       console.error('Fetch orders error:', e);
-      setErrorMsg('Network error loading pickup history. Please check your connection.');
+      if (mounted.current) {
+        setErrorMsg('Network error loading pickup history. Please check your connection.');
+      }
     } finally {
-      setLoading(false);
+      requestInFlight.current = false;
+      if (mounted.current) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchOrders();
+    mounted.current = true;
+    void fetchOrders();
 
-    if (unauthenticated) return;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sessionReady || unauthenticated) return;
 
     let eventSource: EventSource | null = null;
     try {
@@ -84,12 +105,18 @@ export default function MyPickupsPage() {
       console.error('[CUSTOMER SSE] Init notice:', err);
     }
 
+    // Polling fallback to keep pickups fresh if stream drops
+    const pollInterval = window.setInterval(() => {
+      fetchOrders();
+    }, 5000);
+
     return () => {
       if (eventSource) {
         eventSource.close();
       }
+      window.clearInterval(pollInterval);
     };
-  }, [unauthenticated]);
+  }, [sessionReady, unauthenticated]);
 
   if (unauthenticated && !loading) {
     return (
@@ -115,7 +142,11 @@ export default function MyPickupsPage() {
         <CustomerOtpLogin
           open={loginOpen}
           onClose={() => setLoginOpen(false)}
-          onAuthenticated={() => fetchOrders()}
+          onAuthenticated={() => {
+            setSessionReady(true);
+            setUnauthenticated(false);
+            void fetchOrders();
+          }}
         />
       </div>
     );
@@ -407,7 +438,11 @@ export default function MyPickupsPage() {
       <CustomerOtpLogin
         open={loginOpen}
         onClose={() => setLoginOpen(false)}
-        onAuthenticated={() => fetchOrders()}
+        onAuthenticated={() => {
+          setSessionReady(true);
+          setUnauthenticated(false);
+          void fetchOrders();
+        }}
       />
     </div>
   );
