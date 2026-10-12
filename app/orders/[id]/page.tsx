@@ -667,7 +667,7 @@ export default function OrderTrackingPage() {
 
             {order.invoices && order.invoices.length > 0 && (
               <a
-                href={`/api/orders/${order.id}`}
+                href={`/orders/${order.id}/receipt`}
                 target="_blank"
                 className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-4 py-3 rounded-xl border border-slate-700 flex items-center gap-2"
               >
