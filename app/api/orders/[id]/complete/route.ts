@@ -103,7 +103,11 @@ export async function POST(
     });
 
     broadcaster.broadcast('ORDER_UPDATED', completedOrder);
-    broadcaster.broadcast('ORDER_COMPLETED', { orderId: id, invoiceNumber });
+    broadcaster.broadcast('ORDER_COMPLETED', {
+      orderId: id,
+      agentId: completedOrder.agentId,
+      invoiceNumber,
+    });
 
     return successResponse(completedOrder);
   } catch (err: any) {

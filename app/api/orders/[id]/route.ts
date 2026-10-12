@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
+import { getOrderIdentifierWhere, isCustomerOrderOwner } from '@/lib/orderAccess';
 
 export async function GET(
   req: NextRequest,
@@ -12,9 +13,7 @@ export async function GET(
     const authUser = await getAuthUser(req);
 
     const order = await db.order.findFirst({
-      where: {
-        OR: [{ id }, { orderNumber: id }],
-      },
+      where: getOrderIdentifierWhere(id),
       include: {
         customer: { include: { user: true } },
         agent: { include: { user: true } },
@@ -38,9 +37,7 @@ export async function GET(
     }
 
     if (authUser.role === 'CUSTOMER') {
-      const isOwnerCustomer = authUser.customerId && order.customerId === authUser.customerId;
-      const isOwnerUser = authUser.userId && order.customer?.userId === authUser.userId;
-      if (!isOwnerCustomer && !isOwnerUser) {
+      if (!isCustomerOrderOwner(order, authUser)) {
         return errorResponse('FORBIDDEN', 'You are not authorized to view details for this order.', 403);
       }
     } else if (authUser.role === 'AGENT') {

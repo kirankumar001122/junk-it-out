@@ -1,72 +1,124 @@
 import { NextRequest } from 'next/server';
+import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { broadcaster } from '@/lib/realtime';
+import { createSseResponse } from '@/lib/sse';
+import { getOrderIdentifierWhere } from '@/lib/orderAccess';
+import {
+  createBoundedDispatcher,
+  shouldForwardCustomerEvent,
+  type CustomerTrackingState,
+} from '@/lib/sseTracking';
 
 export const dynamic = 'force-dynamic';
+
+const HEARTBEAT_INTERVAL_MS = 20_000;
 
 export async function GET(req: NextRequest) {
   const authUser = await getAuthUser(req);
 
-  // Security: Reject unauthenticated users
-  if (!authUser || !authUser.userId) {
-    return new Response(JSON.stringify({ success: false, error: 'Authentication required for customer notification stream.' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
+  if (!authUser || authUser.role !== 'CUSTOMER' || !authUser.userId) {
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: 'Authentication required for customer notification stream.',
+      }),
+      {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
   }
 
-  const customerId = authUser.customerId;
   const userId = authUser.userId;
-  const encoder = new TextEncoder();
+  const hasOrderId = req.nextUrl.searchParams.has('orderId');
+  const requestedOrderId = req.nextUrl.searchParams.get('orderId')?.trim() ?? '';
+  let trackedOrder: CustomerTrackingState = {
+    trackedOrderId: null,
+    assignedAgentId: null,
+    orderStatus: null,
+  };
 
-  const customStream = new ReadableStream({
-    start(controller) {
-      // 1. Initial connection heartbeat
-      controller.enqueue(
-        encoder.encode(`event: connected\ndata: ${JSON.stringify({ status: 'connected', customerId, userId })}\n\n`)
+  if (hasOrderId) {
+    if (!requestedOrderId) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'A valid order ID is required.' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
       );
+    }
 
-      // 2. Subscribe to realtime broadcaster with server-side ownership enforcement
-      const unsubscribe = broadcaster.subscribe((eventData) => {
-        try {
-          const payload = eventData.payload;
+    const order = await db.order.findFirst({
+      where: {
+        ...getOrderIdentifierWhere(requestedOrderId),
+        customer: { userId },
+      },
+      select: { id: true, agentId: true, status: true },
+    });
 
-          // Server-side Ownership Security:
-          // A customer MUST ONLY receive events for orders belonging to their profile/userId.
-          if (['AGENT_ASSIGNED', 'ORDER_UPDATED', 'ORDER_ACCEPTED'].includes(eventData.event)) {
-            const eventCustomerId = payload?.customerId || payload?.order?.customerId;
-            const eventUserId = payload?.userId || payload?.order?.customer?.userId;
+    if (!order) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Order not found or customer access denied.' }),
+        { status: 404, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
 
-            const isOwner =
-              (customerId && eventCustomerId === customerId) ||
-              (userId && eventUserId === userId);
+    trackedOrder = {
+      trackedOrderId: order.id,
+      assignedAgentId: order.agentId,
+      orderStatus: order.status,
+    };
+  }
 
-            if (!isOwner) {
-              return; // Suppress notification for other customers
-            }
-          }
+  // For order-specific streams the owner check was completed above and the
+  // stream only accepts that exact ID. The global customer stream resolves
+  // every event's order against the authenticated user before forwarding it.
+  const isOwnedOrder = (orderId: string) => {
+    if (trackedOrder.trackedOrderId) {
+      return orderId === trackedOrder.trackedOrderId;
+    }
 
-          // Forward event to authenticated customer client
-          controller.enqueue(
-            encoder.encode(`event: ${eventData.event}\ndata: ${JSON.stringify(payload)}\n\n`)
-          );
-        } catch (err) {
-          console.error('[CUSTOMER SSE] Stream dispatch error:', err);
-        }
-      });
+    return db.order.findFirst({
+      where: { id: orderId, customer: { userId } },
+      select: { id: true },
+    }).then(Boolean);
+  };
 
-      // 3. Clean up subscription on stream close
-      return () => {
-        unsubscribe();
-      };
+  // The global stream authorizes each event against the database. Bound the
+  // number of in-flight checks so a slow database cannot create an unbounded
+  // backlog. Dropped events are never sent without authorization.
+  const MAX_PENDING_AUTHORIZATIONS = 32;
+  const dispatchAuthorizedEvent = createBoundedDispatcher(
+    MAX_PENDING_AUTHORIZATIONS,
+    async ({ event, send }: {
+      event: Parameters<typeof shouldForwardCustomerEvent>[0];
+      send: (name: string, payload: unknown) => void;
+    }) => {
+      if (await shouldForwardCustomerEvent(event, trackedOrder, isOwnedOrder)) {
+        send(event.event, event.payload);
+      }
     },
-  });
+    (error) => console.error('[CUSTOMER SSE] Event authorization error:', error),
+  );
 
-  return new Response(customStream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
+  return createSseResponse({
+    signal: req.signal,
+    subscribe: (listener) => broadcaster.subscribe(listener),
+    connectedPayload: {
+      status: 'connected',
+      orderId: trackedOrder.trackedOrderId,
+    },
+    heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+    onEvent(event, send) {
+      if (trackedOrder.trackedOrderId) {
+        // This order's ownership was verified before subscribing, and its
+        // synchronous check preserves event order for tracking state updates.
+        if (shouldForwardCustomerEvent(event, trackedOrder, isOwnedOrder) as boolean) {
+          send(event.event, event.payload);
+        }
+        return;
+      }
+
+      dispatchAuthorizedEvent({ event, send });
     },
   });
 }

@@ -22,10 +22,23 @@ class RealtimeBroadcaster {
       try {
         listener(message);
       } catch (err) {
-        console.error('SSE Broadcast error:', err);
+        console.error("SSE Broadcast error:", err);
       }
     });
   }
 }
 
-export const broadcaster = new RealtimeBroadcaster();
+/*
+ * Keep ONE shared instance on globalThis.
+ * In Next.js dev, each API route (and hot reload) can load this file
+ * as a separate module copy, so a plain module-level instance means the
+ * agent's location route broadcasts to a different object than the one
+ * the customer's stream route is subscribed to.
+ */
+const globalForBroadcaster = globalThis as unknown as {
+  __junkItOutBroadcaster?: RealtimeBroadcaster;
+};
+
+export const broadcaster =
+  globalForBroadcaster.__junkItOutBroadcaster ??
+  (globalForBroadcaster.__junkItOutBroadcaster = new RealtimeBroadcaster());
