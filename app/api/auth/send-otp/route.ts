@@ -8,7 +8,6 @@ import {
   hasTrustedOrigin,
   addCorsHeaders,
 } from '@/lib/auth/requestSecurity';
-import { db } from '@/lib/db';
 
 export async function OPTIONS(req: NextRequest) {
   const res = new NextResponse(null, { status: 204 });
@@ -58,6 +57,7 @@ export async function POST(req: NextRequest) {
      */
 
     const testModeEnabled =
+      process.env.NODE_ENV !== 'production' &&
       process.env.OTP_TEST_MODE?.trim().toLowerCase() === 'true';
 
     const configuredTestPhone =
@@ -166,75 +166,12 @@ export async function POST(req: NextRequest) {
       cooldownSeconds = Number(result.cooldownSeconds) || 30;
     }
 
-    /*
-     * ------------------------------------------------------------
-     * CUSTOMER LOOKUP
-     * ------------------------------------------------------------
-     *
-     * This remains the same for both test and real OTP flows.
-     * It allows the frontend to keep the existing customer name.
-     */
-    let isCustomer = false;
-    let existingName: string | null = null;
-
-    try {
-      const rawDigits = normalized.replace(/\D/g, '');
-
-      const phoneVariants = Array.from(
-        new Set([
-          normalized,
-          rawDigits,
-          `+91${rawDigits.slice(-10)}`,
-        ])
-      );
-
-      const existingUser = await db.user.findFirst({
-        where: {
-          phone: {
-            in: phoneVariants,
-          },
-        },
-        select: {
-          id: true,
-          name: true,
-          role: true,
-        },
-      });
-
-      if (existingUser?.role === 'CUSTOMER') {
-        isCustomer = true;
-
-        const hasRealName =
-          existingUser.name &&
-          existingUser.name !== 'Customer' &&
-          existingUser.name !== 'Valued Customer' &&
-          existingUser.name !== 'Valued Member';
-
-        if (hasRealName) {
-          existingName = existingUser.name;
-        }
-      }
-    } catch (dbErr: any) {
-      /*
-       * Customer lookup is intentionally non-fatal.
-       * A successfully requested OTP should not fail just because
-       * the optional customer-name lookup had a DB issue.
-       */
-      console.warn(
-        '[SEND_OTP_DB_LOOKUP_WARNING] Non-fatal DB lookup warning:',
-        dbErr?.message || dbErr
-      );
-    }
-
     return addCorsHeaders(
       successResponse({
         message: isTestPhone
           ? 'Test OTP mode enabled. Enter any 6-digit OTP.'
           : 'If this number can receive SMS, an OTP will arrive shortly.',
         cooldownSeconds,
-        isExisting: isCustomer,
-        existingName,
-
         // This is intentionally only true for the configured test
         // number while local test mode is enabled.
         testMode: isTestPhone,

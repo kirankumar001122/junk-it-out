@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
+import { getCustomerAddresses } from '@/lib/services/customerService';
 
 export async function GET(req: NextRequest) {
   try {
@@ -18,12 +19,11 @@ export async function GET(req: NextRequest) {
         customer: true,
         agent: isAgent,
         admin: true,
-        addresses: { orderBy: { createdAt: 'desc' }, take: 5 },
       },
     });
 
     if (!user) {
-      return errorResponse('USER_NOT_FOUND', 'User profile not found.', 444);
+      return errorResponse('UNAUTHORIZED', 'The session is no longer valid.', 401);
     }
 
     // Auto-heal missing Agent record if role is AGENT
@@ -43,6 +43,8 @@ export async function GET(req: NextRequest) {
       };
     }
 
+    const addresses = await getCustomerAddresses(user.id);
+
     return successResponse({
       user: {
         id: user.id,
@@ -53,7 +55,7 @@ export async function GET(req: NextRequest) {
         customer: user.customer,
         agent: user.agent,
         admin: user.admin,
-        addresses: user.addresses,
+        addresses,
       },
     });
   } catch (err: any) {

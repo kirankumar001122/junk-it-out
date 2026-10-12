@@ -18,23 +18,8 @@ export async function GET(req: NextRequest) {
 
     const initialNullable = columnCheck[0]?.is_nullable === 'YES';
 
-    let syncExecuted = false;
-
-    if (!initialNullable) {
-      // 2. Non-destructive Additive Schema Synchronization
-      // ALTER COLUMN orderId DROP NOT NULL makes orderId nullable without deleting any records or dropping tables.
-      await db.$executeRawUnsafe(`ALTER TABLE "Complaint" ALTER COLUMN "orderId" DROP NOT NULL;`);
-      syncExecuted = true;
-    }
-
-    // 3. Post-Sync Verification
-    const postColumnCheck: any[] = await db.$queryRawUnsafe(`
-      SELECT table_name, column_name, is_nullable, data_type 
-      FROM information_schema.columns 
-      WHERE table_name = 'Complaint' AND column_name = 'orderId';
-    `);
-
-    const isNowNullable = postColumnCheck[0]?.is_nullable === 'YES';
+    // This endpoint is diagnostic only. Schema changes belong in a reviewed migration.
+    const isNowNullable = initialNullable;
 
     const [complaintCount, orderCount, customerCount, userCount] = await Promise.all([
       db.complaint.count(),
@@ -45,12 +30,12 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: 'Production complaint schema check and synchronization complete.',
+      message: 'Complaint schema check complete. Apply an approved migration if orderId is not nullable.',
       details: {
         targetTable: 'Complaint',
         targetColumn: 'orderId',
         initialNullable,
-        syncExecuted,
+        syncExecuted: false,
         isNullable: isNowNullable,
         recordsPreserved: {
           complaints: complaintCount,

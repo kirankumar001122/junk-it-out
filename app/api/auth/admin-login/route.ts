@@ -160,9 +160,13 @@ export async function POST(req: NextRequest) {
 
     return addCorsHeaders(response, req);
   } catch (err: any) {
-    console.error('Admin login error:', err);
+    console.error('Admin login service error:', err?.code || err?.name || 'Unknown error');
     return addCorsHeaders(
-      errorResponse('INTERNAL_SERVER_ERROR', err?.message || 'Admin authentication failed.', 500),
+      errorResponse(
+        'AUTH_SERVICE_UNAVAILABLE',
+        'Sign-in could not be completed because account services are temporarily unavailable. Please try again later.',
+        503
+      ),
       req
     );
   }

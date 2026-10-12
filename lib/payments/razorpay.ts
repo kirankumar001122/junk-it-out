@@ -22,12 +22,14 @@ function requireCredentials() {
   };
 }
 
-function isValidSignature(
+export function verifyRazorpayHmacSignature(
   payload: string,
   signature: string,
   secret: string
 ) {
   try {
+    if (!/^[a-f0-9]{64}$/i.test(signature)) return false;
+
     const expected = createHmac('sha256', secret)
       .update(payload)
       .digest('hex');
@@ -86,6 +88,8 @@ export async function createRazorpayOrder(input: {
 
         'Content-Type': 'application/json',
       },
+
+      signal: AbortSignal.timeout(20_000),
 
       body: JSON.stringify({
         amount: input.amountInPaise,
@@ -191,7 +195,7 @@ export function verifyRazorpayPaymentSignature(
   const payload =
     `${orderId}|${paymentId}`;
 
-  return isValidSignature(
+  return verifyRazorpayHmacSignature(
     payload,
     signature,
     secret
@@ -222,7 +226,7 @@ export function verifyRazorpayWebhookSignature(
     return false;
   }
 
-  return isValidSignature(
+  return verifyRazorpayHmacSignature(
     rawBody,
     signature,
     webhookSecret

@@ -156,11 +156,11 @@ export async function POST(req: NextRequest) {
 
     return response;
   } catch (err: any) {
-    console.error('Agent login error:', err);
+    console.error('Agent login service error:', err?.code || err?.name || 'Unknown error');
     return errorResponse(
-      'INTERNAL_SERVER_ERROR',
-      err?.message || 'Agent authentication failed.',
-      500
+      'AUTH_SERVICE_UNAVAILABLE',
+      'Sign-in could not be completed because account services are temporarily unavailable. Please try again later.',
+      503
     );
   }
 }

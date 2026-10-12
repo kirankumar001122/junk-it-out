@@ -20,6 +20,8 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import CustomerOtpLogin from '@/components/CustomerOtpLogin';
+import { formatPickupAddress } from '@/lib/address';
+import { isPickupCompletedStatus, normalizeOrderStatus } from '@/lib/orders/lifecycle';
 
 export default function MyPickupsPage() {
   const [orders, setOrders] = useState<any[]>([]);
@@ -123,12 +125,10 @@ export default function MyPickupsPage() {
 
   // Filter Counts
   const activeOrders = orders.filter(
-    (o) => !['SETTLEMENT_COMPLETED', 'PICKUP_COMPLETED', 'CANCELLED'].includes(o.status)
+    (o) => !isPickupCompletedStatus(o.status) && normalizeOrderStatus(o.status) !== 'CANCELLED'
   );
-  const completedOrders = orders.filter((o) =>
-    ['SETTLEMENT_COMPLETED', 'PICKUP_COMPLETED'].includes(o.status)
-  );
-  const cancelledOrders = orders.filter((o) => o.status === 'CANCELLED');
+  const completedOrders = orders.filter((o) => isPickupCompletedStatus(o.status));
+  const cancelledOrders = orders.filter((o) => normalizeOrderStatus(o.status) === 'CANCELLED');
 
   const filteredOrders =
     activeTab === 'ACTIVE'
@@ -140,7 +140,7 @@ export default function MyPickupsPage() {
       : orders;
 
   const getStatusBadgeStyle = (status: string) => {
-    switch (status) {
+    switch (normalizeOrderStatus(status)) {
       case 'SETTLEMENT_COMPLETED':
       case 'PICKUP_COMPLETED':
         return 'bg-emerald-100 text-emerald-800 border-emerald-200';
@@ -292,6 +292,12 @@ export default function MyPickupsPage() {
       ) : (
         <div className="space-y-4">
           {filteredOrders.map((o) => {
+            const isPickupCompleted = isPickupCompletedStatus(o.status);
+            const normalizedStatus = normalizeOrderStatus(o.status);
+            const isCancelled = normalizedStatus === 'CANCELLED';
+            const payoutStatus = normalizedStatus === 'SETTLEMENT_COMPLETED'
+              ? 'COMPLETED'
+              : o.settlement?.status || o.paymentStatus;
             let photoCount = 0;
             try {
               const parsed = typeof o.wastePhotos === 'string' ? JSON.parse(o.wastePhotos) : o.wastePhotos;
@@ -327,8 +333,7 @@ export default function MyPickupsPage() {
                     <div className="flex items-start gap-2 text-slate-700">
                       <MapPin className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                       <div>
-                        <p className="font-bold text-slate-900">{o.address?.houseNo}</p>
-                        <p className="text-slate-600">{o.address?.street}, {o.address?.area}</p>
+                        <p className="text-slate-600">{formatPickupAddress(o.address) || 'Address not available'}</p>
                       </div>
                     </div>
 
@@ -357,7 +362,7 @@ export default function MyPickupsPage() {
                 </div>
 
                 {/* ASSIGNED AGENT FOOTER CARD */}
-                {o.agent && (
+                {o.agent && !isPickupCompleted && (
                   <div className="p-3 bg-emerald-50/60 rounded-2xl border border-emerald-200/60 flex items-center justify-between gap-3 text-xs">
                     <div className="flex items-center gap-2.5">
                       <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold text-sm">
@@ -384,17 +389,31 @@ export default function MyPickupsPage() {
                 {/* CARD FOOTER */}
                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
                   <div>
-                    <span className="text-[11px] text-slate-400 block font-medium">Total Booking Amount</span>
+                    <span className="text-[11px] text-slate-400 block font-medium">
+                      {isPickupCompleted ? 'Final Recorded Valuation' : 'Total Booking Amount'}
+                    </span>
                     <span className="text-base font-black text-emerald-600">
                       ₹{(o.finalAmount || o.estimatedTotal || 0).toFixed(2)}
                     </span>
+                    {isPickupCompleted && (
+                      <span className="text-[11px] text-slate-500 block mt-1">
+                        {o.financialDirection === 'JUNKITOUT_PAYS'
+                          ? `Payout status: ${(payoutStatus || 'PENDING').replace(/_/g, ' ')}`
+                          : `Payment status: ${(o.paymentStatus || 'PENDING').replace(/_/g, ' ')}`}
+                      </span>
+                    )}
+                    {o.paymentStatus === 'REFUND_REQUIRED' && (
+                      <span className="text-[11px] text-amber-700 block mt-1">
+                        Payment captured; admin refund review required
+                      </span>
+                    )}
                   </div>
 
                   <Link
-                    href={`/orders/${o.id}`}
+                    href={isPickupCompleted ? `/orders/${o.id}/receipt` : `/orders/${o.id}`}
                     className="hover-lift bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl flex items-center gap-1.5 shadow-sm uppercase tracking-wider"
                   >
-                    TRACK PICKUP
+                    {isPickupCompleted ? 'VIEW RECEIPT' : isCancelled ? 'VIEW DETAILS' : 'TRACK PICKUP'}
                     <ArrowRight className="w-3.5 h-3.5" />
                   </Link>
                 </div>

@@ -5,6 +5,7 @@ import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { sendDispatchUpdate } from '@/lib/services/whatsappService';
+import { isOrderPaymentGateSatisfied } from '@/lib/payments/policy';
 
 export async function POST(
   req: NextRequest,
@@ -28,6 +29,10 @@ export async function POST(
 
     if (!order.agentId || order.agentId !== authUser.agentId) {
       return errorResponse('FORBIDDEN', 'Order is assigned to another agent.', 403);
+    }
+
+    if (!isOrderPaymentGateSatisfied(order)) {
+      return errorResponse('PAYMENT_REQUIRED', 'Customer payment must be captured before this pickup can progress.', 409);
     }
 
     const oldStatus = order.status;

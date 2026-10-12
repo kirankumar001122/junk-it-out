@@ -1,9 +1,7 @@
 import { db } from '../db';
-import {
-  findOrCreateUserCustomer,
-  saveCustomerAddress,
-} from './customerService';
+import { saveCustomerAddress } from './customerService';
 import { checkGeofenceServiceability } from './serviceAreaService';
+import { getAuthenticatedOrderCustomerId } from '../orders/customerAssociation';
 
 // In-memory Idempotency Store to prevent duplicate order placements
 // on network retries.
@@ -48,6 +46,7 @@ export async function createOrder(
       lat: number;
       lng: number;
       googlePlaceId?: string | null;
+      formattedAddress?: string | null;
     };
 
     items: {
@@ -77,7 +76,8 @@ export async function createOrder(
   // ---------------------------------------------------------
 
   if (idempotencyKey) {
-    const cached = idempotencyStore.get(idempotencyKey);
+    const scopedIdempotencyKey = `${authUser?.customerId || 'anonymous'}:${idempotencyKey}`;
+    const cached = idempotencyStore.get(scopedIdempotencyKey);
 
     if (
       cached &&
@@ -127,14 +127,9 @@ export async function createOrder(
     });
   }
 
-  if (!user || !user.customer) {
-    user = await findOrCreateUserCustomer(
-      input.phone,
-      input.name
-    );
-  }
+  const orderCustomerId = getAuthenticatedOrderCustomerId(authUser, user);
 
-  if (!user.customer) {
+  if (!user || !user.customer) {
     throw new Error(
       'Could not initialize customer profile.'
     );
@@ -147,14 +142,15 @@ export async function createOrder(
   const savedAddress =
     await saveCustomerAddress(user.id, {
       label: input.address.label || 'Home',
-      name: input.name,
-      phone: input.phone,
-      houseNo: input.address.houseNo,
+      name: user.name,
+      phone: user.phone,
+      formattedAddress: input.address.formattedAddress,
+      houseNo: input.address.houseNo || '',
       building: input.address.building,
-      street: input.address.street,
+      street: input.address.street || '',
       area: input.address.area,
       landmark: input.address.landmark,
-      pincode: input.address.pincode,
+      pincode: input.address.pincode || '',
       lat: input.address.lat,
       lng: input.address.lng,
       googlePlaceId:
@@ -290,8 +286,7 @@ export async function createOrder(
           data: {
             orderNumber,
 
-            customerId:
-              user.customer!.id,
+            customerId: orderCustomerId,
 
             addressId:
               savedAddress.id,
@@ -393,8 +388,9 @@ export async function createOrder(
   // ---------------------------------------------------------
 
   if (idempotencyKey) {
+    const scopedIdempotencyKey = `${authUser?.customerId || 'anonymous'}:${idempotencyKey}`;
     idempotencyStore.set(
-      idempotencyKey,
+      scopedIdempotencyKey,
       {
         orderId:
           newOrder.id,

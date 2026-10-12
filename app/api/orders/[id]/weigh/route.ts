@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth/middleware';
 import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
+import { isOrderPaymentGateSatisfied } from '@/lib/payments/policy';
 
 export async function POST(
   req: NextRequest,
@@ -30,6 +31,8 @@ export async function POST(
         customer: { include: { user: true } },
         items: { include: { category: true } },
         weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
+        payments: { where: { direction: 'CUSTOMER_PAYS', status: 'CAPTURED' } },
+        settlement: true,
       },
     });
 
@@ -39,6 +42,10 @@ export async function POST(
 
     if (!order.agentId || order.agentId !== authUser.agentId) {
       return errorResponse('FORBIDDEN', 'Order is assigned to another agent.', 403);
+    }
+
+    if (!isOrderPaymentGateSatisfied(order)) {
+      return errorResponse('PAYMENT_REQUIRED', 'Customer payment must be captured before this pickup can progress.', 409);
     }
 
     if (['WEIGHING', 'PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'].includes(order.status) && order.weightRecords.length > 0) {
@@ -52,6 +59,7 @@ export async function POST(
       return errorResponse('INVALID_STATUS_TRANSITION', `Cannot record weights from current status (${oldStatus}).`, 400);
     }
 
+    const weighedItemIds = new Set<string>();
     for (const itemInput of actualWeights) {
       const dbItem = order.items.find(
         (i) => i.categoryId === itemInput?.categoryId || i.id === itemInput?.categoryId
@@ -59,6 +67,36 @@ export async function POST(
       if (!dbItem || typeof itemInput.actualWeight !== 'number' || !Number.isFinite(itemInput.actualWeight) || itemInput.actualWeight <= 0) {
         return errorResponse('INVALID_WEIGH_DATA', 'Each actual weight must be a positive number for a valid order item.', 400);
       }
+      if (weighedItemIds.has(dbItem.id)) {
+        return errorResponse('INVALID_WEIGH_DATA', 'Each order item can be weighed only once per submission.', 400);
+      }
+      weighedItemIds.add(dbItem.id);
+    }
+    const submittedItems = new Set(actualWeights.map((item: any) => item.categoryId));
+    if (order.items.some((item) => !submittedItems.has(item.id) && !submittedItems.has(item.categoryId))) {
+      return errorResponse('INVALID_WEIGH_DATA', 'Actual weights are required for every order item.', 400);
+    }
+
+    let expectedRecyclable = 0;
+    let expectedWasteCharge = 0;
+    for (const itemInput of actualWeights) {
+      const item = order.items.find((i) => i.categoryId === itemInput.categoryId || i.id === itemInput.categoryId)!;
+      const subtotal = itemInput.actualWeight * item.ratePerKg;
+      if (item.category.type === 'WASTE_CHARGE') expectedWasteCharge += subtotal;
+      else expectedRecyclable += subtotal;
+    }
+    const expectedNet = expectedRecyclable - (expectedWasteCharge + order.pickupCharge - order.discountAmount);
+    const expectedDirection = expectedNet >= 0 ? 'JUNKITOUT_PAYS' : 'CUSTOMER_PAYS';
+    const expectedAmount = Math.abs(expectedNet);
+    const capturedCustomerPayment = order.payments[0];
+    if (
+      expectedDirection !== order.financialDirection ||
+      (capturedCustomerPayment && (expectedDirection !== 'CUSTOMER_PAYS' || Math.round(Number(capturedCustomerPayment.amount) * 100) !== Math.round(expectedAmount * 100)))
+    ) {
+      return errorResponse('FINANCIAL_RECONCILIATION_REQUIRED', 'Recorded weight changes the payer or amount from the verified payment. No weight or payment record was changed; admin financial reconciliation is required.', 409);
+    }
+    if (order.settlement && order.settlement.status !== 'PENDING' && expectedDirection === 'JUNKITOUT_PAYS' && Math.round(order.settlement.amount * 100) !== Math.round(expectedAmount * 100)) {
+      return errorResponse('FINANCIAL_RECONCILIATION_REQUIRED', 'Recorded weight changes an approved or paid payout. No weight or settlement record was changed; admin financial reconciliation is required.', 409);
     }
 
     // Execute Weighing Update in Transaction

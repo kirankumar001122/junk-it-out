@@ -56,13 +56,19 @@ export default function Navbar() {
       try {
         const res = await fetch('/api/auth/me');
         const data = await res.json();
+        if (res.status === 401) {
+          setUser(null);
+          return;
+        }
+        if (!res.ok || !data.success) return;
+
         if (res.ok && data.success && data.data?.user?.role === 'CUSTOMER') {
           setUser(data.data.user);
         } else {
           setUser(null);
         }
       } catch {
-        setUser(null);
+        // Keep the current session display during a temporary network failure.
       } finally {
         setCheckingAuth(false);
       }

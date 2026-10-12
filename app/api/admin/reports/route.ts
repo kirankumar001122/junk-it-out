@@ -1,7 +1,13 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { getAuthUser, requireAdminUser } from '@/lib/auth/middleware';
+import { toSafeCsvCell } from '@/lib/reports/csv';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const authUser = await getAuthUser(req);
+  if (!requireAdminUser(authUser)) {
+    return NextResponse.json({ success: false, message: 'Admin access required.' }, { status: 403 });
+  }
   try {
     const orders = await db.order.findMany({
       include: {
@@ -26,7 +32,7 @@ export async function GET() {
       o.agent ? o.agent.user.name : 'Unassigned',
     ]);
 
-    const csvContent = [headers.join(','), ...rows.map((r) => r.map((cell) => `"${cell}"`).join(','))].join('\n');
+    const csvContent = [headers.map(toSafeCsvCell).join(','), ...rows.map((r) => r.map(toSafeCsvCell).join(','))].join('\n');
 
     return new Response(csvContent, {
       headers: {
