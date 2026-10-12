@@ -48,7 +48,7 @@ const categoryIcons = [
 const categoryImages: Record<string, string> = {
   'E-Waste': '/categories/e-waste.png',
   'Household Dry Waste': '/categories/household-waste.png',
-  'Paper & Cardboard': '/categories/paper-cardboard.jpg',
+  'Paper & Cardboard': '/categories/paper-carboard.jpg',
   'Plastic Waste': '/categories/plastic-waste.jpg',
 };
 
