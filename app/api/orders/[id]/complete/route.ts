@@ -23,6 +23,7 @@ export async function POST(
         customer: { include: { user: true } },
         items: { include: { category: true } },
         weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
+        invoices: { take: 1 },
       },
     });
 
@@ -55,33 +56,38 @@ export async function POST(
 
     // Execute completion in transaction
     const completedOrder = await db.$transaction(async (tx) => {
-      const updated = await tx.order.update({
-        where: { id },
-        data: {
-          status: newStatus,
-          paymentStatus: order.financialDirection === 'JUNKITOUT_PAYS' ? 'SETTLEMENT_PENDING' : order.paymentStatus,
-          statusHistory: {
-            create: {
-              oldStatus,
-              newStatus,
-              changedByUserId: authUser?.userId || null,
-              notes: `Pickup completed at doorstep by agent.`,
-            },
-          },
-          invoices: {
-            create: {
-              invoiceNumber,
-              totalAmount: order.finalAmount,
-              pdfDataJson: JSON.stringify({
-                orderNumber: order.orderNumber,
-                invoiceNumber,
-                items: order.items,
-                finalAmount: order.finalAmount,
-                financialDirection: order.financialDirection,
-              }),
-            },
+      const orderUpdateData: any = {
+        status: newStatus,
+        paymentStatus: order.financialDirection === 'JUNKITOUT_PAYS' ? 'SETTLEMENT_PENDING' : order.paymentStatus,
+        statusHistory: {
+          create: {
+            oldStatus,
+            newStatus,
+            changedByUserId: authUser?.userId || null,
+            notes: `Pickup completed at doorstep by agent.`,
           },
         },
+      };
+
+      if (!order.invoices || order.invoices.length === 0) {
+        orderUpdateData.invoices = {
+          create: {
+            invoiceNumber,
+            totalAmount: order.finalAmount,
+            pdfDataJson: JSON.stringify({
+              orderNumber: order.orderNumber,
+              invoiceNumber,
+              items: order.items,
+              finalAmount: order.finalAmount,
+              financialDirection: order.financialDirection,
+            }),
+          },
+        };
+      }
+
+      const updated = await tx.order.update({
+        where: { id },
+        data: orderUpdateData,
         include: {
           agent: { include: { user: true } },
           customer: { include: { user: true } },

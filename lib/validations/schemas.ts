@@ -93,7 +93,9 @@ const ALLOWED_STATUS_TRANSITIONS: Record<string, string[]> = {
 };
 
 export function validateStatusTransition(currentStatus: string, targetStatus: string): boolean {
-  if (currentStatus === targetStatus) return true;
-  const allowed = ALLOWED_STATUS_TRANSITIONS[currentStatus];
-  return allowed ? allowed.includes(targetStatus) : false;
+  const normCurrent = currentStatus === 'COMPLETED' ? 'PICKUP_COMPLETED' : currentStatus;
+  const normTarget = targetStatus === 'COMPLETED' ? 'PICKUP_COMPLETED' : targetStatus;
+  if (normCurrent === normTarget) return true;
+  const allowed = ALLOWED_STATUS_TRANSITIONS[normCurrent];
+  return allowed ? allowed.includes(normTarget) : false;
 }

@@ -50,9 +50,17 @@ export default function AgentDashboardPage() {
 
   // Weighing Modal State
   const [showWeighModal, setShowWeighModal] = useState(false);
-  const [actualWeightsInput, setActualWeightsInput] = useState<{ categoryId: string; categoryName: string; actualWeight: number }[]>([]);
+  const [actualWeightsInput, setActualWeightsInput] = useState<{
+    itemId?: string;
+    categoryId: string;
+    categoryName: string;
+    estimatedWeight: number;
+    weightStr: string;
+  }[]>([]);
   const [scalePhotoUrl, setScalePhotoUrl] = useState('https://images.unsplash.com/photo-1589939705384-5185137a7f0f?q=80&w=600');
   const [weighNotes, setWeighNotes] = useState('');
+  const [submittingWeigh, setSubmittingWeigh] = useState(false);
+  const [weighModalError, setWeighModalError] = useState<string | null>(null);
 
   const fetchAgentData = async () => {
     try {
@@ -103,9 +111,14 @@ export default function AgentDashboardPage() {
         if (assigned) {
           setActualWeightsInput(
             (assigned.items || []).map((i: any) => ({
+              itemId: i.id,
               categoryId: i.categoryId,
               categoryName: i.category?.name || 'Waste item',
-              actualWeight: Number(i.actualWeight ?? i.estimatedWeight ?? 0),
+              estimatedWeight: Number(i.estimatedWeight ?? 0),
+              weightStr:
+                typeof i.actualWeight === 'number' && i.actualWeight > 0
+                  ? String(i.actualWeight)
+                  : '',
             }))
           );
         } else {
@@ -367,36 +380,70 @@ export default function AgentDashboardPage() {
 
   const handleSubmitWeighingAndComplete = async () => {
     if (!activeOrder) return;
+    setWeighModalError(null);
+
+    // 1. Client-side weight validation
+    if (!actualWeightsInput || actualWeightsInput.length === 0) {
+      setWeighModalError('No order items available to weigh.');
+      return;
+    }
+
+    const payloadActualWeights: { itemId?: string; categoryId: string; actualWeight: number }[] = [];
+
+    for (const item of actualWeightsInput) {
+      const trimmed = item.weightStr.trim();
+      const numVal = Number(trimmed);
+
+      if (!trimmed || isNaN(numVal) || !Number.isFinite(numVal) || numVal <= 0) {
+        setWeighModalError(`Please enter a valid weight (greater than 0 kg) for "${item.categoryName}".`);
+        return;
+      }
+
+      payloadActualWeights.push({
+        itemId: item.itemId,
+        categoryId: item.categoryId,
+        actualWeight: numVal,
+      });
+    }
+
+    setSubmittingWeigh(true);
     try {
+      // 2. Submit door-to-door scale weights
       const weighRes = await fetch(`/api/orders/${activeOrder.id}/weigh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          actualWeights: actualWeightsInput,
+          actualWeights: payloadActualWeights,
           scalePhotoUrl,
-          notes: weighNotes,
+          notes: weighNotes || 'Digital scale weight recorded at doorstep.',
         }),
       });
-      const weighData = await weighRes.json();
+      const weighData = await weighRes.json().catch(() => ({}));
       if (!weighRes.ok || !weighData.success) {
-        alert(weighData.error?.message || weighData.message || 'Failed to record weighing.');
+        setWeighModalError(weighData.error?.message || weighData.message || 'Failed to record scale weights.');
+        setSubmittingWeigh(false);
         return;
       }
 
+      // 3. Submit Order Completion
       const completeRes = await fetch(`/api/orders/${activeOrder.id}/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      const completeData = await completeRes.json();
-      if (completeRes.ok || completeData.success) {
+      const completeData = await completeRes.json().catch(() => ({}));
+      if (completeRes.ok && completeData.success) {
         setShowWeighModal(false);
-        fetchAgentData();
+        setStatusNotice(`Order #${activeOrder.orderNumber} successfully COMPLETED! Weights persisted & invoice generated.`);
+        setTimeout(() => setStatusNotice(null), 6000);
+        await fetchAgentData();
       } else {
-        alert(completeData.error?.message || completeData.message || 'Failed to complete pickup.');
+        setWeighModalError(completeData.error?.message || completeData.message || 'Failed to complete pickup order.');
       }
     } catch (e) {
-      console.error(e);
-      alert('Network error while completing pickup.');
+      console.error('Weighing/Completion error:', e);
+      setWeighModalError('Network error while completing pickup. Please check your connection and try again.');
+    } finally {
+      setSubmittingWeigh(false);
     }
   };
 
@@ -756,10 +803,12 @@ export default function AgentDashboardPage() {
 
             {(activeOrder.status === 'AGENT_ARRIVED' || activeOrder.status === 'WEIGHING') && (
               <button
+                type="button"
                 onClick={() => {
+                  setWeighModalError(null);
                   setShowWeighModal(true);
                 }}
-                className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2"
+                className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 cursor-pointer transition-transform hover:scale-[1.01]"
               >
                 <Scale className="w-5 h-5" />
                 START WEIGHING & RECORD KG
@@ -778,33 +827,55 @@ export default function AgentDashboardPage() {
       {/* WEIGHING MODAL */}
       {showWeighModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-extrabold text-white flex items-center gap-2">
                 <Scale className="w-5 h-5 text-emerald-400" />
                 Record Digital Scale Weights
               </h3>
-              <button onClick={() => setShowWeighModal(false)} className="text-slate-400 text-xs font-bold">
+              <button
+                onClick={() => {
+                  if (!submittingWeigh) setShowWeighModal(false);
+                }}
+                disabled={submittingWeigh}
+                className="text-slate-400 hover:text-white text-xs font-bold p-1 rounded-lg disabled:opacity-50"
+              >
                 ✕ Close
               </button>
             </div>
 
+            {weighModalError && (
+              <div className="p-3 bg-rose-950/80 border border-rose-800 text-rose-300 rounded-2xl text-xs font-bold flex items-center gap-2 animate-scale-in">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{weighModalError}</span>
+              </div>
+            )}
+
             <div className="space-y-3">
               {actualWeightsInput.map((item, idx) => (
-                <div key={item.categoryId} className="bg-slate-800 p-3 rounded-2xl border border-slate-700 flex items-center justify-between">
-                  <span className="text-xs font-bold text-white">{item.categoryName}</span>
+                <div key={item.itemId || item.categoryId || idx} className="bg-slate-800 p-3 rounded-2xl border border-slate-700 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-white block">{item.categoryName}</span>
+                    <span className="text-[10px] text-slate-400">
+                      Customer estimate: {item.estimatedWeight} kg (for reference only)
+                    </span>
+                  </div>
                   <div className="flex items-center gap-2">
                     <input
-                      type="number"
-                      step="0.1"
-                      value={item.actualWeight}
+                      type="text"
+                      inputMode="decimal"
+                      value={item.weightStr}
                       onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        const copy = [...actualWeightsInput];
-                        copy[idx].actualWeight = val;
-                        setActualWeightsInput(copy);
+                        const raw = e.target.value;
+                        if (/^\d*\.?\d{0,2}$/.test(raw)) {
+                          const copy = [...actualWeightsInput];
+                          copy[idx].weightStr = raw;
+                          setActualWeightsInput(copy);
+                          if (weighModalError) setWeighModalError(null);
+                        }
                       }}
-                      className="w-20 bg-slate-900 border border-slate-600 rounded-xl p-2 text-sm font-bold text-emerald-400 text-right focus:outline-none focus:border-emerald-500"
+                      placeholder="0.0"
+                      className="w-24 bg-slate-900 border border-slate-600 rounded-xl p-2 text-sm font-bold text-emerald-400 text-right focus:outline-none focus:border-emerald-500"
                     />
                     <span className="text-xs text-slate-400 font-bold">kg</span>
                   </div>
@@ -813,7 +884,7 @@ export default function AgentDashboardPage() {
             </div>
 
             {/* Photo Scale Proof */}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <label className="block text-xs font-bold text-slate-400">Scale Photo Proof URL:</label>
               <div className="flex items-center gap-2">
                 <input
@@ -823,22 +894,46 @@ export default function AgentDashboardPage() {
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-300"
                 />
                 <button
+                  type="button"
                   onClick={() =>
                     setScalePhotoUrl('https://images.unsplash.com/photo-1589939705384-5185137a7f0f?q=80&w=600')
                   }
-                  className="bg-slate-800 border border-slate-700 text-emerald-400 p-2.5 rounded-xl shrink-0"
+                  className="bg-slate-800 border border-slate-700 text-emerald-400 p-2.5 rounded-xl shrink-0 hover:bg-slate-700 transition-colors"
                 >
                   <Camera className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
+            {/* Doorstep Weighing Notes */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-400">Doorstep Notes (Optional):</label>
+              <input
+                type="text"
+                placeholder="e.g. Verified and weighed on digital scale at doorstep"
+                value={weighNotes}
+                onChange={(e) => setWeighNotes(e.target.value)}
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+
             <button
+              type="button"
               onClick={handleSubmitWeighingAndComplete}
-              className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm py-4 rounded-2xl shadow-xl flex items-center justify-center gap-2"
+              disabled={submittingWeigh}
+              className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-sm py-4 rounded-2xl shadow-xl flex items-center justify-center gap-2 transition-all cursor-pointer hover:scale-[1.01]"
             >
-              <CheckCircle className="w-5 h-5" />
-              CONFIRM WEIGHTS & COMPLETE PICKUP
+              {submittingWeigh ? (
+                <>
+                  <RefreshCw className="w-5 h-5 animate-spin" />
+                  <span>SAVING WEIGHTS & COMPLETING...</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-5 h-5" />
+                  <span>CONFIRM WEIGHTS & COMPLETE PICKUP</span>
+                </>
+              )}
             </button>
           </div>
         </div>
