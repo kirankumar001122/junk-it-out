@@ -28,25 +28,27 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ success: false, message: 'Status is required.' }, { status: 400 });
     }
 
-    if (!validateStatusTransition(oldStatus, newStatus)) {
-      return NextResponse.json({ success: false, message: `Invalid status transition from ${oldStatus} to ${newStatus}.` }, { status: 400 });
+    const effectiveStatus = newStatus === 'COMPLETED' ? 'PICKUP_COMPLETED' : newStatus;
+
+    if (!validateStatusTransition(oldStatus, effectiveStatus)) {
+      return NextResponse.json({ success: false, message: `Invalid status transition from ${oldStatus} to ${effectiveStatus}.` }, { status: 400 });
     }
 
     // Idempotency check: if status is already the same, return order directly
-    if (oldStatus === newStatus) {
+    if (oldStatus === effectiveStatus) {
       return NextResponse.json({ success: true, message: 'Status already updated', data: order });
     }
 
     const updatedOrder = await db.order.update({
       where: { id },
       data: {
-        status: newStatus,
+        status: effectiveStatus,
         statusHistory: {
           create: {
             oldStatus,
-            newStatus,
+            newStatus: effectiveStatus,
             changedByUserId: authUser.userId,
-            notes: notes || `Status changed from ${oldStatus} to ${newStatus}`,
+            notes: notes || `Status changed from ${oldStatus} to ${effectiveStatus}`,
           },
         },
         notifications: {
