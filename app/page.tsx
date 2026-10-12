@@ -404,6 +404,13 @@ export default function HomePage() {
                               {category.name}
                             </h3>
 
+                            {category.name === 'Plastic Waste' && (
+                              <p className="mt-1.5 min-h-8 text-xs leading-relaxed text-slate-600">
+                                {category.description ||
+                                  'Bottles, containers, polythene, packaging materials, hard plastics'}
+                              </p>
+                            )}
+
                             <p className="mt-2 text-sm font-extrabold text-emerald-700">
                               ₹{category.pricePerKg}{' '}
                               <span className="text-xs font-normal text-slate-500">
