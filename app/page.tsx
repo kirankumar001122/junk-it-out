@@ -33,6 +33,15 @@ import {
 } from '@/lib/pickupCart';
 
 import CustomerReviews from '@/components/CustomerReviews';
+import { getCachedClientJson } from '@/lib/clientRequestCache';
+
+const categoryImages: Record<string, string> = {
+  'E-Waste': '/categories/e-waste.png',
+  'Household Dry Waste': '/categories/household-waste.png',
+  'Paper & Cardboard': '/categories/paper-carboard.jpg',
+  'Plastic Waste': '/categories/plastic-waste.jpg?v=2',
+};
+const CUSTOMER_CATEGORY_NAMES = new Set(Object.keys(categoryImages));
 
 const categoryIcons = [
   FileText,
@@ -45,13 +54,6 @@ const categoryIcons = [
   Sparkles,
 ];
 
-const categoryImages: Record<string, string> = {
-  'E-Waste': '/categories/e-waste.png',
-  'Household Dry Waste': '/categories/household-waste.png',
-  'Paper & Cardboard': '/categories/paper-carboard.jpg',
-  'Plastic Waste': '/categories/plastic-waste.jpg?v=2',
-};
-
 export default function HomePage() {
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,9 +61,19 @@ export default function HomePage() {
   const [cartItems, setCartItems] = useState<PickupCartItem[]>([]);
 
   useEffect(() => {
-    fetch('/api/waste-categories')
-      .then((r) => r.json())
-      .then((d) => setCategories(d.success ? d.data : []))
+    getCachedClientJson<{ success: boolean; data?: any[] }>(
+      'public-waste-categories',
+      '/api/waste-categories',
+      60_000,
+      { cache: 'force-cache' }
+    )
+      .then((d) =>
+        setCategories(
+          d.success
+            ? d.data.filter((category: any) => CUSTOMER_CATEGORY_NAMES.has(category.name?.trim()))
+            : []
+        )
+      )
       .catch(() => setCategories([]))
       .finally(() => setLoading(false));
   }, []);
@@ -76,19 +88,7 @@ export default function HomePage() {
     return () => window.removeEventListener(pickupCartEvent, refresh);
   }, []);
 
-  // Only show the four requested waste categories
-  const featured = useMemo(() => {
-    const allowedCategories = new Set([
-      'E-Waste',
-      'Household Dry Waste',
-      'Paper & Cardboard',
-      'Plastic Waste',
-    ]);
-
-    return categories.filter((category) =>
-      allowedCategories.has(category.name?.trim())
-    );
-  }, [categories]);
+  const featured = useMemo(() => categories, [categories]);
 
   const addCategory = (category: any) => {
     addToPickupCart(category.id);
@@ -303,7 +303,7 @@ export default function HomePage() {
           </div>
 
           {/* Four Category Cards */}
-          <div className="grid grid-cols-1 items-start gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 items-stretch gap-5 sm:grid-cols-2 lg:grid-cols-4">
 
             {loading
               ? Array.from({ length: 4 }).map((_, index) => (
@@ -328,19 +328,19 @@ export default function HomePage() {
                   return (
                     <article
                       key={category.id}
-                      className="flex h-[360px] w-full flex-col justify-between rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm transition-all hover:-translate-y-1 hover:border-emerald-400 hover:shadow-md"
+                      className="flex h-full w-full flex-col rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm transition-all hover:-translate-y-1 hover:border-emerald-400 hover:shadow-md"
                     >
 
                       <Link
                         href={`/book?category=${encodeURIComponent(
                           category.id
                         )}`}
-                        className="block"
+                        className="flex flex-1 flex-col"
                       >
 
                         {category.name === 'Household Dry Waste' ? (
                           <>
-                            <div className="mb-3 overflow-hidden rounded-xl bg-emerald-50">
+                            <div className="mb-3 h-24 overflow-hidden rounded-xl bg-emerald-50">
                               <img
                                 src="/categories/household-waste.png"
                                 alt="Wet Waste and Dry Waste"
@@ -357,8 +357,8 @@ export default function HomePage() {
                               household clutter cleared out fast.
                             </p>
 
-                            <div className="mt-3 grid grid-cols-2 gap-2">
-                              <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-2.5">
+                            <div className="mt-2.5 grid grid-cols-2 gap-2">
+                              <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-2">
                                 <p className="text-xs font-bold text-emerald-700">
                                   Wet Waste
                                 </p>
@@ -367,7 +367,7 @@ export default function HomePage() {
                                 </p>
                               </div>
 
-                              <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-2.5">
+                              <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-2">
                                 <p className="text-xs font-bold text-emerald-700">
                                   Dry Waste
                                 </p>
@@ -400,16 +400,13 @@ export default function HomePage() {
                               </div>
                             )}
 
-                            <h3 className="min-h-10 text-sm font-bold leading-tight text-slate-900">
+                            <h3 className="text-sm font-bold leading-tight text-slate-900">
                               {category.name}
                             </h3>
 
-                            {category.name === 'Plastic Waste' && (
-                              <p className="mt-1.5 min-h-8 text-xs leading-relaxed text-slate-600">
-                                {category.description ||
-                                  'Bottles, containers, polythene, packaging materials, hard plastics'}
-                              </p>
-                            )}
+                            <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+                              {category.description || 'Standard waste collection category.'}
+                            </p>
 
                             <p className="mt-2 text-sm font-extrabold text-emerald-700">
                               ₹{category.pricePerKg}{' '}

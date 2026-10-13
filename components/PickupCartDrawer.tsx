@@ -28,6 +28,7 @@ import {
   updatePickupCartQuantity,
   type PickupCartItem,
 } from '@/lib/pickupCart';
+import { getCachedClientJson } from '@/lib/clientRequestCache';
 
 type Props = { open: boolean; onClose: () => void };
 
@@ -68,9 +69,13 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
   const checkAuth = useCallback(async () => {
     setCheckingAuth(true);
     try {
-      const res = await fetch('/api/auth/me');
-      const data = await res.json();
-      const authenticatedCustomer = res.ok && data.success && data.data?.user?.role === 'CUSTOMER';
+      const data = await getCachedClientJson<any>(
+        'authenticated-user',
+        '/api/auth/me',
+        10_000,
+        { cache: 'no-store' }
+      );
+      const authenticatedCustomer = data.success && data.data?.user?.role === 'CUSTOMER';
       if (authenticatedCustomer) {
         setIsCustomer(true);
         setUser(data.data.user);
@@ -109,7 +114,12 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
     setLoading(true);
 
     Promise.all([
-      fetch('/api/waste-categories').then((res) => (res.ok ? res.json() : { success: false })),
+      getCachedClientJson<any>(
+        'public-waste-categories',
+        '/api/waste-categories',
+        60_000,
+        { cache: 'force-cache' }
+      ),
       checkAuth(),
     ])
       .then(([categoryData]) => {
@@ -192,6 +202,12 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
+        if (data.error?.code === 'OTP_EXPIRED' || data.code === 'OTP_EXPIRED') {
+          setOtpStep('details');
+          setCode('');
+          setCooldown(0);
+          throw new Error('This OTP has expired or was already used. Please request a new OTP.');
+        }
         throw new Error(data.message || data.error?.message || 'The OTP code could not be verified.');
       }
 

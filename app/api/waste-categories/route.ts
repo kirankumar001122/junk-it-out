@@ -5,9 +5,22 @@ import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 
 export async function GET(req: NextRequest) {
   try {
+    const categorySelect = {
+      id: true,
+      name: true,
+      description: true,
+      icon: true,
+      type: true,
+      pricePerKg: true,
+      minWeightKg: true,
+      maxWeightKg: true,
+      active: true,
+    } as const;
+
     let categories = await db.wasteCategory.findMany({
       where: { active: true },
       orderBy: { name: 'asc' },
+      select: categorySelect,
     });
 
     if (categories.length === 0) {
@@ -22,21 +35,22 @@ export async function GET(req: NextRequest) {
         { name: 'Appliances (Fridge/AC/Washing Machine)', description: 'Refrigerators, AC units, washing machines, microwaves', icon: 'Tv', type: 'RECYCLABLE_BUY', pricePerKg: 25.0 },
       ];
 
-      for (const cat of defaultCategories) {
-        await db.wasteCategory.upsert({
+      await Promise.all(defaultCategories.map((cat) => db.wasteCategory.upsert({
           where: { name: cat.name },
           update: { pricePerKg: cat.pricePerKg, type: cat.type, description: cat.description },
           create: cat,
-        });
-      }
+        })));
 
       categories = await db.wasteCategory.findMany({
         where: { active: true },
         orderBy: { name: 'asc' },
+        select: categorySelect,
       });
     }
 
-    return successResponse(categories);
+    const response = successResponse(categories);
+    response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+    return response;
   } catch (err: any) {
     return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to fetch waste categories.', 500);
   }

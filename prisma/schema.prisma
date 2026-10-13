@@ -85,6 +85,7 @@ model Address {
   pickupInstructions String?
   isDefault          Boolean  @default(false)
   createdAt          DateTime @default(now())
+  formattedAddress   String?
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   orders             Order[]
 }
@@ -166,6 +167,9 @@ model Order {
   reviews            Review?
   settlement         Settlement?
   weightRecords      WeightRecord[]
+
+  @@index([customerId, createdAt])
+  @@index([agentId, status, createdAt])
 }
 
 model OrderItem {
@@ -204,6 +208,9 @@ model Payment {
   status         String   @default("PENDING")
   createdAt      DateTime @default(now())
   order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([gatewayOrderId, direction])
+  @@index([paymentId])
 }
 
 model Settlement {
@@ -231,6 +238,8 @@ model AgentLocation {
   timestamp DateTime @default(now())
   agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
   order     Order?   @relation(fields: [orderId], references: [id])
+
+  @@index([agentId, orderId, timestamp])
 }
 
 model OrderStatusHistory {
@@ -300,6 +309,8 @@ model Review {
   agent      Agent    @relation(fields: [agentId], references: [id])
   customer   Customer @relation(fields: [customerId], references: [id])
   order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
 }
 
 model Invoice {

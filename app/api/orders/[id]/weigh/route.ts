@@ -9,9 +9,13 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const startedAt = Date.now();
+  const logTiming = (phase: string) =>
+    console.info(`[api/orders/weigh] ${phase} elapsedMs=${Date.now() - startedAt}`);
   try {
     const { id } = await params;
     const authUser = await getAuthUser(req);
+    logTiming('authentication complete');
     if (!authUser || authUser.role !== 'AGENT') {
       return errorResponse('UNAUTHORIZED', 'Authenticated agent access is required.', 401);
     }
@@ -32,6 +36,7 @@ export async function POST(
         weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
       },
     });
+    logTiming('order lookup complete');
 
     if (!order) {
       return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
@@ -89,6 +94,7 @@ export async function POST(
               subtotal,
             },
           });
+          logTiming('weigh transaction complete');
         }
       }
 
@@ -158,6 +164,7 @@ export async function POST(
 
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
     broadcaster.broadcast('WEIGHING_STARTED', { orderId: id, actualTotal: updatedOrder.actualTotal });
+    logTiming('response ready');
 
     return successResponse(updatedOrder);
   } catch (err: any) {

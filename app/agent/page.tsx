@@ -67,7 +67,10 @@ export default function AgentDashboardPage() {
       setLoading(true);
       setAuthError(null);
 
-      const profileRes = await fetch('/api/auth/me');
+      const [profileRes, ordersRes] = await Promise.all([
+        fetch('/api/auth/me', { cache: 'no-store' }),
+        fetch('/api/orders?limit=20', { cache: 'no-store' }),
+      ]);
       const profileData = await profileRes.json().catch(() => ({ success: false }));
 
       if (!profileData.success || !profileData.data?.user || profileData.data.user.role !== 'AGENT') {
@@ -97,8 +100,7 @@ export default function AgentDashboardPage() {
       });
       setIsOnline((agentProfile?.status || 'AVAILABLE') !== 'OFFLINE');
 
-      const res = await fetch('/api/orders');
-      const data = await res.json().catch(() => ({ success: false }));
+      const data = await ordersRes.json().catch(() => ({ success: false }));
       if (data.success) {
         const agentOrders = (data.data || []).filter((o: any) => o.agentId === agentProfile.id);
         setOrders(agentOrders);
@@ -140,11 +142,15 @@ export default function AgentDashboardPage() {
   useEffect(() => {
     if (!activeOrder?.id || !isOnline || !agent?.id) return;
 
-    const locationInterval = setInterval(() => {
+    let cancelled = false;
+    let locationTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const sendLocation = async () => {
       const simulatedLat = (activeOrder.address?.lat || 12.9077) + (Math.random() - 0.5) * 0.005;
       const simulatedLng = (activeOrder.address?.lng || 77.5854) + (Math.random() - 0.5) * 0.005;
 
-      fetch('/api/agent/location', {
+      try {
+        const response = await fetch('/api/agent/location', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -154,10 +160,25 @@ export default function AgentDashboardPage() {
           lng: simulatedLng,
           speed: 22.4,
         }),
-      }).catch(() => {});
-    }, 8000);
+        });
+        if (!response.ok) {
+          console.warn('[AGENT_LOCATION_UPDATE_FAILED]', response.status);
+        }
+      } catch (error) {
+        console.warn('[AGENT_LOCATION_UPDATE_FAILED]', error);
+      } finally {
+        if (!cancelled) {
+          locationTimer = setTimeout(sendLocation, 8000);
+        }
+      }
+    };
 
-    return () => clearInterval(locationInterval);
+    locationTimer = setTimeout(sendLocation, 8000);
+
+    return () => {
+      cancelled = true;
+      if (locationTimer) clearTimeout(locationTimer);
+    };
   }, [activeOrder?.id, isOnline, agent?.id]);
 
   // Authenticated Agent SSE Stream Connection for NEW_PICKUP_AVAILABLE Notifications
@@ -338,7 +359,7 @@ export default function AgentDashboardPage() {
   };
 
   const handleCallEndpoint = async (action: 'accept' | 'start' | 'arrive') => {
-    if (!activeOrder) return;
+    if (!activeOrder || actionLoading) return;
 
     if (!isOnline && action === 'accept') {
       setStatusNotice('You are currently OFFLINE. Please switch status to ONLINE to accept pickups.');
@@ -348,11 +369,16 @@ export default function AgentDashboardPage() {
 
     setActionLoading(true);
     setStatusNotice(null);
+    let actionTimeout: number | undefined;
     try {
+      const controller = new AbortController();
+      actionTimeout = window.setTimeout(() => controller.abort(), 15_000);
       const res = await fetch(`/api/orders/${activeOrder.id}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
       });
+      window.clearTimeout(actionTimeout);
       const data = await res.json();
       if (res.ok && data.success) {
         setStatusNotice(
@@ -363,7 +389,13 @@ export default function AgentDashboardPage() {
             : 'Arrived at customer doorstep!'
         );
         setTimeout(() => setStatusNotice(null), 4000);
-        await fetchAgentData();
+        if (data.data?.id) {
+          setActiveOrder(data.data);
+          setOrders((currentOrders) =>
+            currentOrders.map((order) => order.id === data.data.id ? data.data : order)
+          );
+        }
+        void fetchAgentData();
       } else {
         const errorText = data.error?.message || data.message || `Failed to perform ${action} action.`;
         setStatusNotice(errorText);
@@ -371,9 +403,14 @@ export default function AgentDashboardPage() {
       }
     } catch (e) {
       console.error(e);
-      setStatusNotice('Network error while processing action. Please try again.');
+      setStatusNotice(
+        e instanceof DOMException && e.name === 'AbortError'
+          ? 'The action timed out. Please check the order status and try again.'
+          : 'Network error while processing action. Please try again.'
+      );
       setTimeout(() => setStatusNotice(null), 4000);
     } finally {
+      if (actionTimeout) window.clearTimeout(actionTimeout);
       setActionLoading(false);
     }
   };
@@ -435,7 +472,15 @@ export default function AgentDashboardPage() {
         setShowWeighModal(false);
         setStatusNotice(`Order #${activeOrder.orderNumber} successfully COMPLETED! Weights persisted & invoice generated.`);
         setTimeout(() => setStatusNotice(null), 6000);
-        await fetchAgentData();
+        if (completeData.data?.id) {
+          setActiveOrder(completeData.data);
+          setOrders((currentOrders) =>
+            currentOrders.map((order) =>
+              order.id === completeData.data.id ? completeData.data : order
+            )
+          );
+        }
+        void fetchAgentData();
       } else {
         setWeighModalError(completeData.error?.message || completeData.message || 'Failed to complete pickup order.');
       }

@@ -9,9 +9,13 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const startedAt = Date.now();
+  const logTiming = (phase: string) =>
+    console.info(`[api/orders/arrive] ${phase} elapsedMs=${Date.now() - startedAt}`);
   try {
     const { id } = await params;
     const authUser = await getAuthUser(req);
+    logTiming('authentication complete');
     if (!authUser || authUser.role !== 'AGENT') {
       return errorResponse('UNAUTHORIZED', 'Authenticated agent access is required.', 401);
     }
@@ -20,6 +24,7 @@ export async function POST(
       where: { id },
       include: { agent: { include: { user: true } }, customer: { include: { user: true } } },
     });
+    logTiming('order lookup complete');
 
     if (!order) {
       return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
@@ -56,6 +61,7 @@ export async function POST(
         items: { include: { category: true } },
       },
     });
+    logTiming('order update complete');
 
     if (order.agentId) {
       await db.agent.update({
@@ -66,6 +72,7 @@ export async function POST(
 
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
     broadcaster.broadcast('AGENT_ARRIVED', { orderId: id, agentId: order.agentId });
+    logTiming('response ready');
 
     return successResponse(updatedOrder);
   } catch (err: any) {

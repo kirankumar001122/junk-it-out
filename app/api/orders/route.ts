@@ -168,8 +168,81 @@ export async function GET(req: NextRequest) {
     //
     // =====================================================
 
-    const orders =
-      await db.order.findMany({
+    const orders = authUser.role === 'AGENT'
+      ? await db.order.findMany({
+        where: whereClause,
+        select: {
+          id: true,
+          orderNumber: true,
+          customerId: true,
+          agentId: true,
+          pickupType: true,
+          scheduledSlot: true,
+          status: true,
+          financialDirection: true,
+          estimatedTotal: true,
+          actualTotal: true,
+          pickupCharge: true,
+          discountAmount: true,
+          finalAmount: true,
+          paymentStatus: true,
+          notes: true,
+          createdAt: true,
+          updatedAt: true,
+          customer: {
+            select: {
+              id: true,
+              user: { select: { id: true, name: true, phone: true } },
+            },
+          },
+          agent: {
+            select: {
+              id: true,
+              userId: true,
+              vehicleType: true,
+              vehicleNumber: true,
+              status: true,
+              currentLat: true,
+              currentLng: true,
+              rating: true,
+              serviceAreas: true,
+              user: { select: { id: true, name: true, phone: true } },
+            },
+          },
+          address: {
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+              houseNo: true,
+              building: true,
+              street: true,
+              area: true,
+              landmark: true,
+              city: true,
+              pincode: true,
+              lat: true,
+              lng: true,
+              formattedAddress: true,
+              pickupInstructions: true,
+            },
+          },
+          items: {
+            select: {
+              id: true,
+              categoryId: true,
+              estimatedWeight: true,
+              actualWeight: true,
+              ratePerKg: true,
+              subtotal: true,
+              category: { select: { id: true, name: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      })
+      : await db.order.findMany({
         where: whereClause,
 
         include: {

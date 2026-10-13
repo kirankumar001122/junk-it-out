@@ -14,7 +14,12 @@ export async function GET(req: NextRequest) {
 
     let user = await db.user.findUnique({
       where: { id: authUser.userId },
-      include: {
+      select: {
+        id: true,
+        phone: true,
+        name: true,
+        email: true,
+        role: true,
         customer: true,
         agent: isAgent,
         admin: true,
@@ -58,6 +63,20 @@ export async function GET(req: NextRequest) {
     });
   } catch (err: any) {
     console.error('Auth me error:', err);
-    return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to retrieve profile.', 500);
+    const message = String(err?.message || '');
+    const databaseUnavailable =
+      message.includes('Authentication failed against database server') ||
+      message.includes('Can\'t reach database server') ||
+      message.includes('P1001') ||
+      message.includes('P1000') ||
+      message.includes('[YOUR-PASSWORD]');
+
+    return errorResponse(
+      databaseUnavailable ? 'DATABASE_UNAVAILABLE' : 'INTERNAL_SERVER_ERROR',
+      databaseUnavailable
+        ? 'The database credentials are invalid or the database is unreachable. Verify DATABASE_URL and restart the server.'
+        : 'Failed to retrieve profile.',
+      databaseUnavailable ? 503 : 500
+    );
   }
 }

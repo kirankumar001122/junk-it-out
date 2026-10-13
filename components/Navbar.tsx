@@ -8,6 +8,7 @@ import { pickupCartEvent, readPickupCart } from '@/lib/pickupCart';
 import { getSelectedLocation, LOCATION_CHANGE_EVENT, setSelectedLocation } from '@/lib/selectedLocation';
 import PickupCartDrawer from '@/components/PickupCartDrawer';
 import LocationSearchModal from '@/components/LocationSearchModal';
+import { getCachedClientJson } from '@/lib/clientRequestCache';
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -24,12 +25,12 @@ export default function Navbar() {
     const refreshLoc = (e?: Event) => {
       const customDetail = (e as CustomEvent)?.detail;
       if (customDetail?.area || customDetail?.address) {
-        setLocation(customDetail.area || customDetail.address);
+        setLocation(customDetail.address || customDetail.area);
         return;
       }
       const loc = getSelectedLocation();
       if (loc?.area || loc?.address) {
-        setLocation(loc.area || loc.address);
+        setLocation(loc.address || loc.area);
       } else {
         setLocation('Select location');
       }
@@ -51,12 +52,16 @@ export default function Navbar() {
   }, []);
 
   useEffect(() => {
-    const checkAuth = async () => {
+    const checkAuth = async (force = false) => {
       setCheckingAuth(true);
       try {
-        const res = await fetch('/api/auth/me');
-        const data = await res.json();
-        if (res.ok && data.success && data.data?.user?.role === 'CUSTOMER') {
+        const data = await getCachedClientJson<any>(
+          'authenticated-user',
+          '/api/auth/me',
+          10_000,
+          { cache: 'no-store', force }
+        );
+        if (data.success && data.data?.user?.role === 'CUSTOMER') {
           setUser(data.data.user);
         } else {
           setUser(null);
@@ -68,9 +73,10 @@ export default function Navbar() {
       }
     };
 
+    const handleAuthChange = () => checkAuth(true);
     checkAuth();
-    window.addEventListener('jio_auth_change', checkAuth);
-    return () => window.removeEventListener('jio_auth_change', checkAuth);
+    window.addEventListener('jio_auth_change', handleAuthChange);
+    return () => window.removeEventListener('jio_auth_change', handleAuthChange);
   }, []);
 
   const getDisplayName = (userObj: any) => {
@@ -91,7 +97,8 @@ export default function Navbar() {
   };
 
   return (
-    <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/90 backdrop-blur-md transition-all">
+    <>
+    <header className="relative z-50 border-b border-slate-200/80 bg-white/90 backdrop-blur-md transition-all">
       <div className="mx-auto flex max-w-7xl items-center gap-2 sm:gap-3 px-3 sm:px-6 py-2.5">
         <Link href="/" className="flex shrink-0 items-center gap-2 transition-opacity hover:opacity-90" aria-label="Junk It Out home">
           <span className="relative grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl bg-white border border-slate-200 shadow-sm overflow-hidden shrink-0">
@@ -103,16 +110,19 @@ export default function Navbar() {
         </Link>
 
         {/* Display-only location indicator */}
-        <div
+        <button
+          type="button"
+          onClick={() => setLocationOpen(true)}
           className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2 rounded-xl bg-slate-50/90 px-2 sm:px-3 py-1.5 text-left border border-slate-200/90 max-w-[135px] sm:max-w-[200px] md:max-w-[240px]"
           title={`Pickup Location: ${location}`}
+          aria-label={`Change pickup location. Current location: ${location}`}
         >
           <MapPin className="h-4 w-4 shrink-0 text-emerald-600" />
           <span className="min-w-0 flex-1 overflow-hidden">
             <span className="block text-[9px] sm:text-[10px] font-semibold uppercase tracking-wider text-slate-500 leading-tight">Picking Up From</span>
             <span className="block truncate text-xs font-bold text-slate-900 leading-tight">{location}</span>
           </span>
-        </div>
+        </button>
 
         {/* Search input */}
         <form onSubmit={submitSearch} className="relative min-w-0 flex-1 max-w-md mx-auto">
@@ -144,17 +154,18 @@ export default function Navbar() {
         </button>
       </div>
 
-      <LocationSearchModal
-        open={locationOpen}
-        onClose={() => setLocationOpen(false)}
-        currentArea={location}
-        onSelectLocation={(data) => {
-          setSelectedLocation(data);
-          setLocation(data.area);
-        }}
-      />
-
-      <PickupCartDrawer open={cartOpen} onClose={() => setCartOpen(false)} />
     </header>
+    {/* Dialogs are rendered below the header so fixed positioning is relative to the viewport. */}
+    <PickupCartDrawer open={cartOpen} onClose={() => setCartOpen(false)} />
+    <LocationSearchModal
+      open={locationOpen}
+      onClose={() => setLocationOpen(false)}
+      currentArea={location}
+      onSelectLocation={(data) => {
+        setSelectedLocation(data);
+        setLocation(data.area);
+      }}
+    />
+    </>
   );
 }

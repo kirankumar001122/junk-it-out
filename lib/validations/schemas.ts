@@ -22,11 +22,26 @@ export function validatePhone(phone: string): { valid: boolean; normalized: stri
 }
 
 export function validateCoordinates(lat: any, lng: any): boolean {
+  if (
+    lat === null ||
+    lat === undefined ||
+    lng === null ||
+    lng === undefined ||
+    lat === '' ||
+    lng === '' ||
+    (typeof lat !== 'number' && typeof lat !== 'string') ||
+    (typeof lng !== 'number' && typeof lng !== 'string')
+  ) {
+    return false;
+  }
+
   const latitude = Number(lat);
   const longitude = Number(lng);
   return (
     !isNaN(latitude) &&
     !isNaN(longitude) &&
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
     latitude >= -90 &&
     latitude <= 90 &&
     longitude >= -180 &&

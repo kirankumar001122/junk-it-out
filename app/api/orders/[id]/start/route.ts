@@ -1,3 +1,4 @@
+import { after } from 'next/server';
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
@@ -68,53 +69,54 @@ export async function POST(
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
     broadcaster.broadcast('AGENT_STARTED', { orderId: id, agentId: order.agentId });
 
-    // Phase 5A: Fast2SMS WhatsApp Dispatch Update Notification Trigger
-    try {
-      const customerPhone = updatedOrder.customer?.user?.phone;
-      const customerName = updatedOrder.customer?.user?.name || 'Valued Customer';
-      const agentName = updatedOrder.agent?.user?.name || 'Field Agent';
-      const agentPhone = updatedOrder.agent?.user?.phone || '';
+    // Notifications are nonessential to the journey transition and may involve
+    // a slow third-party request. Keep them out of the action response path.
+    after(async () => {
+      try {
+        const customerPhone = updatedOrder.customer?.user?.phone;
+        const customerName = updatedOrder.customer?.user?.name || 'Valued Customer';
+        const agentName = updatedOrder.agent?.user?.name || 'Field Agent';
+        const agentPhone = updatedOrder.agent?.user?.phone || '';
 
-      if (customerPhone) {
-        // Idempotency check: Ensure WhatsApp Dispatch Update is not duplicated for the same order
+        if (!customerPhone) return;
+
         const existingNotification = await db.notification.findFirst({
           where: {
             orderId: updatedOrder.id,
             type: 'WHATSAPP_DISPATCH_UPDATE',
           },
+          select: { id: true },
         });
 
-        if (!existingNotification) {
-          const whatsappResult = await sendDispatchUpdate({
-            customerPhone,
-            customerName,
-            agentName,
-            agentPhone,
-            estimatedArrival: '20-30 mins',
-            orderNumber: updatedOrder.orderNumber,
-          });
+        if (existingNotification) return;
 
-          // Record notification attempt in DB
-          await db.notification.create({
-            data: {
-              userId: updatedOrder.customer.userId,
-              orderId: updatedOrder.id,
-              type: 'WHATSAPP_DISPATCH_UPDATE',
-              recipient: customerPhone,
-              content: `Dispatch update sent via Fast2SMS WhatsApp: Agent ${agentName} on the way.`,
-              status: whatsappResult.success ? 'SENT' : 'FAILED',
-              provider: 'FAST2SMS',
-              providerRequestId: whatsappResult.requestId || null,
-              deliveryStatus: whatsappResult.success ? 'sent' : 'failed',
-              statusDescription: whatsappResult.error || 'Sent via Fast2SMS API',
-            },
-          });
-        }
+        const whatsappResult = await sendDispatchUpdate({
+          customerPhone,
+          customerName,
+          agentName,
+          agentPhone,
+          estimatedArrival: '20-30 mins',
+          orderNumber: updatedOrder.orderNumber,
+        });
+
+        await db.notification.create({
+          data: {
+            userId: updatedOrder.customer.userId,
+            orderId: updatedOrder.id,
+            type: 'WHATSAPP_DISPATCH_UPDATE',
+            recipient: customerPhone,
+            content: `Dispatch update sent via Fast2SMS WhatsApp: Agent ${agentName} on the way.`,
+            status: whatsappResult.success ? 'SENT' : 'FAILED',
+            provider: 'FAST2SMS',
+            providerRequestId: whatsappResult.requestId || null,
+            deliveryStatus: whatsappResult.success ? 'sent' : 'failed',
+            statusDescription: whatsappResult.error || 'Sent via Fast2SMS API',
+          },
+        });
+      } catch (whatsappErr: any) {
+        console.warn('[WHATSAPP DISPATCH TRIGGER NOTICE] Safe notification error:', whatsappErr?.message);
       }
-    } catch (whatsappErr: any) {
-      // Notification failures MUST NEVER roll back the order status or journey start!
-      console.warn('[WHATSAPP DISPATCH TRIGGER NOTICE] Safe notification error:', whatsappErr?.message);
-    }
+    });
 
     return successResponse(updatedOrder);
   } catch (err: any) {

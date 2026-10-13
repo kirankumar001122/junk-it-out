@@ -337,7 +337,8 @@ export default function LocationSearchModal({
     }
   };
 
-  // Handle Current Location GPS Click
+  // Handle Current Location GPS Click. A readable address is required; coordinates
+  // alone are not presented as a successful pickup location.
   const handleUseCurrentLocation = () => {
     if (!navigator.geolocation) {
       setServiceError('Geolocation is not supported by your browser.');
@@ -391,23 +392,9 @@ export default function LocationSearchModal({
                       );
                     }
                   } else {
-                    const check = await checkServiceability(userLat, userLng);
-                    if (check.serviceable) {
-                      const locData = {
-                        address: `Near (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`,
-                        area: 'Bengaluru',
-                        lat: userLat,
-                        lng: userLng,
-                        serviceable: true,
-                      };
-                      setSelectedLocation(locData);
-                      onSelectLocation(locData);
-                      onClose();
-                    } else {
-                      setServiceError(
-                        "We're not serving this location yet. Please select a location within Bengaluru."
-                      );
-                    }
+                    setServiceError(
+                      'We found your coordinates but could not resolve a readable address. Please search for your address manually.'
+                    );
                   }
                 } finally {
                   setLoadingGeolocate(false);
@@ -415,24 +402,10 @@ export default function LocationSearchModal({
               }
             );
           } else {
-            const check = await checkServiceability(userLat, userLng);
             setLoadingGeolocate(false);
-            if (check.serviceable) {
-              const locData = {
-                address: `GPS (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`,
-                area: 'Bengaluru',
-                lat: userLat,
-                lng: userLng,
-                serviceable: true,
-              };
-              setSelectedLocation(locData);
-              onSelectLocation(locData);
-              onClose();
-            } else {
-              setServiceError(
-                "We're not serving this location yet. Please select a location within Bengaluru."
-              );
-            }
+            setServiceError(
+              'Address lookup is unavailable because the maps service is not configured. Please enter your address or choose a service area.'
+            );
           }
         } catch (e) {
           setLoadingGeolocate(false);
@@ -448,6 +421,64 @@ export default function LocationSearchModal({
         }
       },
       { timeout: 10000, enableHighAccuracy: true }
+    );
+  };
+
+  const handleConfirmManualAddress = () => {
+    const addressQuery = query.trim();
+    if (addressQuery.length < 3) {
+      setServiceError('Enter at least 3 characters for a pickup address.');
+      return;
+    }
+    if (!geocoderRef.current) {
+      setServiceError('Address verification is unavailable. Please select a service area or try again later.');
+      return;
+    }
+
+    setLoadingPlaceSelect(true);
+    setServiceError(null);
+    geocoderRef.current.geocode(
+      { address: addressQuery, componentRestrictions: { country: 'IN' } },
+      async (results: any[], status: string) => {
+        try {
+          const result = results?.[0];
+          if (status !== 'OK' || !result?.geometry?.location) {
+            setServiceError('We could not find that address. Check the spelling or choose a suggestion.');
+            return;
+          }
+
+          const targetLat = result.geometry.location.lat();
+          const targetLng = result.geometry.location.lng();
+          const components = result.address_components || [];
+          const valueFor = (type: string) =>
+            components.find((item: any) => item.types?.includes(type))?.long_name || '';
+          const areaName = valueFor('sublocality_level_1') || valueFor('locality') || 'Bengaluru';
+          const check = await checkServiceability(targetLat, targetLng);
+          if (!check.serviceable) {
+            setServiceError(check.message || 'This address is outside our current service area.');
+            return;
+          }
+
+          const locData = {
+            address: result.formatted_address || addressQuery,
+            area: areaName,
+            lat: targetLat,
+            lng: targetLng,
+            placeId: result.place_id,
+            street: valueFor('route') || valueFor('neighborhood'),
+            pincode: valueFor('postal_code'),
+            serviceable: true,
+            zoneName: check.zoneName,
+          };
+          setSelectedLocation(locData);
+          onSelectLocation(locData);
+          onClose();
+        } catch {
+          setServiceError('We could not verify that address. Please try another address or suggestion.');
+        } finally {
+          setLoadingPlaceSelect(false);
+        }
+      }
     );
   };
 
@@ -586,6 +617,7 @@ export default function LocationSearchModal({
                     ) : (
                       <MapPin className="h-3.5 w-3.5 text-emerald-600" />
                     )}
+
                   </span>
                   <div className="min-w-0 flex-1">
                     <span className="block text-xs font-bold text-slate-900 truncate">
@@ -597,6 +629,22 @@ export default function LocationSearchModal({
                   </div>
                 </button>
               ))}
+            </div>
+          )}
+
+          {query.trim().length >= 3 && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
+              <p className="mb-2 text-[11px] font-semibold text-slate-600">
+                Can’t find your address in the suggestions?
+              </p>
+              <button
+                type="button"
+                onClick={handleConfirmManualAddress}
+                disabled={loadingPlaceSelect}
+                className="w-full rounded-lg bg-slate-900 p-2.5 text-left text-xs font-bold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {loadingPlaceSelect ? 'Verifying address…' : `Use “${query.trim()}” as pickup address`}
+              </button>
             </div>
           )}
 

@@ -25,6 +25,14 @@ import {
   PickupCartItem,
 } from '@/lib/pickupCart';
 
+const categoryImages: Record<string, string> = {
+  'E-Waste': '/categories/e-waste.png',
+  'Household Dry Waste': '/categories/household-waste.png',
+  'Paper & Cardboard': '/categories/paper-carboard.jpg',
+  'Plastic Waste': '/categories/plastic-waste.jpg?v=2',
+};
+const CUSTOMER_CATEGORY_NAMES = new Set(Object.keys(categoryImages));
+
 const icons = [
   FileText,
   Recycle,
@@ -33,21 +41,6 @@ const icons = [
   Wine,
   Sofa,
 ];
-
-const categoryImages: Record<string, string> = {
-  'E-Waste': '/categories/e-waste.png',
-  'Household Dry Waste': '/categories/household-waste.png',
-  'Paper & Cardboard': '/categories/paper-carboard.jpg',
-  'Plastic Waste': '/categories/plastic-waste.jpg?v=2',
-};
-
-const allowedCategoryNames = [
-  'E-Waste',
-  'Household Dry Waste',
-  'Paper & Cardboard',
-  'Plastic Waste',
-] as const;
-
 
 export default function CategoriesPage() {
   const [categories, setCategories] = useState<any[]>([]);
@@ -66,11 +59,9 @@ export default function CategoriesPage() {
       .then((d) => {
         const data = Array.isArray(d?.data) ? d.data : [];
 
-        const filteredCategories = data.filter((category: any) =>
-          allowedCategoryNames.includes(category.name)
+        setCategories(
+          data.filter((category: any) => CUSTOMER_CATEGORY_NAMES.has(category.name?.trim()))
         );
-
-        setCategories(filteredCategories);
       })
       .catch(() => {});
   }, []);
@@ -93,7 +84,7 @@ export default function CategoriesPage() {
     const search = query.trim().toLowerCase();
 
     return categories.filter((category) => {
-      if (!allowedCategoryNames.includes(category.name)) {
+      if (!CUSTOMER_CATEGORY_NAMES.has(category.name?.trim())) {
         return false;
       }
 
@@ -160,7 +151,7 @@ export default function CategoriesPage() {
           return (
             <article
               key={category.id}
-              className="flex min-h-[420px] flex-col rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md"
+              className="flex h-full flex-col rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md"
             >
               {/* IMAGE */}
               <div className="mb-4 h-32 w-full overflow-hidden rounded-xl bg-emerald-50">
@@ -171,14 +162,14 @@ export default function CategoriesPage() {
                     className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
                   />
                 ) : (
-                  <div className="flex h-full w-full items-center justify-center">
+                <div className="flex h-full w-full items-center justify-center">
                     <IconComp className="h-8 w-8 text-emerald-600" />
-                  </div>
+                </div>
                 )}
               </div>
 
               {/* CONTENT */}
-              <div className="flex-1">
+              <div className="flex flex-1 flex-col">
 
                 {category.name === 'Household Dry Waste' ? (
                   <>
@@ -191,8 +182,8 @@ export default function CategoriesPage() {
                       household clutter cleared out fast.
                     </p>
 
-                    <div className="mt-4 grid grid-cols-2 gap-2">
-                      <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-2.5">
                         <h3 className="text-xs font-bold text-emerald-700">
                           Wet Waste
                         </h3>
@@ -202,7 +193,7 @@ export default function CategoriesPage() {
                         </p>
                       </div>
 
-                      <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-2.5">
                         <h3 className="text-xs font-bold text-emerald-700">
                           Dry Waste
                         </h3>
@@ -219,7 +210,7 @@ export default function CategoriesPage() {
                       {category.name}
                     </h2>
 
-                    <p className="mt-1 min-h-8 text-xs leading-relaxed text-slate-500">
+                    <p className="mt-1 text-xs leading-relaxed text-slate-500">
                       {category.description ||
                         'Standard waste collection category.'}
                     </p>
@@ -227,7 +218,7 @@ export default function CategoriesPage() {
                 )}
 
                 {/* PRICE */}
-                <p className="mt-3 text-xs font-bold text-emerald-700">
+                <p className="mt-2 text-xs font-bold text-emerald-700">
                   ₹{category.pricePerKg}{' '}
                   <span className="text-[10px] font-normal text-slate-500">
                     / kg
@@ -242,7 +233,7 @@ export default function CategoriesPage() {
               </div>
 
               {/* ACTIONS */}
-              <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-3">
+              <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3">
 
                 {quantity === 0 ? (
                   <button

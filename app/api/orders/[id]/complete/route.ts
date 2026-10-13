@@ -9,9 +9,13 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const startedAt = Date.now();
+  const logTiming = (phase: string) =>
+    console.info(`[api/orders/complete] ${phase} elapsedMs=${Date.now() - startedAt}`);
   try {
     const { id } = await params;
     const authUser = await getAuthUser(req);
+    logTiming('authentication complete');
     if (!authUser || authUser.role !== 'AGENT') {
       return errorResponse('UNAUTHORIZED', 'Authenticated agent access is required.', 401);
     }
@@ -26,6 +30,7 @@ export async function POST(
         invoices: { take: 1 },
       },
     });
+    logTiming('order lookup complete');
 
     if (!order) {
       return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
@@ -97,6 +102,7 @@ export async function POST(
           invoices: true,
         },
       });
+      logTiming('completion transaction complete');
 
       if (order.agentId) {
         await tx.agent.update({
@@ -114,6 +120,7 @@ export async function POST(
       agentId: completedOrder.agentId,
       invoiceNumber,
     });
+    logTiming('response ready');
 
     return successResponse(completedOrder);
   } catch (err: any) {

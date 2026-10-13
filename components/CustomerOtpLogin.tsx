@@ -87,6 +87,12 @@ export default function CustomerOtpLogin({
       const data = await response.json();
 
       if (!response.ok || !data.success) {
+        if (data.error?.code === 'OTP_EXPIRED' || data.code === 'OTP_EXPIRED') {
+          setStep('details');
+          setCode('');
+          setCooldown(0);
+          throw new Error('This OTP has expired or was already used. Please request a new OTP.');
+        }
         throw new Error(
           data.message ||
             data.error?.message ||

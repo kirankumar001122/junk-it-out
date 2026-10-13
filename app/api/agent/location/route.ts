@@ -95,6 +95,7 @@ export async function POST(req: NextRequest) {
       const previous = await tx.agentLocation.findFirst({
         where: { agentId: targetAgentId, orderId: order.id },
         orderBy: { timestamp: "desc" },
+        select: { id: true, lat: true, lng: true, timestamp: true },
       });
       log(`previous location query complete found=${Boolean(previous)}`);
       const duplicate = previous?.lat === latitude && previous?.lng === longitude &&
@@ -104,7 +105,11 @@ export async function POST(req: NextRequest) {
       const agent = await tx.agent.update({
         where: { id: targetAgentId },
         data: { currentLat: latitude, currentLng: longitude },
-        include: { user: true },
+        select: {
+          status: true,
+          vehicleNumber: true,
+          user: { select: { name: true } },
+        },
       });
       log('agent coordinate update complete');
       if (!duplicate) log('location record insert start');
@@ -113,7 +118,7 @@ export async function POST(req: NextRequest) {
       });
       if (!duplicate) log('location record insert complete');
       return { order, agent, locRecord, duplicate };
-    }, { isolationLevel: "Serializable", maxWait: 5_000, timeout: 10_000 });
+    }, { isolationLevel: "ReadCommitted", maxWait: 5_000, timeout: 5_000 });
     log(`transaction complete assignedActiveOrder=${Boolean(result)}`);
 
     if (!result) {
