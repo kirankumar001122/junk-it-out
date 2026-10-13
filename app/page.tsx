@@ -303,7 +303,7 @@ export default function HomePage() {
           </div>
 
           {/* Four Category Cards */}
-          <div className="grid grid-cols-1 items-stretch gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 items-start gap-5 sm:grid-cols-2 lg:grid-cols-4">
 
             {loading
               ? Array.from({ length: 4 }).map((_, index) => (
@@ -328,14 +328,14 @@ export default function HomePage() {
                   return (
                     <article
                       key={category.id}
-                      className="flex h-full w-full flex-col rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm transition-all hover:-translate-y-1 hover:border-emerald-400 hover:shadow-md"
+                      className="flex w-full flex-col rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm transition-all hover:-translate-y-1 hover:border-emerald-400 hover:shadow-md"
                     >
 
                       <Link
                         href={`/book?category=${encodeURIComponent(
                           category.id
                         )}`}
-                        className="flex flex-1 flex-col"
+                        className="flex flex-col"
                       >
 
                         {category.name === 'Household Dry Waste' ? (
@@ -377,12 +377,6 @@ export default function HomePage() {
                               </div>
                             </div>
 
-                            <p className="mt-3 text-sm font-extrabold text-emerald-700">
-                              ₹{category.pricePerKg}{' '}
-                              <span className="text-[10px] font-normal text-slate-500">
-                                / kg
-                              </span>
-                            </p>
                           </>
                         ) : (
                           <>
@@ -408,30 +402,32 @@ export default function HomePage() {
                               {category.description || 'Standard waste collection category.'}
                             </p>
 
-                            <p className="mt-2 text-sm font-extrabold text-emerald-700">
-                              ₹{category.pricePerKg}{' '}
-                              <span className="text-xs font-normal text-slate-500">
-                                / kg
-                              </span>
-                            </p>
                           </>
                         )}
 
                       </Link>
 
-                      {quantity === 0 ? (
+                      <div className="mt-3">
+                        <p className="mb-2 text-sm font-extrabold text-emerald-700">
+                          ₹{category.pricePerKg}{' '}
+                          <span className="text-xs font-normal text-slate-500">
+                            / kg
+                          </span>
+                        </p>
 
-                        <button
-                          onClick={() => addCategory(category)}
-                          className="mt-3 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-slate-900 text-sm font-bold text-white transition-colors hover:bg-emerald-600 active:scale-95"
-                        >
-                          <Plus className="h-4 w-4" />
-                          ADD
-                        </button>
+                        {quantity === 0 ? (
 
-                      ) : (
+                          <button
+                            onClick={() => addCategory(category)}
+                            className="inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-slate-900 text-sm font-bold text-white transition-colors hover:bg-emerald-600 active:scale-95"
+                          >
+                            <Plus className="h-4 w-4" />
+                            ADD
+                          </button>
 
-                        <div className="mt-4 flex h-10 items-center justify-between rounded-lg border border-emerald-300 bg-emerald-50/80 px-1">
+                        ) : (
+
+                          <div className="flex h-10 items-center justify-between rounded-lg border border-emerald-300 bg-emerald-50/80 px-1">
 
                           <button
                             onClick={() => {
@@ -473,9 +469,10 @@ export default function HomePage() {
                             <Plus className="h-4 w-4" />
                           </button>
 
-                        </div>
+                          </div>
 
-                      )}
+                        )}
+                      </div>
 
                     </article>
                   );

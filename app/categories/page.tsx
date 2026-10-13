@@ -138,7 +138,7 @@ export default function CategoriesPage() {
       )}
 
       {/* CATEGORY GRID */}
-      <section className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4">
+      <section className="mt-6 grid items-start gap-5 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4">
         {results.map((category, index) => {
           const IconComp = icons[index % icons.length];
 
@@ -151,7 +151,7 @@ export default function CategoriesPage() {
           return (
             <article
               key={category.id}
-              className="flex h-full flex-col rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md"
+              className="flex flex-col rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md"
             >
               {/* IMAGE */}
               <div className="mb-4 h-32 w-full overflow-hidden rounded-xl bg-emerald-50">
@@ -169,7 +169,7 @@ export default function CategoriesPage() {
               </div>
 
               {/* CONTENT */}
-              <div className="flex flex-1 flex-col">
+              <div className="flex flex-col">
 
                 {category.name === 'Household Dry Waste' ? (
                   <>
@@ -217,8 +217,11 @@ export default function CategoriesPage() {
                   </>
                 )}
 
-                {/* PRICE */}
-                <p className="mt-2 text-xs font-bold text-emerald-700">
+              </div>
+
+              {/* PRICE AND ACTIONS */}
+              <div className="mt-3">
+                <p className="mb-2 text-xs font-bold text-emerald-700">
                   ₹{category.pricePerKg}{' '}
                   <span className="text-[10px] font-normal text-slate-500">
                     / kg
@@ -230,10 +233,8 @@ export default function CategoriesPage() {
                     </span>
                   )}
                 </p>
-              </div>
 
-              {/* ACTIONS */}
-              <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3">
+                <div className="flex items-center gap-2 border-t border-slate-100 pt-3">
 
                 {quantity === 0 ? (
                   <button
@@ -288,7 +289,7 @@ export default function CategoriesPage() {
                       <Plus className="h-3.5 w-3.5" />
                     </button>
 
-                  </div>
+                    </div>
                 )}
 
                 <Link
@@ -301,6 +302,7 @@ export default function CategoriesPage() {
                   <ArrowRight className="ml-1 h-3.5 w-3.5" />
                 </Link>
 
+              </div>
               </div>
             </article>
           );
