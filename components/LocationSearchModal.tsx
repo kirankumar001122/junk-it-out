@@ -51,6 +51,8 @@ export default function LocationSearchModal({
 
   const autocompleteServiceRef = useRef<any>(null);
   const geocoderRef = useRef<any>(null);
+  const predictionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const predictionRequestRef = useRef(0);
 
   // Prevent background page scrolling when modal is open & handle Escape key
   useEffect(() => {
@@ -67,6 +69,8 @@ export default function LocationSearchModal({
     window.addEventListener('keydown', handleKeyDown);
 
     return () => {
+      if (predictionTimerRef.current) clearTimeout(predictionTimerRef.current);
+      predictionRequestRef.current += 1;
       document.body.style.overflow = originalOverflow;
       window.removeEventListener('keydown', handleKeyDown);
     };
@@ -189,6 +193,8 @@ export default function LocationSearchModal({
   const handleQueryChange = (val: string) => {
     setQuery(val);
     setServiceError(null);
+    if (predictionTimerRef.current) clearTimeout(predictionTimerRef.current);
+    const requestId = ++predictionRequestRef.current;
 
     if (!val || val.trim().length < 2) {
       setPredictions([]);
@@ -203,35 +209,35 @@ export default function LocationSearchModal({
       return;
     }
 
-    try {
-      const LatLngBoundsClass = window.google?.maps?.LatLngBounds;
-      const locationBias = LatLngBoundsClass
-        ? new LatLngBoundsClass(
-            { lat: 12.734, lng: 77.379 },
-            { lat: 13.203, lng: 77.978 }
-          )
-        : undefined;
+    predictionTimerRef.current = setTimeout(() => {
+      try {
+        const LatLngBoundsClass = window.google?.maps?.LatLngBounds;
+        const locationBias = LatLngBoundsClass
+          ? new LatLngBoundsClass(
+              { lat: 12.734, lng: 77.379 },
+              { lat: 13.203, lng: 77.978 }
+            )
+          : undefined;
 
-      autocompleteServiceRef.current.getPlacePredictions(
-        {
-          input: val,
-          componentRestrictions: { country: 'in' },
-          ...(locationBias ? { locationBias } : {}),
-        },
-        (results: any[], status: any) => {
-          const okStatus = window.google?.maps?.places?.PlacesServiceStatus?.OK || 'OK';
-          if (status === okStatus && results) {
-            setPredictions(results);
-          } else {
-            setPredictions([]);
+        autocompleteServiceRef.current.getPlacePredictions(
+          {
+            input: val,
+            componentRestrictions: { country: 'in' },
+            ...(locationBias ? { locationBias } : {}),
+          },
+          (results: any[], status: any) => {
+            if (requestId !== predictionRequestRef.current) return;
+            const okStatus = window.google?.maps?.places?.PlacesServiceStatus?.OK || 'OK';
+            setPredictions(status === okStatus && results ? results : []);
           }
-        }
-      );
-    } catch (e) {
-      console.error('[LocationModal] Places autocomplete prediction error:', e);
-      setPredictions([]);
-      setMapsError('Location search is temporarily unavailable. Please select a service area below.');
-    }
+        );
+      } catch (e) {
+        if (requestId !== predictionRequestRef.current) return;
+        console.error('[LocationModal] Places autocomplete prediction error:', e);
+        setPredictions([]);
+        setMapsError('Location search is temporarily unavailable. Please select a service area below.');
+      }
+    }, 250);
   };
 
   // Handle Selection of a Google Places Result

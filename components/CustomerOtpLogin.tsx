@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import {
   CheckCircle2,
   KeyRound,
@@ -29,6 +29,7 @@ export default function CustomerOtpLogin({
   const [error, setError] = useState('');
   const [cooldown, setCooldown] = useState(0);
   const [showServiceNotice, setShowServiceNotice] = useState(false);
+  const requestInFlightRef = useRef(false);
 
   // Reset the login form whenever the modal is closed.
   useEffect(() => {
@@ -62,6 +63,7 @@ export default function CustomerOtpLogin({
 
   const sendOtp = async (event: FormEvent) => {
     event.preventDefault();
+    if (requestInFlightRef.current) return;
 
     const cleanPhone = phone.trim().replace(/\D/g, '');
 
@@ -70,6 +72,7 @@ export default function CustomerOtpLogin({
       return;
     }
 
+    requestInFlightRef.current = true;
     setLoading(true);
     setError('');
 
@@ -118,6 +121,7 @@ export default function CustomerOtpLogin({
       setError(err?.message || 'Unable to send OTP.');
     } finally {
       setLoading(false);
+      requestInFlightRef.current = false;
     }
   };
 
@@ -127,6 +131,7 @@ export default function CustomerOtpLogin({
 
   const verifyOtp = async (event: FormEvent) => {
     event.preventDefault();
+    if (requestInFlightRef.current) return;
 
     const cleanCode = code.trim();
 
@@ -135,6 +140,7 @@ export default function CustomerOtpLogin({
       return;
     }
 
+    requestInFlightRef.current = true;
     setLoading(true);
     setError('');
 
@@ -175,6 +181,7 @@ export default function CustomerOtpLogin({
       );
     } finally {
       setLoading(false);
+      requestInFlightRef.current = false;
     }
   };
 

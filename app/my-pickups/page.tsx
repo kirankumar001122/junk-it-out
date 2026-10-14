@@ -108,7 +108,7 @@ export default function MyPickupsPage() {
     // Polling fallback to keep pickups fresh if stream drops
     const pollInterval = window.setInterval(() => {
       fetchOrders();
-    }, 5000);
+    }, 15000);
 
     return () => {
       if (eventSource) {

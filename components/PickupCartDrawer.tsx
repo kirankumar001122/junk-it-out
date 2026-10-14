@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -48,6 +48,9 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpError, setOtpError] = useState('');
   const [cooldown, setCooldown] = useState(0);
+  const otpRequestRef = useRef(false);
+  const logoutRequestRef = useRef(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const getDisplayName = (userObj: any) => {
     if (!userObj) return 'Customer';
@@ -146,12 +149,14 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
 
   const handleSendOtp = async (e?: FormEvent) => {
     if (e) e.preventDefault();
+    if (otpRequestRef.current) return;
 
     if (!phone || phone.trim().replace(/\D/g, '').length < 10) {
       setOtpError('Please enter a valid 10-digit mobile number.');
       return;
     }
 
+    otpRequestRef.current = true;
     setOtpLoading(true);
     setOtpError('');
     try {
@@ -179,15 +184,18 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
       setOtpError(err.message || 'Unable to send OTP.');
     } finally {
       setOtpLoading(false);
+      otpRequestRef.current = false;
     }
   };
 
   const handleVerifyOtp = async (e?: FormEvent) => {
     if (e) e.preventDefault();
+    if (otpRequestRef.current) return;
     if (!code || code.trim().length === 0) {
       setOtpError('Please enter the OTP code received.');
       return;
     }
+    otpRequestRef.current = true;
     setOtpLoading(true);
     setOtpError('');
     try {
@@ -221,6 +229,22 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
       setOtpError(err.message || 'The OTP could not be verified.');
     } finally {
       setOtpLoading(false);
+      otpRequestRef.current = false;
+    }
+  };
+
+  const handleLogout = async () => {
+    if (logoutRequestRef.current) return;
+    logoutRequestRef.current = true;
+    setLoggingOut(true);
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      window.dispatchEvent(new Event('jio_auth_change'));
+    } catch (err) {
+      console.error('Logout error from cart:', err);
+    } finally {
+      setLoggingOut(false);
+      logoutRequestRef.current = false;
     }
   };
 
@@ -314,19 +338,11 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
                 </div>
               </div>
               <button
-                onClick={async () => {
-                  try {
-                    await fetch('/api/auth/logout', { method: 'POST' });
-                    if (typeof window !== 'undefined') {
-                      window.dispatchEvent(new Event('jio_auth_change'));
-                    }
-                  } catch (err) {
-                    console.error('Logout error from cart:', err);
-                  }
-                }}
-                className="text-xs font-bold text-rose-600 hover:text-rose-800 hover:underline shrink-0"
+                onClick={handleLogout}
+                disabled={loggingOut}
+                className="text-xs font-bold text-rose-600 hover:text-rose-800 hover:underline shrink-0 disabled:opacity-50"
               >
-                Logout
+                {loggingOut ? 'Logging out...' : 'Logout'}
               </button>
             </section>
           ) : !isCustomer ? (

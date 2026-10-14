@@ -1,55 +1,98 @@
 'use client';
 
-import { useState } from 'react';
-import { MapPin, Plus, Trash2, CheckCircle, Home, Briefcase, Tag } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Plus, Trash2, Home, Briefcase } from 'lucide-react';
 
 export default function CustomerAddressesPage() {
-  const [addresses, setAddresses] = useState([
-    {
-      id: 'addr-1',
-      label: 'Home',
-      houseNo: 'Flat 204, Royal Palms Apartment',
-      street: '15th Cross, 24th Main Road',
-      area: 'JP Nagar 7th Phase',
-      landmark: 'Near Brigade Millenium',
-      pincode: '560078',
-      isDefault: true,
-    },
-    {
-      id: 'addr-2',
-      label: 'Work',
-      houseNo: 'Building 4, Electronic City Phase 1',
-      street: 'Hosur Main Road',
-      area: 'Electronic City',
-      landmark: 'Opposite Wipro Gate 2',
-      pincode: '560100',
-      isDefault: false,
-    },
-  ]);
-
+  const [addresses, setAddresses] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newLabel, setNewLabel] = useState('Home');
   const [newHouse, setNewHouse] = useState('');
   const [newStreet, setNewStreet] = useState('');
   const [newArea, setNewArea] = useState('JP Nagar');
   const [newPincode, setNewPincode] = useState('560078');
+  const savingRef = useRef(false);
+  const deletingRef = useRef<string | null>(null);
 
-  const handleAddAddress = () => {
-    if (!newHouse || !newStreet) return;
-    const item = {
-      id: `addr-${Date.now()}`,
-      label: newLabel,
-      houseNo: newHouse,
-      street: newStreet,
-      area: newArea,
-      landmark: '',
-      pincode: newPincode,
-      isDefault: false,
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/customer/addresses', { credentials: 'same-origin' })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) throw new Error(data.message || 'Unable to load saved addresses.');
+        if (!cancelled) setAddresses(Array.isArray(data.data) ? data.data : []);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to load saved addresses.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
     };
-    setAddresses([...addresses, item]);
-    setShowAddModal(false);
-    setNewHouse('');
-    setNewStreet('');
+  }, []);
+
+  const handleAddAddress = async () => {
+    if (savingRef.current) return;
+    if (!newHouse.trim() || !newStreet.trim() || !newArea.trim()) {
+      setError('House, street, and area are required.');
+      return;
+    }
+
+    savingRef.current = true;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/customer/addresses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          label: newLabel,
+          houseNo: newHouse.trim(),
+          street: newStreet.trim(),
+          area: newArea.trim(),
+          pincode: newPincode.trim(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.message || 'Unable to save address.');
+      setAddresses((current) => [data.data, ...current]);
+      setShowAddModal(false);
+      setNewHouse('');
+      setNewStreet('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to save address.');
+    } finally {
+      setSaving(false);
+      savingRef.current = false;
+    }
+  };
+
+  const handleDeleteAddress = async (id: string) => {
+    if (deletingRef.current) return;
+    deletingRef.current = id;
+    setDeletingId(id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/customer/addresses?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.message || 'Unable to delete address.');
+      setAddresses((current) => current.filter((address) => address.id !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to delete address.');
+    } finally {
+      setDeletingId(null);
+      deletingRef.current = null;
+    }
   };
 
   return (
@@ -68,8 +111,20 @@ export default function CustomerAddressesPage() {
         </button>
       </div>
 
+      {error && (
+        <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-xl px-4 py-3 text-xs font-bold">
+          {error}
+        </div>
+      )}
+
       <div className="space-y-4">
-        {addresses.map((addr) => (
+        {loading ? (
+          <div className="rounded-3xl bg-slate-100 h-28 animate-pulse" />
+        ) : addresses.length === 0 ? (
+          <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-500">
+            No saved addresses yet. Add one for faster booking.
+          </div>
+        ) : addresses.map((addr) => (
           <div key={addr.id} className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -84,10 +139,11 @@ export default function CustomerAddressesPage() {
                 )}
               </div>
               <button
-                onClick={() => setAddresses(addresses.filter((a) => a.id !== addr.id))}
-                className="text-slate-400 hover:text-rose-600 p-1"
+                onClick={() => handleDeleteAddress(addr.id)}
+                disabled={deletingId === addr.id}
+                className="text-slate-400 hover:text-rose-600 p-1 disabled:opacity-50"
               >
-                <Trash2 className="w-4 h-4" />
+                <Trash2 className={`w-4 h-4 ${deletingId === addr.id ? 'animate-pulse' : ''}`} />
               </button>
             </div>
 
@@ -156,9 +212,10 @@ export default function CustomerAddressesPage() {
               </button>
               <button
                 onClick={handleAddAddress}
-                className="w-1/2 bg-emerald-600 text-white font-bold text-xs py-3 rounded-xl shadow-md"
+                disabled={saving}
+                className="w-1/2 bg-emerald-600 text-white font-bold text-xs py-3 rounded-xl shadow-md disabled:opacity-60"
               >
-                Save Address
+                {saving ? 'Saving...' : 'Save Address'}
               </button>
             </div>
           </div>

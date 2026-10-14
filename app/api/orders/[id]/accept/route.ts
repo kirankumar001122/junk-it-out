@@ -191,7 +191,7 @@ export async function POST(
       }
     }
 
-    return successResponse({
+    return successResponse(updatedOrder || {
       orderId: order.id,
       orderNumber: order.orderNumber,
       agentId: agentId,

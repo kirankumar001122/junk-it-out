@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Truck,
   MapPin,
@@ -46,6 +46,7 @@ export default function AgentDashboardPage() {
   const [loginOtp, setLoginOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
   // Weighing Modal State
@@ -61,8 +62,15 @@ export default function AgentDashboardPage() {
   const [weighNotes, setWeighNotes] = useState('');
   const [submittingWeigh, setSubmittingWeigh] = useState(false);
   const [weighModalError, setWeighModalError] = useState<string | null>(null);
+  const dataRequestRef = useRef(false);
+  const acceptingPickupRef = useRef(false);
+  const actionRequestRef = useRef(false);
+  const statusRequestRef = useRef(false);
+  const weighingRequestRef = useRef(false);
 
   const fetchAgentData = async () => {
+    if (dataRequestRef.current) return;
+    dataRequestRef.current = true;
     try {
       setLoading(true);
       setAuthError(null);
@@ -132,6 +140,7 @@ export default function AgentDashboardPage() {
       setAuthError('Network error while loading your pickup dashboard.');
     } finally {
       setLoading(false);
+      dataRequestRef.current = false;
     }
   };
 
@@ -213,24 +222,29 @@ export default function AgentDashboardPage() {
     };
   }, [agent?.id, isOnline]);
 
+  const fetchOrderDetails = async (orderId: string) => {
+    const res = await fetch(`/api/orders/${orderId}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      throw new Error(data.error?.message || data.message || 'Unable to fetch pickup details.');
+    }
+    return data.data;
+  };
+
   const handleViewPickupDetails = async (orderId: string) => {
     setLoadingPickupDetails(true);
     try {
-      const res = await fetch(`/api/orders/${orderId}`);
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setViewPickupModal(data.data);
-      } else {
-        alert(data.error?.message || data.message || 'Unable to view pickup details.');
-      }
+      setViewPickupModal(await fetchOrderDetails(orderId));
     } catch (err) {
-      alert('Network error fetching pickup details.');
+      alert(err instanceof Error ? err.message : 'Network error fetching pickup details.');
     } finally {
       setLoadingPickupDetails(false);
     }
   };
 
   const handleAcceptPickup = async (orderId: string) => {
+    if (acceptingPickupRef.current) return;
+    acceptingPickupRef.current = true;
     setAcceptingPickup(true);
     try {
       const res = await fetch(`/api/orders/${orderId}/accept`, {
@@ -244,7 +258,6 @@ export default function AgentDashboardPage() {
         setTimeout(() => setStatusNotice(null), 5000);
         setViewPickupModal(null);
         setNewPickupNotice(null);
-        fetchAgentData();
         return;
       }
 
@@ -253,7 +266,14 @@ export default function AgentDashboardPage() {
         setTimeout(() => setStatusNotice(null), 5000);
         setViewPickupModal(null);
         setNewPickupNotice(null);
-        fetchAgentData();
+        const updatedOrder = Array.isArray(data.data?.items)
+          ? data.data
+          : await fetchOrderDetails(orderId);
+        setActiveOrder(updatedOrder);
+        setOrders((currentOrders) => [
+          updatedOrder,
+          ...currentOrders.filter((order) => order.id !== updatedOrder.id),
+        ]);
       } else {
         alert(data.error?.message || data.message || 'Failed to accept pickup.');
       }
@@ -261,6 +281,7 @@ export default function AgentDashboardPage() {
       alert('Network error while accepting pickup.');
     } finally {
       setAcceptingPickup(false);
+      acceptingPickupRef.current = false;
     }
   };
 
@@ -319,6 +340,8 @@ export default function AgentDashboardPage() {
   };
 
   const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
       setAgent(null);
@@ -328,10 +351,14 @@ export default function AgentDashboardPage() {
       setLoginOtp('');
     } catch (e) {
       console.error('Agent logout error:', e);
+    } finally {
+      setLoggingOut(false);
     }
   };
 
   const toggleAgentStatus = async () => {
+    if (statusRequestRef.current) return;
+    statusRequestRef.current = true;
     const targetStatus = isOnline ? 'OFFLINE' : 'AVAILABLE';
     setStatusUpdating(true);
     setStatusNotice(null);
@@ -355,11 +382,12 @@ export default function AgentDashboardPage() {
       setStatusNotice('Network error updating status.');
     } finally {
       setStatusUpdating(false);
+      statusRequestRef.current = false;
     }
   };
 
   const handleCallEndpoint = async (action: 'accept' | 'start' | 'arrive') => {
-    if (!activeOrder || actionLoading) return;
+    if (!activeOrder || actionRequestRef.current) return;
 
     if (!isOnline && action === 'accept') {
       setStatusNotice('You are currently OFFLINE. Please switch status to ONLINE to accept pickups.');
@@ -367,6 +395,7 @@ export default function AgentDashboardPage() {
       return;
     }
 
+    actionRequestRef.current = true;
     setActionLoading(true);
     setStatusNotice(null);
     let actionTimeout: number | undefined;
@@ -390,12 +419,16 @@ export default function AgentDashboardPage() {
         );
         setTimeout(() => setStatusNotice(null), 4000);
         if (data.data?.id) {
-          setActiveOrder(data.data);
+          const nextOrder = action === 'accept'
+            ? Array.isArray(data.data.items)
+              ? data.data
+              : await fetchOrderDetails(data.data.id)
+            : data.data;
+          setActiveOrder(nextOrder);
           setOrders((currentOrders) =>
-            currentOrders.map((order) => order.id === data.data.id ? data.data : order)
+            currentOrders.map((order) => order.id === nextOrder.id ? nextOrder : order)
           );
         }
-        void fetchAgentData();
       } else {
         const errorText = data.error?.message || data.message || `Failed to perform ${action} action.`;
         setStatusNotice(errorText);
@@ -412,11 +445,13 @@ export default function AgentDashboardPage() {
     } finally {
       if (actionTimeout) window.clearTimeout(actionTimeout);
       setActionLoading(false);
+      actionRequestRef.current = false;
     }
   };
 
   const handleSubmitWeighingAndComplete = async () => {
-    if (!activeOrder) return;
+    if (!activeOrder || weighingRequestRef.current) return;
+    weighingRequestRef.current = true;
     setWeighModalError(null);
 
     // 1. Client-side weight validation
@@ -480,7 +515,6 @@ export default function AgentDashboardPage() {
             )
           );
         }
-        void fetchAgentData();
       } else {
         setWeighModalError(completeData.error?.message || completeData.message || 'Failed to complete pickup order.');
       }
@@ -489,6 +523,7 @@ export default function AgentDashboardPage() {
       setWeighModalError('Network error while completing pickup. Please check your connection and try again.');
     } finally {
       setSubmittingWeigh(false);
+      weighingRequestRef.current = false;
     }
   };
 
@@ -645,10 +680,11 @@ export default function AgentDashboardPage() {
 
           <button
             onClick={handleLogout}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl transition-colors"
+            disabled={loggingOut}
+            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl transition-colors disabled:opacity-50"
             title="Log Out"
           >
-            <LogOut className="w-4 h-4" />
+            {loggingOut ? <RefreshCw className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
           </button>
         </div>
       </div>

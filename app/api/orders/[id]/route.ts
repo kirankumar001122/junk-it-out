@@ -12,28 +12,59 @@ export async function GET(
     const { id } = await params;
     const authUser = await getAuthUser(req);
 
-    const order = await db.order.findFirst({
-      where: getOrderIdentifierWhere(id),
-      include: {
-        customer: { include: { user: true } },
-        agent: { include: { user: true } },
-        address: true,
-        items: { include: { category: true } },
-        statusHistory: { orderBy: { timestamp: 'desc' } },
-        payments: true,
-        invoices: true,
-        weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
-        settlement: true,
-      },
-    });
-
-    if (!order) {
-      return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
-    }
-
     // Role-based Ownership Authorization Check
     if (!authUser) {
       return errorResponse('UNAUTHORIZED', 'Authentication is required to view order details.', 401);
+    }
+
+    const order = authUser.role === 'AGENT'
+      ? await db.order.findFirst({
+          where: getOrderIdentifierWhere(id),
+          select: {
+            id: true,
+            orderNumber: true,
+            customerId: true,
+            agentId: true,
+            status: true,
+            address: {
+              select: {
+                name: true,
+                houseNo: true,
+                street: true,
+                area: true,
+                lat: true,
+                lng: true,
+                pickupInstructions: true,
+              },
+            },
+            items: {
+              select: {
+                id: true,
+                categoryId: true,
+                estimatedWeight: true,
+                actualWeight: true,
+                category: { select: { id: true, name: true } },
+              },
+            },
+          },
+        })
+      : await db.order.findFirst({
+          where: getOrderIdentifierWhere(id),
+          include: {
+            customer: { include: { user: true } },
+            agent: { include: { user: true } },
+            address: true,
+            items: { include: { category: true } },
+            statusHistory: { orderBy: { timestamp: 'desc' } },
+            payments: true,
+            invoices: true,
+            weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
+            settlement: true,
+          },
+        });
+
+    if (!order) {
+      return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
     }
 
     if (authUser.role === 'CUSTOMER') {
