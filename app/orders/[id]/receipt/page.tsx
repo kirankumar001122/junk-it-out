@@ -1,16 +1,17 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import { formatPickupAddress } from '@/lib/address';
 import { isPickupCompletedStatus } from '@/lib/orders/lifecycle';
 
 export default function ReceiptPage() {
   const params = useParams();
-  const router = useRouter();
   const id = params.id as string;
 
   const [order, setOrder] = useState<any>(null);
+  const [unavailableOrder, setUnavailableOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -25,11 +26,7 @@ export default function ReceiptPage() {
         }
 
         if (!isPickupCompletedStatus(data.data.status)) {
-          if (data.data.status === 'CANCELLED') {
-            router.replace('/my-pickups');
-          } else {
-            router.replace(`/orders/${data.data.id}`);
-          }
+          setUnavailableOrder(data.data);
           return;
         }
 
@@ -43,8 +40,11 @@ export default function ReceiptPage() {
 
     if (id) {
       fetchOrder();
+    } else {
+      setErrorMsg('A receipt order ID is required.');
+      setLoading(false);
     }
-  }, [id, router]);
+  }, [id]);
 
   if (loading) {
     return (
@@ -54,12 +54,41 @@ export default function ReceiptPage() {
     );
   }
 
+  if (unavailableOrder) {
+    const isCancelled = unavailableOrder.status === 'CANCELLED';
+    const returnHref = isCancelled ? '/my-pickups' : `/orders/${unavailableOrder.id}`;
+
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 px-4 py-10">
+        <section className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+          <h1 className="text-xl font-bold text-slate-900">Receipt not available yet</h1>
+          <p className="mt-3 text-sm leading-relaxed text-slate-600">
+            {isCancelled
+              ? 'This order was cancelled, so a pickup receipt is not available.'
+              : `A receipt is available after pickup is complete. Current order status: ${String(unavailableOrder.status).replaceAll('_', ' ').toLowerCase()}.`}
+          </p>
+          <Link
+            href={returnHref}
+            className="mt-6 inline-flex min-h-11 items-center justify-center rounded-xl bg-emerald-700 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-800"
+          >
+            {isCancelled ? 'Back to My Pickups' : 'Back to Order'}
+          </Link>
+        </section>
+      </div>
+    );
+  }
+
   if (errorMsg || !order) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-100">
-        <p className="text-sm text-red-600">
-          {errorMsg || 'Receipt not found'}
-        </p>
+        <div className="max-w-md px-4 text-center">
+          <p className="text-sm text-red-700" role="alert">
+            {errorMsg || 'Receipt not found'}
+          </p>
+          <Link href="/my-pickups" className="mt-4 inline-flex min-h-11 items-center text-sm font-bold text-emerald-800 underline">
+            Back to My Pickups
+          </Link>
+        </div>
       </div>
     );
   }
