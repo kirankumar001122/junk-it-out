@@ -20,6 +20,34 @@ import {
 } from 'lucide-react';
 import InteractiveMap from '@/components/InteractiveMap';
 import { getSecurePhotoUrl } from '@/lib/utils/photoUrl';
+import { isPickupCompletedStatus } from '@/lib/orders/lifecycle';
+
+const loadRazorpayScript = (): Promise<boolean> => {
+  return new Promise((resolve) => {
+    if (typeof window !== 'undefined' && (window as any).Razorpay) {
+      resolve(true);
+      return;
+    }
+    const scriptId = 'razorpay-checkout-script';
+    const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
+    if (existing) {
+      if ((window as any).Razorpay) {
+        resolve(true);
+        return;
+      }
+      existing.addEventListener('load', () => resolve(true), { once: true });
+      existing.addEventListener('error', () => resolve(false), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.id = scriptId;
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+};
 
 export default function OrderTrackingPage() {
   const params = useParams();
@@ -122,6 +150,12 @@ export default function OrderTrackingPage() {
     };
   }, [id]);
 
+  useEffect(() => {
+    if (order && order.financialDirection === 'CUSTOMER_PAYS' && order.paymentStatus !== 'CAPTURED') {
+      loadRazorpayScript().catch(() => {});
+    }
+  }, [order?.financialDirection, order?.paymentStatus]);
+
   if (loading) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
@@ -204,39 +238,6 @@ export default function OrderTrackingPage() {
   };
 
   const currentStatusIdx = getStatusStepIndex(order.status);
-
-  const loadRazorpayScript = (): Promise<boolean> => {
-    return new Promise((resolve) => {
-      if (typeof window !== 'undefined' && (window as any).Razorpay) {
-        resolve(true);
-        return;
-      }
-      const scriptId = 'razorpay-checkout-script';
-      const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
-      if (existing) {
-        if ((window as any).Razorpay) {
-          resolve(true);
-          return;
-        }
-        existing.addEventListener('load', () => resolve(true), { once: true });
-        existing.addEventListener('error', () => resolve(false), { once: true });
-        return;
-      }
-      const script = document.createElement('script');
-      script.id = scriptId;
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.async = true;
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.body.appendChild(script);
-    });
-  };
-
-  useEffect(() => {
-    if (order && order.financialDirection === 'CUSTOMER_PAYS' && order.paymentStatus !== 'CAPTURED') {
-      loadRazorpayScript().catch(() => {});
-    }
-  }, [order]);
 
   const handlePayNow = async () => {
     try {
@@ -356,7 +357,13 @@ export default function OrderTrackingPage() {
 
         <div className="flex items-center gap-2">
           <span className="text-xs font-bold bg-slate-800 border border-slate-700 text-emerald-400 px-3 py-1.5 rounded-xl">
-            ETA: {order.status === 'SETTLEMENT_COMPLETED' ? 'Completed' : '20-30 Mins'}
+            ETA: {isPickupCompletedStatus(order.status)
+              ? 'Completed'
+              : order.status === 'CANCELLED'
+              ? 'Cancelled'
+              : order.pickupType === 'SCHEDULED'
+              ? order.scheduledSlot || 'Scheduled'
+              : '20-30 Mins'}
           </span>
           <button onClick={fetchOrderDetails} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300">
             <RefreshCw className="w-4 h-4" />
@@ -668,7 +675,6 @@ export default function OrderTrackingPage() {
             {order.invoices && order.invoices.length > 0 && (
               <a
                 href={`/orders/${order.id}/receipt`}
-                target="_blank"
                 className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-4 py-3 rounded-xl border border-slate-700 flex items-center gap-2"
               >
                 <FileText className="w-4 h-4 text-emerald-400" />
