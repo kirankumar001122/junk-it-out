@@ -26,6 +26,7 @@ import LocationSearchModal from '@/components/LocationSearchModal';
 import InteractiveMap, { loadGoogleMaps } from '@/components/InteractiveMap';
 import { readPickupCart } from '@/lib/pickupCart';
 import { getSelectedLocation, setSelectedLocation, LOCATION_CHANGE_EVENT } from '@/lib/selectedLocation';
+import { loadRazorpayScript } from '@/lib/razorpayClient';
 
 // Small category images used in the booking cards.
 const CATEGORY_IMAGES: Record<string, string> = {
@@ -46,40 +47,6 @@ const TIME_SLOTS = [
   { id: '16-17', label: '04:00 PM - 05:00 PM', startHour: 16 },
   { id: '18-19', label: '06:00 PM - 07:00 PM', startHour: 18 },
 ];
-
-let razorpayScriptPromise: Promise<boolean> | null = null;
-
-function loadRazorpayScript(): Promise<boolean> {
-  if (typeof window === 'undefined') return Promise.resolve(false);
-  if ((window as any).Razorpay) return Promise.resolve(true);
-  if (razorpayScriptPromise) return razorpayScriptPromise;
-
-  razorpayScriptPromise = new Promise((resolve) => {
-    const scriptId = 'razorpay-checkout-script';
-    const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
-    if (existing) {
-      existing.addEventListener('load', () => resolve(true), { once: true });
-      existing.addEventListener('error', () => {
-        razorpayScriptPromise = null;
-        resolve(false);
-      }, { once: true });
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.id = scriptId;
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.async = true;
-    script.onload = () => resolve(true);
-    script.onerror = () => {
-      razorpayScriptPromise = null;
-      resolve(false);
-    };
-    document.body.appendChild(script);
-  });
-
-  return razorpayScriptPromise;
-}
 
 export default function BookingPage() {
   const router = useRouter();

@@ -67,6 +67,7 @@ export default function AgentDashboardPage() {
   const actionRequestRef = useRef(false);
   const statusRequestRef = useRef(false);
   const weighingRequestRef = useRef(false);
+  const loginRequestRef = useRef(false);
 
   const fetchAgentData = async () => {
     if (dataRequestRef.current) return;
@@ -287,10 +288,12 @@ export default function AgentDashboardPage() {
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loginRequestRef.current) return;
     if (!loginPhone || loginPhone.trim().length < 10) {
       setLoginError('Please enter a valid 10-digit agent mobile number.');
       return;
     }
+    loginRequestRef.current = true;
     setLoginLoading(true);
     setLoginError(null);
     try {
@@ -309,15 +312,18 @@ export default function AgentDashboardPage() {
       setLoginError('Network error sending OTP.');
     } finally {
       setLoginLoading(false);
+      loginRequestRef.current = false;
     }
   };
 
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loginRequestRef.current) return;
     if (!loginOtp || loginOtp.trim().length < 4) {
       setLoginError('Please enter the OTP code received.');
       return;
     }
+    loginRequestRef.current = true;
     setLoginLoading(true);
     setLoginError(null);
     try {
@@ -336,6 +342,7 @@ export default function AgentDashboardPage() {
       setLoginError('Network error verifying agent OTP.');
     } finally {
       setLoginLoading(false);
+      loginRequestRef.current = false;
     }
   };
 

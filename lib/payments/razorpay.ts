@@ -78,6 +78,7 @@ export async function createRazorpayOrder(input: {
     'https://api.razorpay.com/v1/orders',
     {
       method: 'POST',
+      signal: AbortSignal.timeout(15_000),
       headers: {
         Authorization: `Basic ${Buffer.from(
           `${keyId}:${secret}`

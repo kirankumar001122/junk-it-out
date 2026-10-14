@@ -21,6 +21,7 @@ import {
 import InteractiveMap from "@/components/InteractiveMap";
 import { getSecurePhotoUrl } from "@/lib/utils/photoUrl";
 import { getApiErrorMessage } from "@/lib/utils/apiErrorMessage";
+import { loadRazorpayScript } from "@/lib/razorpayClient";
 import {
   isActiveTrackingStatus,
   isTerminalOrderStatus,
@@ -33,45 +34,6 @@ const STALE_AFTER_MS = 30_000;
 
 const DEFAULT_PICKUP_LAT = 12.9077;
 const DEFAULT_PICKUP_LNG = 77.5854;
-
-const loadRazorpayScript = (): Promise<boolean> => {
-  return new Promise((resolve) => {
-    if (typeof window !== "undefined" && (window as any).Razorpay) {
-      resolve(true);
-      return;
-    }
-
-    const scriptId = "razorpay-checkout-script";
-
-    const existing = document.getElementById(
-      scriptId,
-    ) as HTMLScriptElement | null;
-
-    if (existing) {
-      if ((window as any).Razorpay) {
-        resolve(true);
-        return;
-      }
-
-      existing.addEventListener("load", () => resolve(true), { once: true });
-
-      existing.addEventListener("error", () => resolve(false), { once: true });
-
-      return;
-    }
-
-    const script = document.createElement("script");
-
-    script.id = scriptId;
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.async = true;
-
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-
-    document.body.appendChild(script);
-  });
-};
 
 export default function OrderTrackingPage() {
   const params = useParams();
