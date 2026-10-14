@@ -94,7 +94,6 @@ export async function POST(
               subtotal,
             },
           });
-          logTiming('weigh transaction complete');
         }
       }
 
@@ -160,6 +159,9 @@ export async function POST(
       }
 
       return updated;
+    }, {
+      maxWait: 10000,
+      timeout: 15000,
     });
 
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
