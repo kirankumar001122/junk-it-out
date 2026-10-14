@@ -29,6 +29,7 @@ import {
   type PickupCartItem,
 } from '@/lib/pickupCart';
 import { getCachedClientJson } from '@/lib/clientRequestCache';
+import { clearSelectedLocation } from '@/lib/selectedLocation';
 
 type Props = { open: boolean; onClose: () => void };
 
@@ -239,7 +240,8 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
     setLoggingOut(true);
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
-      window.dispatchEvent(new Event('jio_auth_change'));
+      clearSelectedLocation();
+      window.dispatchEvent(new CustomEvent('jio_auth_change', { detail: { type: 'logout' } }));
     } catch (err) {
       console.error('Logout error from cart:', err);
     } finally {

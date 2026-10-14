@@ -5,7 +5,12 @@ import { usePathname, useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useState } from 'react';
 import { CircleUserRound, MapPin, Search, ShoppingBasket } from 'lucide-react';
 import { pickupCartEvent, readPickupCart } from '@/lib/pickupCart';
-import { getSelectedLocation, LOCATION_CHANGE_EVENT, setSelectedLocation } from '@/lib/selectedLocation';
+import {
+  clearSelectedLocation,
+  getSelectedLocation,
+  LOCATION_CHANGE_EVENT,
+  setSelectedLocation,
+} from '@/lib/selectedLocation';
 import PickupCartDrawer from '@/components/PickupCartDrawer';
 import LocationSearchModal from '@/components/LocationSearchModal';
 import { getCachedClientJson } from '@/lib/clientRequestCache';
@@ -65,6 +70,7 @@ export default function Navbar() {
           setUser(data.data.user);
         } else {
           setUser(null);
+          clearSelectedLocation();
         }
       } catch {
         setUser(null);
@@ -73,7 +79,13 @@ export default function Navbar() {
       }
     };
 
-    const handleAuthChange = () => checkAuth(true);
+    const handleAuthChange = (event: Event) => {
+      if ((event as CustomEvent<{ type?: string }>).detail?.type === 'logout') {
+        clearSelectedLocation();
+        setLocation('Select location');
+      }
+      checkAuth(true);
+    };
     checkAuth();
     window.addEventListener('jio_auth_change', handleAuthChange);
     return () => window.removeEventListener('jio_auth_change', handleAuthChange);
