@@ -27,6 +27,11 @@ export default function Navbar() {
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
+    if (checkingAuth || !user) {
+      setLocation('Select location');
+      return;
+    }
+
     const refreshLoc = (e?: Event) => {
       const customDetail = (e as CustomEvent)?.detail;
       if (customDetail?.area || customDetail?.address) {
@@ -47,7 +52,7 @@ export default function Navbar() {
       window.removeEventListener(LOCATION_CHANGE_EVENT, refreshLoc as EventListener);
       window.removeEventListener('storage', refreshLoc);
     };
-  }, []);
+  }, [checkingAuth, user]);
 
   useEffect(() => {
     const refresh = () => setCartCount(readPickupCart().length);
@@ -74,6 +79,7 @@ export default function Navbar() {
         }
       } catch {
         setUser(null);
+        clearSelectedLocation();
       } finally {
         setCheckingAuth(false);
       }
@@ -86,7 +92,7 @@ export default function Navbar() {
       }
       checkAuth(true);
     };
-    checkAuth();
+    checkAuth(true);
     window.addEventListener('jio_auth_change', handleAuthChange);
     return () => window.removeEventListener('jio_auth_change', handleAuthChange);
   }, []);
