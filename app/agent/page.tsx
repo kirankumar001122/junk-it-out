@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Truck,
   MapPin,
@@ -39,7 +39,8 @@ export default function AgentDashboardPage() {
   const [viewPickupModal, setViewPickupModal] = useState<any | null>(null);
   const [loadingPickupDetails, setLoadingPickupDetails] = useState(false);
   const [acceptingPickup, setAcceptingPickup] = useState(false);
-  const [actionLoading, setActionLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const actionInFlightRef = useRef(false);
 
   // Agent OTP Login State
   const [loginPhone, setLoginPhone] = useState('');
@@ -62,19 +63,22 @@ export default function AgentDashboardPage() {
   const [submittingWeigh, setSubmittingWeigh] = useState(false);
   const [weighModalError, setWeighModalError] = useState<string | null>(null);
 
-  const fetchAgentData = async () => {
+  const fetchAgentData = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
       setAuthError(null);
 
       const profileRes = await fetch('/api/auth/me');
       const profileData = await profileRes.json().catch(() => ({ success: false }));
 
       if (!profileData.success || !profileData.data?.user || profileData.data.user.role !== 'AGENT') {
-        setAgent(null);
-        setOrders([]);
-        setActiveOrder(null);
-        setLoading(false);
+        if (!silent) {
+          setAgent(null);
+          setOrders([]);
+          setActiveOrder(null);
+        }
         return;
       }
 
@@ -82,10 +86,11 @@ export default function AgentDashboardPage() {
       const agentProfile = agentUser.agent || null;
 
       if (!agentProfile || !agentProfile.id) {
-        setAgent(null);
-        setOrders([]);
-        setActiveOrder(null);
-        setLoading(false);
+        if (!silent) {
+          setAgent(null);
+          setOrders([]);
+          setActiveOrder(null);
+        }
         return;
       }
 
@@ -127,14 +132,21 @@ export default function AgentDashboardPage() {
       }
     } catch (e) {
       console.error(e);
-      setAuthError('Network error while loading your pickup dashboard.');
+      if (silent) {
+        setStatusNotice('Network error updating pickup dashboard. Showing current data.');
+        setTimeout(() => setStatusNotice(null), 4000);
+      } else {
+        setAuthError('Network error while loading your pickup dashboard.');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    fetchAgentData();
+    fetchAgentData(false);
   }, []);
 
   useEffect(() => {
@@ -193,37 +205,44 @@ export default function AgentDashboardPage() {
   }, [agent?.id, isOnline]);
 
   const handleViewPickupDetails = async (orderId: string) => {
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
     setLoadingPickupDetails(true);
     try {
       const res = await fetch(`/api/orders/${orderId}`);
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
         setViewPickupModal(data.data);
       } else {
-        alert(data.error?.message || data.message || 'Unable to view pickup details.');
+        setStatusNotice(data.error?.message || data.message || 'Unable to view pickup details.');
+        setTimeout(() => setStatusNotice(null), 5000);
       }
     } catch (err) {
-      alert('Network error fetching pickup details.');
+      setStatusNotice('Network error fetching pickup details.');
+      setTimeout(() => setStatusNotice(null), 5000);
     } finally {
       setLoadingPickupDetails(false);
+      actionInFlightRef.current = false;
     }
   };
 
   const handleAcceptPickup = async (orderId: string) => {
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
     setAcceptingPickup(true);
     try {
       const res = await fetch(`/api/orders/${orderId}/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (res.status === 409) {
         setStatusNotice('This pickup has already been accepted by another agent.');
         setTimeout(() => setStatusNotice(null), 5000);
         setViewPickupModal(null);
         setNewPickupNotice(null);
-        fetchAgentData();
+        await fetchAgentData(true);
         return;
       }
 
@@ -232,14 +251,17 @@ export default function AgentDashboardPage() {
         setTimeout(() => setStatusNotice(null), 5000);
         setViewPickupModal(null);
         setNewPickupNotice(null);
-        fetchAgentData();
+        await fetchAgentData(true);
       } else {
-        alert(data.error?.message || data.message || 'Failed to accept pickup.');
+        setStatusNotice(data.error?.message || data.message || 'Failed to accept pickup.');
+        setTimeout(() => setStatusNotice(null), 5000);
       }
     } catch (err) {
-      alert('Network error while accepting pickup.');
+      setStatusNotice('Network error while accepting pickup.');
+      setTimeout(() => setStatusNotice(null), 5000);
     } finally {
       setAcceptingPickup(false);
+      actionInFlightRef.current = false;
     }
   };
 
@@ -338,6 +360,7 @@ export default function AgentDashboardPage() {
   };
 
   const handleCallEndpoint = async (action: 'accept' | 'start' | 'arrive') => {
+    if (actionInFlightRef.current) return;
     if (!activeOrder) return;
 
     if (!isOnline && action === 'accept') {
@@ -346,14 +369,15 @@ export default function AgentDashboardPage() {
       return;
     }
 
-    setActionLoading(true);
+    actionInFlightRef.current = true;
+    setActionLoading(action);
     setStatusNotice(null);
     try {
       const res = await fetch(`/api/orders/${activeOrder.id}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
         setStatusNotice(
           action === 'accept'
@@ -363,7 +387,7 @@ export default function AgentDashboardPage() {
             : 'Arrived at customer doorstep!'
         );
         setTimeout(() => setStatusNotice(null), 4000);
-        await fetchAgentData();
+        await fetchAgentData(true);
       } else {
         const errorText = data.error?.message || data.message || `Failed to perform ${action} action.`;
         setStatusNotice(errorText);
@@ -374,11 +398,13 @@ export default function AgentDashboardPage() {
       setStatusNotice('Network error while processing action. Please try again.');
       setTimeout(() => setStatusNotice(null), 4000);
     } finally {
-      setActionLoading(false);
+      setActionLoading(null);
+      actionInFlightRef.current = false;
     }
   };
 
   const handleSubmitWeighingAndComplete = async () => {
+    if (actionInFlightRef.current) return;
     if (!activeOrder) return;
     setWeighModalError(null);
 
@@ -406,6 +432,7 @@ export default function AgentDashboardPage() {
       });
     }
 
+    actionInFlightRef.current = true;
     setSubmittingWeigh(true);
     try {
       // 2. Submit door-to-door scale weights
@@ -421,7 +448,6 @@ export default function AgentDashboardPage() {
       const weighData = await weighRes.json().catch(() => ({}));
       if (!weighRes.ok || !weighData.success) {
         setWeighModalError(weighData.error?.message || weighData.message || 'Failed to record scale weights.');
-        setSubmittingWeigh(false);
         return;
       }
 
@@ -435,7 +461,7 @@ export default function AgentDashboardPage() {
         setShowWeighModal(false);
         setStatusNotice(`Order #${activeOrder.orderNumber} successfully COMPLETED! Weights persisted & invoice generated.`);
         setTimeout(() => setStatusNotice(null), 6000);
-        await fetchAgentData();
+        await fetchAgentData(true);
       } else {
         setWeighModalError(completeData.error?.message || completeData.message || 'Failed to complete pickup order.');
       }
@@ -444,6 +470,7 @@ export default function AgentDashboardPage() {
       setWeighModalError('Network error while completing pickup. Please check your connection and try again.');
     } finally {
       setSubmittingWeigh(false);
+      actionInFlightRef.current = false;
     }
   };
 
@@ -562,7 +589,13 @@ export default function AgentDashboardPage() {
         <div className="p-4 text-xs text-amber-200 bg-amber-500/10 border-b border-amber-500/30">{authError}</div>
       )}
       {statusNotice && (
-        <div className="p-3 text-xs font-bold text-center text-emerald-300 bg-emerald-950/60 border-b border-emerald-800 animate-scale-in">
+        <div
+          className={`p-3 text-xs font-bold text-center border-b animate-scale-in ${
+            /fail|error|cannot|offline|unable|another|denied|conflict/i.test(statusNotice)
+              ? 'text-rose-300 bg-rose-950/70 border-rose-800'
+              : 'text-emerald-300 bg-emerald-950/60 border-emerald-800'
+          }`}
+        >
           {statusNotice}
         </div>
       )}
@@ -740,6 +773,23 @@ export default function AgentDashboardPage() {
           <div className="space-y-2">
             <span className="text-xs font-bold text-slate-400 uppercase px-1">Pickup Workflow Actions:</span>
 
+            {statusNotice && (
+              <div
+                className={`p-3 rounded-2xl text-xs font-bold flex items-center gap-2 border animate-scale-in ${
+                  /fail|error|cannot|offline|unable|another|denied|conflict/i.test(statusNotice)
+                    ? 'bg-rose-950/80 border-rose-800 text-rose-300'
+                    : 'bg-emerald-950/80 border-emerald-800 text-emerald-300'
+                }`}
+              >
+                {/fail|error|cannot|offline|unable|another|denied|conflict/i.test(statusNotice) ? (
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                ) : (
+                  <CheckCircle className="w-4 h-4 shrink-0 text-emerald-400" />
+                )}
+                <span>{statusNotice}</span>
+              </div>
+            )}
+
             {!isOnline && activeOrder.status === 'AGENT_ASSIGNED' && (
               <div className="bg-rose-950/60 border border-rose-800 p-3.5 rounded-2xl space-y-2 text-center">
                 <p className="text-xs text-rose-300 font-bold">
@@ -747,8 +797,8 @@ export default function AgentDashboardPage() {
                 </p>
                 <button
                   onClick={toggleAgentStatus}
-                  disabled={statusUpdating}
-                  className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs py-3 rounded-xl uppercase tracking-wider shadow-md flex items-center justify-center gap-2"
+                  disabled={statusUpdating || Boolean(actionLoading) || acceptingPickup || submittingWeigh}
+                  className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs py-3 rounded-xl uppercase tracking-wider shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {statusUpdating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Power className="w-4 h-4" />}
                   SWITCH STATUS TO ONLINE
@@ -759,45 +809,60 @@ export default function AgentDashboardPage() {
             {isOnline && activeOrder.status === 'AGENT_ASSIGNED' && (
               <button
                 onClick={() => handleCallEndpoint('accept')}
-                disabled={actionLoading}
+                disabled={Boolean(actionLoading) || acceptingPickup || submittingWeigh}
                 className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
               >
-                {actionLoading ? (
-                  <RefreshCw className="w-5 h-5 animate-spin" />
+                {actionLoading === 'accept' ? (
+                  <>
+                    <RefreshCw className="w-5 h-5 animate-spin" />
+                    <span>ACCEPTING...</span>
+                  </>
                 ) : (
-                  <CheckCircle className="w-5 h-5" />
+                  <>
+                    <CheckCircle className="w-5 h-5" />
+                    <span>ACCEPT PICKUP ASSIGNMENT</span>
+                  </>
                 )}
-                {actionLoading ? 'ACCEPTING ASSIGNMENT...' : 'ACCEPT PICKUP ASSIGNMENT'}
               </button>
             )}
 
             {activeOrder.status === 'AGENT_ACCEPTED' && (
               <button
                 onClick={() => handleCallEndpoint('start')}
-                disabled={actionLoading}
+                disabled={Boolean(actionLoading) || acceptingPickup || submittingWeigh}
                 className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
               >
-                {actionLoading ? (
-                  <RefreshCw className="w-5 h-5 animate-spin" />
+                {actionLoading === 'start' ? (
+                  <>
+                    <RefreshCw className="w-5 h-5 animate-spin" />
+                    <span>STARTING...</span>
+                  </>
                 ) : (
-                  <Play className="w-5 h-5" />
+                  <>
+                    <Play className="w-5 h-5" />
+                    <span>START JOURNEY TO CUSTOMER</span>
+                  </>
                 )}
-                {actionLoading ? 'STARTING JOURNEY...' : 'START JOURNEY TO CUSTOMER'}
               </button>
             )}
 
             {activeOrder.status === 'AGENT_ON_WAY' && (
               <button
                 onClick={() => handleCallEndpoint('arrive')}
-                disabled={actionLoading}
+                disabled={Boolean(actionLoading) || acceptingPickup || submittingWeigh}
                 className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
               >
-                {actionLoading ? (
-                  <RefreshCw className="w-5 h-5 animate-spin" />
+                {actionLoading === 'arrive' ? (
+                  <>
+                    <RefreshCw className="w-5 h-5 animate-spin" />
+                    <span>MARKING ARRIVED...</span>
+                  </>
                 ) : (
-                  <MapPin className="w-5 h-5" />
+                  <>
+                    <MapPin className="w-5 h-5" />
+                    <span>MARK ARRIVED AT DOORSTEP</span>
+                  </>
                 )}
-                {actionLoading ? 'MARKING ARRIVED...' : 'MARK ARRIVED AT DOORSTEP'}
               </button>
             )}
 
@@ -808,10 +873,11 @@ export default function AgentDashboardPage() {
                   setWeighModalError(null);
                   setShowWeighModal(true);
                 }}
-                className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 cursor-pointer transition-transform hover:scale-[1.01]"
+                disabled={Boolean(actionLoading) || acceptingPickup || submittingWeigh}
+                className="w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 cursor-pointer transition-transform hover:scale-[1.01]"
               >
                 <Scale className="w-5 h-5" />
-                START WEIGHING & RECORD KG
+                <span>START WEIGHING & RECORD KG</span>
               </button>
             )}
           </div>
@@ -1007,20 +1073,28 @@ export default function AgentDashboardPage() {
 
             <button
               onClick={() => handleAcceptPickup(viewPickupModal.id)}
-              disabled={acceptingPickup}
+              disabled={acceptingPickup || Boolean(actionLoading) || submittingWeigh}
               className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-xs py-4 rounded-2xl uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.01]"
             >
               {acceptingPickup ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>ACCEPTING...</span>
+                </>
               ) : (
-                <CheckCircle className="w-4 h-4" />
+                <>
+                  <CheckCircle className="w-4 h-4" />
+                  <span>ACCEPT PICKUP</span>
+                </>
               )}
-              ACCEPT PICKUP
             </button>
 
             <button
-              onClick={() => setViewPickupModal(null)}
-              className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs py-3.5 rounded-2xl uppercase tracking-wider transition-colors"
+              onClick={() => {
+                if (!acceptingPickup) setViewPickupModal(null);
+              }}
+              disabled={acceptingPickup}
+              className="w-full bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white font-bold text-xs py-3.5 rounded-2xl uppercase tracking-wider transition-colors"
             >
               CLOSE DETAILS
             </button>
