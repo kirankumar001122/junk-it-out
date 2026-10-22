@@ -1,0 +1,17 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.junkitout.myapplication",
+      "sha256_cert_fingerprints": [
+        "79:41:C3:19:14:CE:14:F3:84:ED:F7:B9:97:2B:BF:01:79:06:28:16:54:A0:5B:54:F3:C6:9A:3F:83:3F:54:AF",
+        "72:36:17:6E:32:47:E6:BA:7E:A1:A3:63:54:4F:A4:8D:F1:D0:09:A3:58:5A:35:1A:DE:CE:C5:D1:A9:43:EF:56",
+        "74:DE:A4:6F:10:4D:C7:FB:6F:58:29:A1:13:34:AE:0B:63:AE:04:26:62:E9:7B:8A:D3:C5:67:40:F6:13:4D:7A"
+      ]
+    }
+  }
+]
