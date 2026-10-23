@@ -82,18 +82,21 @@ export async function POST(
     }
 
     // 5. Service Area Matching Check
-    const orderAreaName = order.address?.area;
-    if (agent.serviceAreas && agent.serviceAreas.trim() !== '' && orderAreaName) {
-      const normalizedArea = orderAreaName.toLowerCase();
-      const agentAreas = agent.serviceAreas.toLowerCase().split(',').map((a) => a.trim());
-      const isEligible = agentAreas.some((area) => normalizedArea.includes(area) || area.includes(normalizedArea));
+    // If the order is already assigned to this agent by dispatcher/system, bypass area eligibility check
+    if (order.agentId !== agentId) {
+      const orderAreaName = order.address?.area;
+      if (agent.serviceAreas && agent.serviceAreas.trim() !== '' && agent.serviceAreas.toLowerCase() !== 'all' && orderAreaName) {
+        const normalizedArea = orderAreaName.toLowerCase();
+        const agentAreas = agent.serviceAreas.toLowerCase().split(',').map((a) => a.trim());
+        const isEligible = agentAreas.some((area) => normalizedArea.includes(area) || area.includes(normalizedArea));
 
-      if (!isEligible) {
-        return errorResponse(
-          'OUT_OF_SERVICE_AREA',
-          'Order service area is not covered by your agent profile.',
-          403
-        );
+        if (!isEligible) {
+          return errorResponse(
+            'OUT_OF_SERVICE_AREA',
+            'Order service area is not covered by your agent profile.',
+            403
+          );
+        }
       }
     }
 
@@ -188,7 +191,7 @@ export async function POST(
       }
     }
 
-    return successResponse({
+    return successResponse(updatedOrder || {
       orderId: order.id,
       orderNumber: order.orderNumber,
       agentId: agentId,

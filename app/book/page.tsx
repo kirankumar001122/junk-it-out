@@ -26,6 +26,16 @@ import LocationSearchModal from '@/components/LocationSearchModal';
 import InteractiveMap, { loadGoogleMaps } from '@/components/InteractiveMap';
 import { readPickupCart } from '@/lib/pickupCart';
 import { getSelectedLocation, setSelectedLocation, LOCATION_CHANGE_EVENT } from '@/lib/selectedLocation';
+import { loadRazorpayScript } from '@/lib/razorpayClient';
+
+// Small category images used in the booking cards.
+const CATEGORY_IMAGES: Record<string, string> = {
+  'E-Waste': '/categories/e-waste.png',
+  'Household Dry Waste': '/categories/household-waste.png',
+  'Paper & Cardboard': '/categories/paper-carboard.jpg',
+  'Plastic Waste': '/categories/plastic-waste.jpg?v=2',
+};
+const CUSTOMER_CATEGORY_NAMES = new Set(Object.keys(CATEGORY_IMAGES));
 
 // Standard 1-hour pickup time slots
 const TIME_SLOTS = [
@@ -37,14 +47,6 @@ const TIME_SLOTS = [
   { id: '16-17', label: '04:00 PM - 05:00 PM', startHour: 16 },
   { id: '18-19', label: '06:00 PM - 07:00 PM', startHour: 18 },
 ];
-
-// Small category images used in the booking cards.
-const CATEGORY_IMAGES: Record<string, string> = {
-  'E-Waste': '/categories/e-waste.png',
-  'Household Dry Waste': '/categories/household-waste.png',
-  'Paper & Cardboard': '/categories/paper-cardboard.jpg',
-  'Plastic Waste': '/categories/plastic-waste.jpg',
-};
 
 export default function BookingPage() {
   const router = useRouter();
@@ -200,41 +202,27 @@ export default function BookingPage() {
       .then((res) => res.json())
       .then((data) => {
         if (data.success && Array.isArray(data.data)) {
-          // Only these four services are available in the customer booking flow.
-          // The other categories remain in the database/API for existing data,
-          // but they are intentionally hidden from this UI.
-          const allowedCategoryNames = new Set([
-            'E-Waste',
-            'Household Dry Waste',
-            'Paper & Cardboard',
-            'Plastic Waste',
-          ]);
-
-          const allowedCategories = data.data.filter((category: any) =>
-            allowedCategoryNames.has(category.name?.trim())
+          const availableCategories = data.data.filter((category: any) =>
+            CUSTOMER_CATEGORY_NAMES.has(category.name?.trim())
           );
-
-          setCategories(allowedCategories);
+          setCategories(availableCategories);
 
           const params = new URLSearchParams(window.location.search);
           const requestedCategory = params.get('category');
           const cartItems = params.get('cart') ? readPickupCart() : [];
 
-          // Only allow a requested URL category if it belongs to the
-          // four currently supported customer services.
-          const selectedCategory = allowedCategories.find(
+          const selectedCategory = availableCategories.find(
             (c: any) => c.id === requestedCategory || c.name === requestedCategory
           );
 
-          // Always use an allowed category as the default.
           const defaultServiceCategory =
-            allowedCategories.find((c: any) => c.name === 'E-Waste') ||
-            allowedCategories[0];
+            availableCategories.find((c: any) => c.name === 'E-Waste') ||
+            availableCategories[0];
 
           if (cartItems.length > 0) {
             const validItems = cartItems
               .filter((item) =>
-                allowedCategories.some((c: any) => c.id === item.categoryId)
+                availableCategories.some((c: any) => c.id === item.categoryId)
               )
               .map((item) => ({
                 categoryId: item.categoryId,
@@ -361,33 +349,6 @@ export default function BookingPage() {
   const curDateObj = availableDates[selectedDateIdx] || availableDates[0];
   const curSlotObj = TIME_SLOTS.find((s) => s.id === selectedSlotId) || TIME_SLOTS[0];
   const formattedScheduledSlot = `${curDateObj.dayLabel} (${curDateObj.dateStr}), ${curSlotObj.label}`;
-
-  function loadRazorpayScript(): Promise<boolean> {
-    return new Promise((resolve) => {
-      if (typeof window !== 'undefined' && (window as any).Razorpay) {
-        resolve(true);
-        return;
-      }
-      const scriptId = 'razorpay-checkout-script';
-      const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
-      if (existing) {
-        if ((window as any).Razorpay) {
-          resolve(true);
-          return;
-        }
-        existing.addEventListener('load', () => resolve(true), { once: true });
-        existing.addEventListener('error', () => resolve(false), { once: true });
-        return;
-      }
-      const script = document.createElement('script');
-      script.id = scriptId;
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.async = true;
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.body.appendChild(script);
-    });
-  }
 
   // Preload Razorpay checkout SDK as soon as booking page mounts to ensure zero-delay checkout opening
   useEffect(() => {
@@ -708,11 +669,6 @@ export default function BookingPage() {
           {/* Simple Clean Category Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {categories
-              .filter((cat) =>
-                ['E-Waste', 'Household Dry Waste', 'Paper & Cardboard', 'Plastic Waste'].includes(
-                  cat.name?.trim()
-                )
-              )
               .map((cat) => {
               const selectedItem = selectedItems.find((i) => i.categoryId === cat.id);
               const isSelected = Boolean(selectedItem);

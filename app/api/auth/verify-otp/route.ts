@@ -124,9 +124,17 @@ export async function POST(req: NextRequest) {
             ? (otpVerification as any).errorDetails
             : 'The OTP could not be verified. Please request a new code and try again.';
 
+        const providerMessage = msg.toLowerCase();
+        const isExpiredOrConsumed =
+          providerMessage.includes('otp not found') ||
+          providerMessage.includes('already verified') ||
+          providerMessage.includes('expired');
+
         return errorResponse(
-          'OTP_VERIFICATION_FAILED',
-          msg,
+          isExpiredOrConsumed ? 'OTP_EXPIRED' : 'OTP_VERIFICATION_FAILED',
+          isExpiredOrConsumed
+            ? 'This OTP has expired or was already used. Please request a new OTP and try again.'
+            : msg,
           status
         );
       }
@@ -229,15 +237,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const errorMessage = String(err?.message || '');
+    const databaseUnavailable =
+      errorMessage.includes('Can\'t reach database server') ||
+      errorMessage.includes('Authentication failed against database server') ||
+      errorMessage.includes('P1001') ||
+      errorMessage.includes('P1000') ||
+      errorMessage.includes('[YOUR-PASSWORD]');
+
     console.error(
       'Verify OTP error:',
       err?.message || err
     );
 
     return errorResponse(
-      'INTERNAL_SERVER_ERROR',
-      'Authentication failed.',
-      500
+      databaseUnavailable ? 'DATABASE_UNAVAILABLE' : 'INTERNAL_SERVER_ERROR',
+      databaseUnavailable
+        ? 'Authentication is temporarily unavailable because the database connection is not configured or reachable. Please verify DATABASE_URL and restart the server.'
+        : 'Authentication failed.',
+      databaseUnavailable ? 503 : 500
     );
   }
 }

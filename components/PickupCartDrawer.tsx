@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -28,6 +28,8 @@ import {
   updatePickupCartQuantity,
   type PickupCartItem,
 } from '@/lib/pickupCart';
+import { getCachedClientJson } from '@/lib/clientRequestCache';
+import { clearSelectedLocation } from '@/lib/selectedLocation';
 
 type Props = { open: boolean; onClose: () => void };
 
@@ -47,6 +49,9 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpError, setOtpError] = useState('');
   const [cooldown, setCooldown] = useState(0);
+  const otpRequestRef = useRef(false);
+  const logoutRequestRef = useRef(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const getDisplayName = (userObj: any) => {
     if (!userObj) return 'Customer';
@@ -68,9 +73,13 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
   const checkAuth = useCallback(async () => {
     setCheckingAuth(true);
     try {
-      const res = await fetch('/api/auth/me');
-      const data = await res.json();
-      const authenticatedCustomer = res.ok && data.success && data.data?.user?.role === 'CUSTOMER';
+      const data = await getCachedClientJson<any>(
+        'authenticated-user',
+        '/api/auth/me',
+        10_000,
+        { cache: 'no-store' }
+      );
+      const authenticatedCustomer = data.success && data.data?.user?.role === 'CUSTOMER';
       if (authenticatedCustomer) {
         setIsCustomer(true);
         setUser(data.data.user);
@@ -109,7 +118,12 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
     setLoading(true);
 
     Promise.all([
-      fetch('/api/waste-categories').then((res) => (res.ok ? res.json() : { success: false })),
+      getCachedClientJson<any>(
+        'public-waste-categories',
+        '/api/waste-categories',
+        60_000,
+        { cache: 'force-cache' }
+      ),
       checkAuth(),
     ])
       .then(([categoryData]) => {
@@ -136,12 +150,14 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
 
   const handleSendOtp = async (e?: FormEvent) => {
     if (e) e.preventDefault();
+    if (otpRequestRef.current) return;
 
     if (!phone || phone.trim().replace(/\D/g, '').length < 10) {
       setOtpError('Please enter a valid 10-digit mobile number.');
       return;
     }
 
+    otpRequestRef.current = true;
     setOtpLoading(true);
     setOtpError('');
     try {
@@ -169,15 +185,18 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
       setOtpError(err.message || 'Unable to send OTP.');
     } finally {
       setOtpLoading(false);
+      otpRequestRef.current = false;
     }
   };
 
   const handleVerifyOtp = async (e?: FormEvent) => {
     if (e) e.preventDefault();
+    if (otpRequestRef.current) return;
     if (!code || code.trim().length === 0) {
       setOtpError('Please enter the OTP code received.');
       return;
     }
+    otpRequestRef.current = true;
     setOtpLoading(true);
     setOtpError('');
     try {
@@ -192,6 +211,12 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
+        if (data.error?.code === 'OTP_EXPIRED' || data.code === 'OTP_EXPIRED') {
+          setOtpStep('details');
+          setCode('');
+          setCooldown(0);
+          throw new Error('This OTP has expired or was already used. Please request a new OTP.');
+        }
         throw new Error(data.message || data.error?.message || 'The OTP code could not be verified.');
       }
 
@@ -205,6 +230,23 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
       setOtpError(err.message || 'The OTP could not be verified.');
     } finally {
       setOtpLoading(false);
+      otpRequestRef.current = false;
+    }
+  };
+
+  const handleLogout = async () => {
+    if (logoutRequestRef.current) return;
+    logoutRequestRef.current = true;
+    setLoggingOut(true);
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      clearSelectedLocation();
+      window.dispatchEvent(new CustomEvent('jio_auth_change', { detail: { type: 'logout' } }));
+    } catch (err) {
+      console.error('Logout error from cart:', err);
+    } finally {
+      setLoggingOut(false);
+      logoutRequestRef.current = false;
     }
   };
 
@@ -298,19 +340,11 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
                 </div>
               </div>
               <button
-                onClick={async () => {
-                  try {
-                    await fetch('/api/auth/logout', { method: 'POST' });
-                    if (typeof window !== 'undefined') {
-                      window.dispatchEvent(new Event('jio_auth_change'));
-                    }
-                  } catch (err) {
-                    console.error('Logout error from cart:', err);
-                  }
-                }}
-                className="text-xs font-bold text-rose-600 hover:text-rose-800 hover:underline shrink-0"
+                onClick={handleLogout}
+                disabled={loggingOut}
+                className="text-xs font-bold text-rose-600 hover:text-rose-800 hover:underline shrink-0 disabled:opacity-50"
               >
-                Logout
+                {loggingOut ? 'Logging out...' : 'Logout'}
               </button>
             </section>
           ) : !isCustomer ? (

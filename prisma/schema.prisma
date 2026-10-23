@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
@@ -23,7 +24,23 @@ model User {
   customer           Customer?
   notifications      Notification[]
   orderStatusChanges OrderStatusHistory[]
+  refundRequests     RefundRequest[]       @relation("RefundRequestedBy")
+  refundReviews      RefundRequest[]       @relation("RefundReviewedBy")
   weightRecords      WeightRecord[]
+}
+
+model ContactEnquiry {
+  id          String   @id @default(uuid())
+  name        String
+  phone       String
+  email       String
+  subject     String
+  message     String
+  status      String   @default("OPEN")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status, createdAt])
 }
 
 model Customer {
@@ -85,6 +102,7 @@ model Address {
   pickupInstructions String?
   isDefault          Boolean  @default(false)
   createdAt          DateTime @default(now())
+  formattedAddress   String?
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   orders             Order[]
 }
@@ -163,9 +181,13 @@ model Order {
   items              OrderItem[]
   statusHistory      OrderStatusHistory[]
   payments           Payment[]
+  refundRequest      RefundRequest?
   reviews            Review?
   settlement         Settlement?
   weightRecords      WeightRecord[]
+
+  @@index([customerId, createdAt])
+  @@index([agentId, status, createdAt])
 }
 
 model OrderItem {
@@ -204,6 +226,65 @@ model Payment {
   status         String   @default("PENDING")
   createdAt      DateTime @default(now())
   order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  refundRequest  RefundRequest?
+
+  @@index([gatewayOrderId, direction])
+  @@index([paymentId])
+  @@index([orderId, direction, status])
+}
+
+model RefundRequest {
+  id                String   @id @default(uuid())
+  orderId           String   @unique
+  paymentId         String   @unique
+  requestedByUserId String
+  requestedAt       DateTime @default(now())
+  status            String   @default("PENDING_ADMIN_REVIEW")
+  amount            Float
+  reviewedByUserId  String?
+  reviewedAt        DateTime?
+  reviewReason      String?
+  razorpayRefundId  String?  @unique
+  failureReason     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  order             Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  payment           Payment  @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  requestedBy       User     @relation("RefundRequestedBy", fields: [requestedByUserId], references: [id])
+  reviewedBy        User?    @relation("RefundReviewedBy", fields: [reviewedByUserId], references: [id])
+
+  @@index([status, createdAt])
+}
+
+// These models mirror the pre-existing Supabase tables. orderId and paymentId
+// intentionally remain scalar columns: the supplied SQL defines no FKs for them.
+model RefundAttempt {
+  id               String               @id
+  orderId          String
+  paymentId        String
+  razorpayRefundId String?              @unique
+  status           String               @default("PENDING")
+  amount           Float
+  failureReason    String?
+  createdAt        DateTime             @default(now()) @db.Timestamp(3)
+  updatedAt        DateTime             @default(now()) @updatedAt @db.Timestamp(3)
+  events           RefundAttemptEvent[]
+
+  @@index([orderId], map: "RefundAttempt_orderId_idx")
+  @@index([paymentId], map: "RefundAttempt_paymentId_idx")
+  @@index([status, createdAt], map: "RefundAttempt_status_createdAt_idx")
+}
+
+model RefundAttemptEvent {
+  id              String        @id
+  refundAttemptId String
+  eventType       String
+  status          String?
+  details         Json?          @db.JsonB
+  createdAt       DateTime      @default(now()) @db.Timestamp(3)
+  refundAttempt   RefundAttempt @relation(fields: [refundAttemptId], references: [id], onDelete: Cascade, map: "RefundAttemptEvent_refundAttemptId_fkey")
+
+  @@index([refundAttemptId, createdAt], map: "RefundAttemptEvent_refundAttemptId_createdAt_idx")
 }
 
 model Settlement {
@@ -231,6 +312,8 @@ model AgentLocation {
   timestamp DateTime @default(now())
   agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
   order     Order?   @relation(fields: [orderId], references: [id])
+
+  @@index([agentId, orderId, timestamp])
 }
 
 model OrderStatusHistory {
@@ -300,6 +383,8 @@ model Review {
   agent      Agent    @relation(fields: [agentId], references: [id])
   customer   Customer @relation(fields: [customerId], references: [id])
   order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
 }
 
 model Invoice {

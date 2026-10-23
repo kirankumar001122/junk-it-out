@@ -29,7 +29,9 @@ export async function GET(req: NextRequest) {
           },
         },
       });
-      return NextResponse.json({ success: true, data: reviews });
+      const response = NextResponse.json({ success: true, data: reviews });
+      response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+      return response;
     }
 
     let whereClause: any = {};

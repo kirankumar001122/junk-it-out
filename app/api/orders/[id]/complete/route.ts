@@ -9,9 +9,13 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const startedAt = Date.now();
+  const logTiming = (phase: string) =>
+    console.info(`[api/orders/complete] ${phase} elapsedMs=${Date.now() - startedAt}`);
   try {
     const { id } = await params;
     const authUser = await getAuthUser(req);
+    logTiming('authentication complete');
     if (!authUser || authUser.role !== 'AGENT') {
       return errorResponse('UNAUTHORIZED', 'Authenticated agent access is required.', 401);
     }
@@ -23,8 +27,10 @@ export async function POST(
         customer: { include: { user: true } },
         items: { include: { category: true } },
         weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
+        invoices: { take: 1 },
       },
     });
+    logTiming('order lookup complete');
 
     if (!order) {
       return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
@@ -55,33 +61,38 @@ export async function POST(
 
     // Execute completion in transaction
     const completedOrder = await db.$transaction(async (tx) => {
-      const updated = await tx.order.update({
-        where: { id },
-        data: {
-          status: newStatus,
-          paymentStatus: order.financialDirection === 'JUNKITOUT_PAYS' ? 'SETTLEMENT_PENDING' : order.paymentStatus,
-          statusHistory: {
-            create: {
-              oldStatus,
-              newStatus,
-              changedByUserId: authUser?.userId || null,
-              notes: `Pickup completed at doorstep by agent.`,
-            },
-          },
-          invoices: {
-            create: {
-              invoiceNumber,
-              totalAmount: order.finalAmount,
-              pdfDataJson: JSON.stringify({
-                orderNumber: order.orderNumber,
-                invoiceNumber,
-                items: order.items,
-                finalAmount: order.finalAmount,
-                financialDirection: order.financialDirection,
-              }),
-            },
+      const orderUpdateData: any = {
+        status: newStatus,
+        paymentStatus: order.financialDirection === 'JUNKITOUT_PAYS' ? 'SETTLEMENT_PENDING' : order.paymentStatus,
+        statusHistory: {
+          create: {
+            oldStatus,
+            newStatus,
+            changedByUserId: authUser?.userId || null,
+            notes: `Pickup completed at doorstep by agent.`,
           },
         },
+      };
+
+      if (!order.invoices || order.invoices.length === 0) {
+        orderUpdateData.invoices = {
+          create: {
+            invoiceNumber,
+            totalAmount: order.finalAmount,
+            pdfDataJson: JSON.stringify({
+              orderNumber: order.orderNumber,
+              invoiceNumber,
+              items: order.items,
+              finalAmount: order.finalAmount,
+              financialDirection: order.financialDirection,
+            }),
+          },
+        };
+      }
+
+      const updated = await tx.order.update({
+        where: { id },
+        data: orderUpdateData,
         include: {
           agent: { include: { user: true } },
           customer: { include: { user: true } },
@@ -91,6 +102,7 @@ export async function POST(
           invoices: true,
         },
       });
+      logTiming('completion transaction complete');
 
       if (order.agentId) {
         await tx.agent.update({
@@ -100,6 +112,9 @@ export async function POST(
       }
 
       return updated;
+    }, {
+      maxWait: 10000,
+      timeout: 15000,
     });
 
     broadcaster.broadcast('ORDER_UPDATED', completedOrder);
@@ -108,6 +123,7 @@ export async function POST(
       agentId: completedOrder.agentId,
       invoiceNumber,
     });
+    logTiming('response ready');
 
     return successResponse(completedOrder);
   } catch (err: any) {

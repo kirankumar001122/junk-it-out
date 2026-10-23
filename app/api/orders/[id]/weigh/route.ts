@@ -9,9 +9,13 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const startedAt = Date.now();
+  const logTiming = (phase: string) =>
+    console.info(`[api/orders/weigh] ${phase} elapsedMs=${Date.now() - startedAt}`);
   try {
     const { id } = await params;
     const authUser = await getAuthUser(req);
+    logTiming('authentication complete');
     if (!authUser || authUser.role !== 'AGENT') {
       return errorResponse('UNAUTHORIZED', 'Authenticated agent access is required.', 401);
     }
@@ -32,6 +36,7 @@ export async function POST(
         weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
       },
     });
+    logTiming('order lookup complete');
 
     if (!order) {
       return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
@@ -41,8 +46,8 @@ export async function POST(
       return errorResponse('FORBIDDEN', 'Order is assigned to another agent.', 403);
     }
 
-    if (['WEIGHING', 'PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'].includes(order.status) && order.weightRecords.length > 0) {
-      return successResponse(order, 200, { message: 'Weights were already recorded for this order.' });
+    if (['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'].includes(order.status) && order.weightRecords.length > 0) {
+      return successResponse(order, 200, { message: 'Order was already completed.' });
     }
 
     const oldStatus = order.status;
@@ -54,12 +59,14 @@ export async function POST(
 
     for (const itemInput of actualWeights) {
       const dbItem = order.items.find(
-        (i) => i.categoryId === itemInput?.categoryId || i.id === itemInput?.categoryId
+        (i) => (itemInput?.itemId && i.id === itemInput.itemId) || i.categoryId === itemInput?.categoryId || i.id === itemInput?.categoryId
       );
       if (!dbItem || typeof itemInput.actualWeight !== 'number' || !Number.isFinite(itemInput.actualWeight) || itemInput.actualWeight <= 0) {
         return errorResponse('INVALID_WEIGH_DATA', 'Each actual weight must be a positive number for a valid order item.', 400);
       }
     }
+
+    const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
     // Execute Weighing Update in Transaction
     const updatedOrder = await db.$transaction(async (tx) => {
@@ -68,11 +75,11 @@ export async function POST(
 
       for (const itemInput of actualWeights) {
         const dbItem = order.items.find(
-          (i) => i.categoryId === itemInput.categoryId || i.id === itemInput.categoryId
+          (i) => (itemInput?.itemId && i.id === itemInput.itemId) || i.categoryId === itemInput.categoryId || i.id === itemInput.categoryId
         );
         if (dbItem) {
           const weightKg = itemInput.actualWeight;
-          const subtotal = weightKg * dbItem.ratePerKg;
+          const subtotal = round2(weightKg * dbItem.ratePerKg);
 
           if (dbItem.category.type === 'WASTE_CHARGE') {
             actualTotalWasteCharge += subtotal;
@@ -92,7 +99,7 @@ export async function POST(
 
       const netAmount = actualTotalRecyclable - (actualTotalWasteCharge + order.pickupCharge - order.discountAmount);
       const financialDirection = netAmount >= 0 ? 'JUNKITOUT_PAYS' : 'CUSTOMER_PAYS';
-      const finalAmount = Math.abs(netAmount);
+      const finalAmount = round2(Math.abs(netAmount));
       const totalWeightKg = actualWeights.reduce((total: number, input: any) => total + input.actualWeight, 0);
 
       // Create WeightRecord
@@ -152,10 +159,14 @@ export async function POST(
       }
 
       return updated;
+    }, {
+      maxWait: 10000,
+      timeout: 15000,
     });
 
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
     broadcaster.broadcast('WEIGHING_STARTED', { orderId: id, actualTotal: updatedOrder.actualTotal });
+    logTiming('response ready');
 
     return successResponse(updatedOrder);
   } catch (err: any) {

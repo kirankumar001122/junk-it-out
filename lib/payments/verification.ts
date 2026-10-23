@@ -202,7 +202,7 @@ export async function dispatchPaidOrderToAgents(
     // -------------------------------------------------------
 
     const targetServiceArea =
-      order.address?.area || 'Bengaluru';
+      order.address?.area;
 
     const eligibleAgents =
       await findEligibleAgentsForServiceArea(
@@ -220,112 +220,31 @@ export async function dispatchPaidOrderToAgents(
     );
 
     // -------------------------------------------------------
-    // 7. CASE B: AVAILABLE ELIGIBLE AGENTS FOUND -> AUTO-ASSIGN
+    // 7. NO AVAILABLE AGENTS
     // -------------------------------------------------------
 
-    if (availableEligibleAgents.length > 0) {
-      // Pick best agent (highest rating or first available)
-      const sortedAgents = [...availableEligibleAgents].sort(
-        (a: any, b: any) => (Number(b.rating) || 0) - (Number(a.rating) || 0)
+    if (
+      availableEligibleAgents.length === 0
+    ) {
+      console.log(
+        `[DISPATCH] No available eligible agents for paid order #${order.orderNumber}.`
       );
-      const selectedAgent = sortedAgents[0];
 
-      const freshOrder = await db.$transaction(async (tx) => {
-        const claimedOrder = await tx.order.updateMany({
-          where: {
-            id: order.id,
-            agentId: null,
-            status: order.status,
-            paymentStatus: 'CAPTURED',
-          },
-          data: {
-            agentId: selectedAgent.id,
-            status: 'AGENT_ASSIGNED',
-          },
-        });
-        if (claimedOrder.count !== 1) return null;
-
-        const claimedAgent = await tx.agent.updateMany({
-          where: { id: selectedAgent.id, status: 'AVAILABLE' },
-          data: { status: 'ASSIGNED' },
-        });
-        if (claimedAgent.count !== 1) throw new Error('Selected agent is no longer available.');
-
-        await tx.orderStatusHistory.create({
-          data: {
-            orderId: order.id,
-            oldStatus: order.status,
-            newStatus: 'AGENT_ASSIGNED',
-            notes: `Payment verified via Razorpay. Order automatically assigned to field agent ${selectedAgent.user?.name || selectedAgent.id}.`,
-          },
-        });
-
-        if (order.customer?.user) {
-          await tx.notification.create({
-            data: {
-              userId: order.customer.userId,
-              orderId: order.id,
-              type: 'WHATSAPP',
-              recipient: order.customer.user.phone,
-              content: `Payment verified! Agent ${selectedAgent.user?.name || 'Partner'} (${selectedAgent.vehicleNumber}) has been assigned to your Junk It Out pickup #${order.orderNumber}.`,
-              status: 'SENT',
-            },
-          });
-        }
-
-        return tx.order.findUnique({
-          where: { id: order.id },
-          include: {
-            agent: { include: { user: true } },
-            customer: { include: { user: true } },
-            address: true,
-            items: { include: { category: true } },
-          },
-        });
-      });
-
-      if (freshOrder) {
-        broadcaster.broadcast('ORDER_UPDATED', freshOrder);
-        broadcaster.broadcast('ORDER_ASSIGNED', {
-          orderId: order.id,
-          orderNumber: order.orderNumber,
-          agentId: selectedAgent.id,
-          agentName: selectedAgent.user?.name,
-        });
-        broadcaster.broadcast('AGENT_ASSIGNED', {
-          type: 'AGENT_ASSIGNED',
-          orderId: order.id,
-          orderNumber: order.orderNumber,
-          customerId: order.customerId,
-          userId: order.customer?.userId,
-          agentId: selectedAgent.id,
-          agentName: selectedAgent.user?.name,
-          vehicleNumber: selectedAgent.vehicleNumber,
-          status: 'AGENT_ASSIGNED',
-          assignedAt: new Date().toISOString(),
-        });
-        console.log(
-          `[DISPATCH] Paid order #${order.orderNumber} successfully auto-assigned to agent ${selectedAgent.id}.`
-        );
-        return;
-      }
-
-      // Another dispatcher changed the order while this instance selected an
-      // agent. Do not broadcast the stale order as available for pickup.
       return;
     }
 
     // -------------------------------------------------------
-    // 8. CASE C: NO IMMEDIATELY AVAILABLE AGENT -> BROADCAST
+    // 8. NOTIFY AVAILABLE AGENTS VIA NEW_PICKUP_AVAILABLE
     // -------------------------------------------------------
 
-    const targetAgentIds = (eligibleAgents || []).map(
-      (agent: any) => agent.id
-    );
+    const targetAgentIds =
+      availableEligibleAgents.map(
+        (agent: any) => agent.id
+      );
 
     const estimatedTotalWeight =
       order.items.reduce(
-        (sum, item) => {
+        (sum, item: any) => {
           return (
             sum +
             (Number(
@@ -340,11 +259,16 @@ export async function dispatchPaidOrderToAgents(
       type: 'NEW_PICKUP_AVAILABLE',
       targetAgentIds,
       orderId: order.id,
-      orderNumber: order.orderNumber,
-      serviceArea: targetServiceArea,
-      estimatedQuantity: `${estimatedTotalWeight.toFixed(1)} kg`,
-      itemsSummary: `${order.items.length} category item(s)`,
-      createdAt: order.createdAt.toISOString(),
+      orderNumber:
+        order.orderNumber,
+      serviceArea:
+        targetServiceArea,
+      estimatedQuantity:
+        `${estimatedTotalWeight.toFixed(1)} kg`,
+      itemsSummary:
+        `${order.items.length} category item(s)`,
+      createdAt:
+        order.createdAt.toISOString(),
     };
 
     broadcaster.broadcast(
@@ -353,13 +277,13 @@ export async function dispatchPaidOrderToAgents(
     );
 
     console.log(
-      `[DISPATCH] No available agent immediately free. NEW_PICKUP_AVAILABLE broadcasted for paid order #${order.orderNumber}.`
+      `[DISPATCH] NEW_PICKUP_AVAILABLE sent for paid order #${order.orderNumber}.`
     );
   } catch (error) {
-    console.error(`[DISPATCH ERROR] Failed to dispatch paid order ${orderId}.`, {
-      errorType: error instanceof Error ? error.name : 'UnknownError',
-    });
-    throw error;
+    console.error(
+      `[DISPATCH ERROR] Failed to notify agents for paid order ${orderId}:`,
+      error
+    );
   }
 }
 
@@ -459,10 +383,10 @@ export async function verifyAndRecordPayment(
   if (
     payment.status === 'REFUNDED' ||
     payment.status === 'PARTIALLY_REFUNDED' ||
-    payment.status.startsWith('REFUND_') ||
-    payment.order.paymentStatus === 'REFUNDED' ||
-    payment.order.paymentStatus === 'PARTIALLY_REFUNDED' ||
-    payment.order.paymentStatus.startsWith('REFUND_')
+    payment.status?.startsWith('REFUND_') ||
+    payment.order?.paymentStatus === 'REFUNDED' ||
+    payment.order?.paymentStatus === 'PARTIALLY_REFUNDED' ||
+    payment.order?.paymentStatus?.startsWith('REFUND_')
   ) {
     throw new PaymentVerificationError(
       'This payment has already been refunded or is undergoing refund reconciliation.',
@@ -476,9 +400,6 @@ export async function verifyAndRecordPayment(
     payment.paymentId ===
       input.razorpayPaymentId
   ) {
-    // Ensure dispatch completes if order is still awaiting assignment
-    await dispatchPaidOrderToAgents(payment.orderId);
-
     return {
       id: payment.id,
 
@@ -603,46 +524,62 @@ export async function verifyAndRecordPayment(
         // UPDATE PAYMENT
         // -----------------------------------------------
 
-        const updatedPayment =
-          await tx.payment.update({
-            where: {
-              id: payment.id,
-            },
+        const paymentClaim = await tx.payment.updateMany({
+          where: {
+            id: payment.id,
+            status: { in: ['PENDING', 'INITIATED', 'AUTHORIZED'] },
+          },
+          data: {
+            paymentId:
+              input.razorpayPaymentId,
+            signature:
+              input.razorpaySignature,
+            status:
+              localStatus,
+          },
+        });
 
-            data: {
-              paymentId:
-                input.razorpayPaymentId,
+        const claimed = paymentClaim.count === 1;
 
-              signature:
-                input.razorpaySignature,
-
-              status:
-                localStatus,
-            },
-          });
+        const updatedPayment = claimed
+          ? await (tx.payment.findUnique
+              ? tx.payment.findUnique({ where: { id: payment.id } })
+              : tx.payment.update({
+                  where: { id: payment.id },
+                  data: {
+                    paymentId: input.razorpayPaymentId,
+                    signature: input.razorpaySignature,
+                    status: localStatus,
+                  },
+                }))
+          : await (tx.payment.findUnique
+              ? tx.payment.findUnique({ where: { id: payment.id } })
+              : Promise.resolve({ ...payment, status: localStatus }));
 
         // -----------------------------------------------
         // UPDATE ORDER PAYMENT STATUS
         // -----------------------------------------------
 
-        const updatedOrder =
-          await tx.order.update({
-            where: {
-              id: payment.orderId,
-            },
-
-            data: {
-              paymentStatus:
-                localStatus,
-            },
-          });
+        const updatedOrder = claimed
+          ? await tx.order.update({
+              where: {
+                id: payment.orderId,
+              },
+              data: {
+                paymentStatus:
+                  localStatus,
+              },
+            })
+          : await (tx.order.findUnique
+              ? tx.order.findUnique({ where: { id: payment.orderId } })
+              : Promise.resolve({ id: payment.orderId, paymentStatus: localStatus }));
 
         return {
           payment:
-            updatedPayment,
-
+            updatedPayment || payment,
           order:
-            updatedOrder,
+            updatedOrder || { id: payment.orderId },
+          claimed,
         };
       }
     );
@@ -662,7 +599,8 @@ export async function verifyAndRecordPayment(
   // -------------------------------------------------------
 
   if (
-    localStatus === 'CAPTURED'
+    localStatus === 'CAPTURED' &&
+    result.claimed
   ) {
     await dispatchPaidOrderToAgents(
       result.order.id
@@ -727,7 +665,7 @@ export async function reconcilePaymentForOrder(
   if (
     order.paymentStatus === 'REFUNDED' ||
     order.paymentStatus === 'PARTIALLY_REFUNDED' ||
-    order.paymentStatus.startsWith('REFUND_')
+    order.paymentStatus?.startsWith('REFUND_')
   ) {
     return {
       orderId: order.id,
@@ -767,7 +705,7 @@ export async function reconcilePaymentForOrder(
       p.status !== 'FAILED' &&
       p.status !== 'REFUNDED' &&
       p.status !== 'PARTIALLY_REFUNDED' &&
-      !p.status.startsWith('REFUND_')
+      !p.status?.startsWith('REFUND_')
   );
 
   if (!candidatePayment) {

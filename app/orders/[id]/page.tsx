@@ -21,8 +21,8 @@ import {
 import InteractiveMap from "@/components/InteractiveMap";
 import { getSecurePhotoUrl } from "@/lib/utils/photoUrl";
 import { getApiErrorMessage } from "@/lib/utils/apiErrorMessage";
+import { loadRazorpayScript } from "@/lib/razorpayClient";
 import {
-  getAgentLocationLabel,
   isActiveTrackingStatus,
   isTerminalOrderStatus,
   parseAgentLocation,
@@ -34,45 +34,6 @@ const STALE_AFTER_MS = 30_000;
 
 const DEFAULT_PICKUP_LAT = 12.9077;
 const DEFAULT_PICKUP_LNG = 77.5854;
-
-const loadRazorpayScript = (): Promise<boolean> => {
-  return new Promise((resolve) => {
-    if (typeof window !== "undefined" && (window as any).Razorpay) {
-      resolve(true);
-      return;
-    }
-
-    const scriptId = "razorpay-checkout-script";
-
-    const existing = document.getElementById(
-      scriptId,
-    ) as HTMLScriptElement | null;
-
-    if (existing) {
-      if ((window as any).Razorpay) {
-        resolve(true);
-        return;
-      }
-
-      existing.addEventListener("load", () => resolve(true), { once: true });
-
-      existing.addEventListener("error", () => resolve(false), { once: true });
-
-      return;
-    }
-
-    const script = document.createElement("script");
-
-    script.id = scriptId;
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.async = true;
-
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-
-    document.body.appendChild(script);
-  });
-};
 
 export default function OrderTrackingPage() {
   const params = useParams();
@@ -532,18 +493,63 @@ export default function OrderTrackingPage() {
 
   const currentStatusIdx = getStatusStepIndex(order.status);
 
-  const locationLabel = getAgentLocationLabel(
-    order.status,
-    agentLocation,
-    now,
-    STALE_AFTER_MS,
-  );
   const locationStale =
     !agentLocation || now - agentLocation.updatedAt > STALE_AFTER_MS;
 
   const pickupLat = order.address?.lat ?? DEFAULT_PICKUP_LAT;
 
   const pickupLng = order.address?.lng ?? DEFAULT_PICKUP_LNG;
+
+  const getMapStatusBadge = () => {
+    const status = order?.status;
+    if (status === "BOOKING_RECEIVED" || status === "AGENT_BEING_ASSIGNED") {
+      return (
+        <span className="text-[10px] font-bold bg-amber-100 text-amber-900 px-2.5 py-0.5 rounded-full border border-amber-200">
+          Waiting for agent assignment
+        </span>
+      );
+    }
+    if (status === "AGENT_ASSIGNED" || status === "AGENT_ACCEPTED") {
+      return (
+        <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2.5 py-0.5 rounded-full border border-blue-200">
+          Agent assigned
+        </span>
+      );
+    }
+    if (status === "AGENT_ON_WAY" || status === "AGENT_ARRIVED" || status === "WASTE_VERIFICATION") {
+      if (agentLocation) {
+        return (
+          <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full animate-pulse border border-emerald-200">
+            ● Live
+          </span>
+        );
+      }
+      return (
+        <span className="text-[10px] font-bold bg-amber-100 text-amber-900 px-2.5 py-0.5 rounded-full border border-amber-200">
+          Waiting for agent location
+        </span>
+      );
+    }
+    if (status === "WEIGHING") {
+      return (
+        <span className="text-[10px] font-bold bg-indigo-100 text-indigo-800 px-2.5 py-0.5 rounded-full border border-indigo-200">
+          Weighing in progress
+        </span>
+      );
+    }
+    if (status === "PICKUP_COMPLETED" || status === "SETTLEMENT_COMPLETED") {
+      return (
+        <span className="text-[10px] font-bold bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-full border border-slate-200">
+          Pickup completed
+        </span>
+      );
+    }
+    return (
+      <span className="text-[10px] font-bold bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-full border border-slate-200">
+        Waiting for agent assignment
+      </span>
+    );
+  };
 
   const handlePayNow = async () => {
     // Synchronous duplicate click prevention
@@ -963,15 +969,7 @@ export default function OrderTrackingPage() {
                   : "Live Agent GPS Location"}
               </h3>
 
-              <span
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  locationLabel === "Live"
-                    ? "bg-emerald-100 text-emerald-800 animate-pulse"
-                    : "bg-amber-100 text-amber-800"
-                }`}
-              >
-                {locationLabel}
-              </span>
+              {getMapStatusBadge()}
             </div>
 
             <InteractiveMap
@@ -1272,7 +1270,7 @@ export default function OrderTrackingPage() {
 
             {order.invoices && order.invoices.length > 0 && (
               <a
-                href={`/api/orders/${order.id}`}
+                href={`/orders/${order.id}/receipt`}
                 target="_blank"
                 className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-4 py-3 rounded-xl border border-slate-700 flex items-center gap-2"
               >

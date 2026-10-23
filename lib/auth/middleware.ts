@@ -57,3 +57,8 @@ export function isAdminRole(user: JwtPayload | null): boolean {
 export function requireAdminUser(user: JwtPayload | null): JwtPayload | null {
   return isAdminRole(user) ? user : null;
 }
+
+export function getAdminAuthorizationStatus(user: JwtPayload | null): 200 | 401 | 403 {
+  if (!user) return 401;
+  return isAdminRole(user) ? 200 : 403;
+}

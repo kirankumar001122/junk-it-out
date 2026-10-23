@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Truck,
   MapPin,
@@ -46,20 +46,40 @@ export default function AgentDashboardPage() {
   const [loginOtp, setLoginOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
   // Weighing Modal State
   const [showWeighModal, setShowWeighModal] = useState(false);
-  const [actualWeightsInput, setActualWeightsInput] = useState<{ categoryId: string; categoryName: string; actualWeight: number }[]>([]);
+  const [actualWeightsInput, setActualWeightsInput] = useState<{
+    itemId?: string;
+    categoryId: string;
+    categoryName: string;
+    estimatedWeight: number;
+    weightStr: string;
+  }[]>([]);
   const [scalePhotoUrl, setScalePhotoUrl] = useState('https://images.unsplash.com/photo-1589939705384-5185137a7f0f?q=80&w=600');
   const [weighNotes, setWeighNotes] = useState('');
+  const [submittingWeigh, setSubmittingWeigh] = useState(false);
+  const [weighModalError, setWeighModalError] = useState<string | null>(null);
+  const dataRequestRef = useRef(false);
+  const acceptingPickupRef = useRef(false);
+  const actionRequestRef = useRef(false);
+  const statusRequestRef = useRef(false);
+  const weighingRequestRef = useRef(false);
+  const loginRequestRef = useRef(false);
 
   const fetchAgentData = async () => {
+    if (dataRequestRef.current) return;
+    dataRequestRef.current = true;
     try {
       setLoading(true);
       setAuthError(null);
 
-      const profileRes = await fetch('/api/auth/me');
+      const [profileRes, ordersRes] = await Promise.all([
+        fetch('/api/auth/me', { cache: 'no-store' }),
+        fetch('/api/orders?limit=20', { cache: 'no-store' }),
+      ]);
       const profileData = await profileRes.json().catch(() => ({ success: false }));
 
       if (!profileData.success || !profileData.data?.user || profileData.data.user.role !== 'AGENT') {
@@ -89,8 +109,7 @@ export default function AgentDashboardPage() {
       });
       setIsOnline((agentProfile?.status || 'AVAILABLE') !== 'OFFLINE');
 
-      const res = await fetch('/api/orders');
-      const data = await res.json().catch(() => ({ success: false }));
+      const data = await ordersRes.json().catch(() => ({ success: false }));
       if (data.success) {
         const agentOrders = (data.data || []).filter((o: any) => o.agentId === agentProfile.id);
         setOrders(agentOrders);
@@ -103,9 +122,14 @@ export default function AgentDashboardPage() {
         if (assigned) {
           setActualWeightsInput(
             (assigned.items || []).map((i: any) => ({
+              itemId: i.id,
               categoryId: i.categoryId,
               categoryName: i.category?.name || 'Waste item',
-              actualWeight: Number(i.actualWeight ?? i.estimatedWeight ?? 0),
+              estimatedWeight: Number(i.estimatedWeight ?? 0),
+              weightStr:
+                typeof i.actualWeight === 'number' && i.actualWeight > 0
+                  ? String(i.actualWeight)
+                  : '',
             }))
           );
         } else {
@@ -117,6 +141,7 @@ export default function AgentDashboardPage() {
       setAuthError('Network error while loading your pickup dashboard.');
     } finally {
       setLoading(false);
+      dataRequestRef.current = false;
     }
   };
 
@@ -127,11 +152,15 @@ export default function AgentDashboardPage() {
   useEffect(() => {
     if (!activeOrder?.id || !isOnline || !agent?.id) return;
 
-    const locationInterval = setInterval(() => {
+    let cancelled = false;
+    let locationTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const sendLocation = async () => {
       const simulatedLat = (activeOrder.address?.lat || 12.9077) + (Math.random() - 0.5) * 0.005;
       const simulatedLng = (activeOrder.address?.lng || 77.5854) + (Math.random() - 0.5) * 0.005;
 
-      fetch('/api/agent/location', {
+      try {
+        const response = await fetch('/api/agent/location', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -141,10 +170,25 @@ export default function AgentDashboardPage() {
           lng: simulatedLng,
           speed: 22.4,
         }),
-      }).catch(() => {});
-    }, 8000);
+        });
+        if (!response.ok) {
+          console.warn('[AGENT_LOCATION_UPDATE_FAILED]', response.status);
+        }
+      } catch (error) {
+        console.warn('[AGENT_LOCATION_UPDATE_FAILED]', error);
+      } finally {
+        if (!cancelled) {
+          locationTimer = setTimeout(sendLocation, 8000);
+        }
+      }
+    };
 
-    return () => clearInterval(locationInterval);
+    locationTimer = setTimeout(sendLocation, 8000);
+
+    return () => {
+      cancelled = true;
+      if (locationTimer) clearTimeout(locationTimer);
+    };
   }, [activeOrder?.id, isOnline, agent?.id]);
 
   // Authenticated Agent SSE Stream Connection for NEW_PICKUP_AVAILABLE Notifications
@@ -179,24 +223,29 @@ export default function AgentDashboardPage() {
     };
   }, [agent?.id, isOnline]);
 
+  const fetchOrderDetails = async (orderId: string) => {
+    const res = await fetch(`/api/orders/${orderId}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      throw new Error(data.error?.message || data.message || 'Unable to fetch pickup details.');
+    }
+    return data.data;
+  };
+
   const handleViewPickupDetails = async (orderId: string) => {
     setLoadingPickupDetails(true);
     try {
-      const res = await fetch(`/api/orders/${orderId}`);
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setViewPickupModal(data.data);
-      } else {
-        alert(data.error?.message || data.message || 'Unable to view pickup details.');
-      }
+      setViewPickupModal(await fetchOrderDetails(orderId));
     } catch (err) {
-      alert('Network error fetching pickup details.');
+      alert(err instanceof Error ? err.message : 'Network error fetching pickup details.');
     } finally {
       setLoadingPickupDetails(false);
     }
   };
 
   const handleAcceptPickup = async (orderId: string) => {
+    if (acceptingPickupRef.current) return;
+    acceptingPickupRef.current = true;
     setAcceptingPickup(true);
     try {
       const res = await fetch(`/api/orders/${orderId}/accept`, {
@@ -210,7 +259,6 @@ export default function AgentDashboardPage() {
         setTimeout(() => setStatusNotice(null), 5000);
         setViewPickupModal(null);
         setNewPickupNotice(null);
-        fetchAgentData();
         return;
       }
 
@@ -219,7 +267,14 @@ export default function AgentDashboardPage() {
         setTimeout(() => setStatusNotice(null), 5000);
         setViewPickupModal(null);
         setNewPickupNotice(null);
-        fetchAgentData();
+        const updatedOrder = Array.isArray(data.data?.items)
+          ? data.data
+          : await fetchOrderDetails(orderId);
+        setActiveOrder(updatedOrder);
+        setOrders((currentOrders) => [
+          updatedOrder,
+          ...currentOrders.filter((order) => order.id !== updatedOrder.id),
+        ]);
       } else {
         alert(data.error?.message || data.message || 'Failed to accept pickup.');
       }
@@ -227,15 +282,18 @@ export default function AgentDashboardPage() {
       alert('Network error while accepting pickup.');
     } finally {
       setAcceptingPickup(false);
+      acceptingPickupRef.current = false;
     }
   };
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loginRequestRef.current) return;
     if (!loginPhone || loginPhone.trim().length < 10) {
       setLoginError('Please enter a valid 10-digit agent mobile number.');
       return;
     }
+    loginRequestRef.current = true;
     setLoginLoading(true);
     setLoginError(null);
     try {
@@ -254,15 +312,18 @@ export default function AgentDashboardPage() {
       setLoginError('Network error sending OTP.');
     } finally {
       setLoginLoading(false);
+      loginRequestRef.current = false;
     }
   };
 
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loginRequestRef.current) return;
     if (!loginOtp || loginOtp.trim().length < 4) {
       setLoginError('Please enter the OTP code received.');
       return;
     }
+    loginRequestRef.current = true;
     setLoginLoading(true);
     setLoginError(null);
     try {
@@ -281,10 +342,13 @@ export default function AgentDashboardPage() {
       setLoginError('Network error verifying agent OTP.');
     } finally {
       setLoginLoading(false);
+      loginRequestRef.current = false;
     }
   };
 
   const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
       setAgent(null);
@@ -294,10 +358,14 @@ export default function AgentDashboardPage() {
       setLoginOtp('');
     } catch (e) {
       console.error('Agent logout error:', e);
+    } finally {
+      setLoggingOut(false);
     }
   };
 
   const toggleAgentStatus = async () => {
+    if (statusRequestRef.current) return;
+    statusRequestRef.current = true;
     const targetStatus = isOnline ? 'OFFLINE' : 'AVAILABLE';
     setStatusUpdating(true);
     setStatusNotice(null);
@@ -321,11 +389,12 @@ export default function AgentDashboardPage() {
       setStatusNotice('Network error updating status.');
     } finally {
       setStatusUpdating(false);
+      statusRequestRef.current = false;
     }
   };
 
   const handleCallEndpoint = async (action: 'accept' | 'start' | 'arrive') => {
-    if (!activeOrder) return;
+    if (!activeOrder || actionRequestRef.current) return;
 
     if (!isOnline && action === 'accept') {
       setStatusNotice('You are currently OFFLINE. Please switch status to ONLINE to accept pickups.');
@@ -333,13 +402,19 @@ export default function AgentDashboardPage() {
       return;
     }
 
+    actionRequestRef.current = true;
     setActionLoading(true);
     setStatusNotice(null);
+    let actionTimeout: number | undefined;
     try {
+      const controller = new AbortController();
+      actionTimeout = window.setTimeout(() => controller.abort(), 15_000);
       const res = await fetch(`/api/orders/${activeOrder.id}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
       });
+      window.clearTimeout(actionTimeout);
       const data = await res.json();
       if (res.ok && data.success) {
         setStatusNotice(
@@ -350,7 +425,17 @@ export default function AgentDashboardPage() {
             : 'Arrived at customer doorstep!'
         );
         setTimeout(() => setStatusNotice(null), 4000);
-        await fetchAgentData();
+        if (data.data?.id) {
+          const nextOrder = action === 'accept'
+            ? Array.isArray(data.data.items)
+              ? data.data
+              : await fetchOrderDetails(data.data.id)
+            : data.data;
+          setActiveOrder(nextOrder);
+          setOrders((currentOrders) =>
+            currentOrders.map((order) => order.id === nextOrder.id ? nextOrder : order)
+          );
+        }
       } else {
         const errorText = data.error?.message || data.message || `Failed to perform ${action} action.`;
         setStatusNotice(errorText);
@@ -358,45 +443,94 @@ export default function AgentDashboardPage() {
       }
     } catch (e) {
       console.error(e);
-      setStatusNotice('Network error while processing action. Please try again.');
+      setStatusNotice(
+        e instanceof DOMException && e.name === 'AbortError'
+          ? 'The action timed out. Please check the order status and try again.'
+          : 'Network error while processing action. Please try again.'
+      );
       setTimeout(() => setStatusNotice(null), 4000);
     } finally {
+      if (actionTimeout) window.clearTimeout(actionTimeout);
       setActionLoading(false);
+      actionRequestRef.current = false;
     }
   };
 
   const handleSubmitWeighingAndComplete = async () => {
-    if (!activeOrder) return;
+    if (!activeOrder || weighingRequestRef.current) return;
+    weighingRequestRef.current = true;
+    setWeighModalError(null);
+
+    // 1. Client-side weight validation
+    if (!actualWeightsInput || actualWeightsInput.length === 0) {
+      setWeighModalError('No order items available to weigh.');
+      return;
+    }
+
+    const payloadActualWeights: { itemId?: string; categoryId: string; actualWeight: number }[] = [];
+
+    for (const item of actualWeightsInput) {
+      const trimmed = item.weightStr.trim();
+      const numVal = Number(trimmed);
+
+      if (!trimmed || isNaN(numVal) || !Number.isFinite(numVal) || numVal <= 0) {
+        setWeighModalError(`Please enter a valid weight (greater than 0 kg) for "${item.categoryName}".`);
+        return;
+      }
+
+      payloadActualWeights.push({
+        itemId: item.itemId,
+        categoryId: item.categoryId,
+        actualWeight: numVal,
+      });
+    }
+
+    setSubmittingWeigh(true);
     try {
+      // 2. Submit door-to-door scale weights
       const weighRes = await fetch(`/api/orders/${activeOrder.id}/weigh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          actualWeights: actualWeightsInput,
+          actualWeights: payloadActualWeights,
           scalePhotoUrl,
-          notes: weighNotes,
+          notes: weighNotes || 'Digital scale weight recorded at doorstep.',
         }),
       });
-      const weighData = await weighRes.json();
+      const weighData = await weighRes.json().catch(() => ({}));
       if (!weighRes.ok || !weighData.success) {
-        alert(weighData.error?.message || weighData.message || 'Failed to record weighing.');
+        setWeighModalError(weighData.error?.message || weighData.message || 'Failed to record scale weights.');
+        setSubmittingWeigh(false);
         return;
       }
 
+      // 3. Submit Order Completion
       const completeRes = await fetch(`/api/orders/${activeOrder.id}/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      const completeData = await completeRes.json();
-      if (completeRes.ok || completeData.success) {
+      const completeData = await completeRes.json().catch(() => ({}));
+      if (completeRes.ok && completeData.success) {
         setShowWeighModal(false);
-        fetchAgentData();
+        setStatusNotice(`Order #${activeOrder.orderNumber} successfully COMPLETED! Weights persisted & invoice generated.`);
+        setTimeout(() => setStatusNotice(null), 6000);
+        if (completeData.data?.id) {
+          setActiveOrder(completeData.data);
+          setOrders((currentOrders) =>
+            currentOrders.map((order) =>
+              order.id === completeData.data.id ? completeData.data : order
+            )
+          );
+        }
       } else {
-        alert(completeData.error?.message || completeData.message || 'Failed to complete pickup.');
+        setWeighModalError(completeData.error?.message || completeData.message || 'Failed to complete pickup order.');
       }
     } catch (e) {
-      console.error(e);
-      alert('Network error while completing pickup.');
+      console.error('Weighing/Completion error:', e);
+      setWeighModalError('Network error while completing pickup. Please check your connection and try again.');
+    } finally {
+      setSubmittingWeigh(false);
+      weighingRequestRef.current = false;
     }
   };
 
@@ -553,10 +687,11 @@ export default function AgentDashboardPage() {
 
           <button
             onClick={handleLogout}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl transition-colors"
+            disabled={loggingOut}
+            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl transition-colors disabled:opacity-50"
             title="Log Out"
           >
-            <LogOut className="w-4 h-4" />
+            {loggingOut ? <RefreshCw className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
           </button>
         </div>
       </div>
@@ -756,10 +891,12 @@ export default function AgentDashboardPage() {
 
             {(activeOrder.status === 'AGENT_ARRIVED' || activeOrder.status === 'WEIGHING') && (
               <button
+                type="button"
                 onClick={() => {
+                  setWeighModalError(null);
                   setShowWeighModal(true);
                 }}
-                className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2"
+                className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 cursor-pointer transition-transform hover:scale-[1.01]"
               >
                 <Scale className="w-5 h-5" />
                 START WEIGHING & RECORD KG
@@ -778,33 +915,55 @@ export default function AgentDashboardPage() {
       {/* WEIGHING MODAL */}
       {showWeighModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-extrabold text-white flex items-center gap-2">
                 <Scale className="w-5 h-5 text-emerald-400" />
                 Record Digital Scale Weights
               </h3>
-              <button onClick={() => setShowWeighModal(false)} className="text-slate-400 text-xs font-bold">
+              <button
+                onClick={() => {
+                  if (!submittingWeigh) setShowWeighModal(false);
+                }}
+                disabled={submittingWeigh}
+                className="text-slate-400 hover:text-white text-xs font-bold p-1 rounded-lg disabled:opacity-50"
+              >
                 ✕ Close
               </button>
             </div>
 
+            {weighModalError && (
+              <div className="p-3 bg-rose-950/80 border border-rose-800 text-rose-300 rounded-2xl text-xs font-bold flex items-center gap-2 animate-scale-in">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{weighModalError}</span>
+              </div>
+            )}
+
             <div className="space-y-3">
               {actualWeightsInput.map((item, idx) => (
-                <div key={item.categoryId} className="bg-slate-800 p-3 rounded-2xl border border-slate-700 flex items-center justify-between">
-                  <span className="text-xs font-bold text-white">{item.categoryName}</span>
+                <div key={item.itemId || item.categoryId || idx} className="bg-slate-800 p-3 rounded-2xl border border-slate-700 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-white block">{item.categoryName}</span>
+                    <span className="text-[10px] text-slate-400">
+                      Customer estimate: {item.estimatedWeight} kg (for reference only)
+                    </span>
+                  </div>
                   <div className="flex items-center gap-2">
                     <input
-                      type="number"
-                      step="0.1"
-                      value={item.actualWeight}
+                      type="text"
+                      inputMode="decimal"
+                      value={item.weightStr}
                       onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        const copy = [...actualWeightsInput];
-                        copy[idx].actualWeight = val;
-                        setActualWeightsInput(copy);
+                        const raw = e.target.value;
+                        if (/^\d*\.?\d{0,2}$/.test(raw)) {
+                          const copy = [...actualWeightsInput];
+                          copy[idx].weightStr = raw;
+                          setActualWeightsInput(copy);
+                          if (weighModalError) setWeighModalError(null);
+                        }
                       }}
-                      className="w-20 bg-slate-900 border border-slate-600 rounded-xl p-2 text-sm font-bold text-emerald-400 text-right focus:outline-none focus:border-emerald-500"
+                      placeholder="0.0"
+                      className="w-24 bg-slate-900 border border-slate-600 rounded-xl p-2 text-sm font-bold text-emerald-400 text-right focus:outline-none focus:border-emerald-500"
                     />
                     <span className="text-xs text-slate-400 font-bold">kg</span>
                   </div>
@@ -813,7 +972,7 @@ export default function AgentDashboardPage() {
             </div>
 
             {/* Photo Scale Proof */}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <label className="block text-xs font-bold text-slate-400">Scale Photo Proof URL:</label>
               <div className="flex items-center gap-2">
                 <input
@@ -823,22 +982,46 @@ export default function AgentDashboardPage() {
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-300"
                 />
                 <button
+                  type="button"
                   onClick={() =>
                     setScalePhotoUrl('https://images.unsplash.com/photo-1589939705384-5185137a7f0f?q=80&w=600')
                   }
-                  className="bg-slate-800 border border-slate-700 text-emerald-400 p-2.5 rounded-xl shrink-0"
+                  className="bg-slate-800 border border-slate-700 text-emerald-400 p-2.5 rounded-xl shrink-0 hover:bg-slate-700 transition-colors"
                 >
                   <Camera className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
+            {/* Doorstep Weighing Notes */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-400">Doorstep Notes (Optional):</label>
+              <input
+                type="text"
+                placeholder="e.g. Verified and weighed on digital scale at doorstep"
+                value={weighNotes}
+                onChange={(e) => setWeighNotes(e.target.value)}
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+
             <button
+              type="button"
               onClick={handleSubmitWeighingAndComplete}
-              className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm py-4 rounded-2xl shadow-xl flex items-center justify-center gap-2"
+              disabled={submittingWeigh}
+              className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-sm py-4 rounded-2xl shadow-xl flex items-center justify-center gap-2 transition-all cursor-pointer hover:scale-[1.01]"
             >
-              <CheckCircle className="w-5 h-5" />
-              CONFIRM WEIGHTS & COMPLETE PICKUP
+              {submittingWeigh ? (
+                <>
+                  <RefreshCw className="w-5 h-5 animate-spin" />
+                  <span>SAVING WEIGHTS & COMPLETING...</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-5 h-5" />
+                  <span>CONFIRM WEIGHTS & COMPLETE PICKUP</span>
+                </>
+              )}
             </button>
           </div>
         </div>

@@ -22,11 +22,26 @@ export function validatePhone(phone: string): { valid: boolean; normalized: stri
 }
 
 export function validateCoordinates(lat: any, lng: any): boolean {
+  if (
+    lat === null ||
+    lat === undefined ||
+    lng === null ||
+    lng === undefined ||
+    lat === '' ||
+    lng === '' ||
+    (typeof lat !== 'number' && typeof lat !== 'string') ||
+    (typeof lng !== 'number' && typeof lng !== 'string')
+  ) {
+    return false;
+  }
+
   const latitude = Number(lat);
   const longitude = Number(lng);
   return (
     !isNaN(latitude) &&
     !isNaN(longitude) &&
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
     latitude >= -90 &&
     latitude <= 90 &&
     longitude >= -180 &&
@@ -93,7 +108,9 @@ const ALLOWED_STATUS_TRANSITIONS: Record<string, string[]> = {
 };
 
 export function validateStatusTransition(currentStatus: string, targetStatus: string): boolean {
-  if (currentStatus === targetStatus) return true;
-  const allowed = ALLOWED_STATUS_TRANSITIONS[currentStatus];
-  return allowed ? allowed.includes(targetStatus) : false;
+  const normCurrent = currentStatus === 'COMPLETED' ? 'PICKUP_COMPLETED' : currentStatus;
+  const normTarget = targetStatus === 'COMPLETED' ? 'PICKUP_COMPLETED' : targetStatus;
+  if (normCurrent === normTarget) return true;
+  const allowed = ALLOWED_STATUS_TRANSITIONS[normCurrent];
+  return allowed ? allowed.includes(normTarget) : false;
 }

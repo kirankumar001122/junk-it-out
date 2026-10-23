@@ -220,6 +220,29 @@ export async function POST(req: NextRequest) {
        * A successfully requested OTP should not fail just because
        * the optional customer-name lookup had a DB issue.
        */
+      const dbErrorMessage = String(dbErr?.message || '');
+      const databaseUnavailable =
+        dbErrorMessage.includes('Authentication failed against database server') ||
+        dbErrorMessage.includes('Can\'t reach database server') ||
+        dbErrorMessage.includes('P1001') ||
+        dbErrorMessage.includes('P1000') ||
+        dbErrorMessage.includes('[YOUR-PASSWORD]');
+
+      if (databaseUnavailable) {
+        console.error(
+          '[SEND_OTP_DATABASE_UNAVAILABLE]',
+          'OTP was sent, but the customer profile database is unavailable.'
+        );
+        return addCorsHeaders(
+          errorResponse(
+            'DATABASE_UNAVAILABLE',
+            'OTP delivery completed, but sign-in is temporarily unavailable because the database credentials are invalid or unreachable. Verify DATABASE_URL and restart the server.',
+            503
+          ),
+          req
+        );
+      }
+
       console.warn(
         '[SEND_OTP_DB_LOOKUP_WARNING] Non-fatal DB lookup warning:',
         dbErr?.message || dbErr

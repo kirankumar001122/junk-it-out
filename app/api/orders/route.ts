@@ -168,8 +168,44 @@ export async function GET(req: NextRequest) {
     //
     // =====================================================
 
-    const orders =
-      await db.order.findMany({
+    const orders = authUser.role === 'AGENT'
+      ? await db.order.findMany({
+        where: whereClause,
+        select: {
+          id: true,
+          orderNumber: true,
+          agentId: true,
+          status: true,
+          customer: {
+            select: {
+              user: { select: { id: true, name: true, phone: true } },
+            },
+          },
+          address: {
+            select: {
+              name: true,
+              houseNo: true,
+              street: true,
+              area: true,
+              lat: true,
+              lng: true,
+              pickupInstructions: true,
+            },
+          },
+          items: {
+            select: {
+              id: true,
+              categoryId: true,
+              estimatedWeight: true,
+              actualWeight: true,
+              category: { select: { id: true, name: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      })
+      : await db.order.findMany({
         where: whereClause,
 
         include: {

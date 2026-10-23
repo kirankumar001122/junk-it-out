@@ -19,6 +19,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import CustomerOtpLogin from '@/components/CustomerOtpLogin';
+import { clearSelectedLocation } from '@/lib/selectedLocation';
 
 export default function CustomerProfilePage() {
   const router = useRouter();
@@ -63,8 +64,9 @@ export default function CustomerProfilePage() {
     setLoggingOut(true);
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
+      clearSelectedLocation();
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('jio_auth_change'));
+        window.dispatchEvent(new CustomEvent('jio_auth_change', { detail: { type: 'logout' } }));
       }
       router.refresh();
       setUser(null);

@@ -33,6 +33,15 @@ import {
 } from '@/lib/pickupCart';
 
 import CustomerReviews from '@/components/CustomerReviews';
+import { getCachedClientJson } from '@/lib/clientRequestCache';
+
+const categoryImages: Record<string, string> = {
+  'E-Waste': '/categories/e-waste.png',
+  'Household Dry Waste': '/categories/household-waste.png',
+  'Paper & Cardboard': '/categories/paper-carboard.jpg',
+  'Plastic Waste': '/categories/plastic-waste.jpg?v=2',
+};
+const CUSTOMER_CATEGORY_NAMES = new Set(Object.keys(categoryImages));
 
 const categoryIcons = [
   FileText,
@@ -45,13 +54,6 @@ const categoryIcons = [
   Sparkles,
 ];
 
-const categoryImages: Record<string, string> = {
-  'E-Waste': '/categories/e-waste.png',
-  'Household Dry Waste': '/categories/household-waste.png',
-  'Paper & Cardboard': '/categories/paper-cardboard.jpg',
-  'Plastic Waste': '/categories/plastic-waste.jpg',
-};
-
 export default function HomePage() {
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,9 +61,19 @@ export default function HomePage() {
   const [cartItems, setCartItems] = useState<PickupCartItem[]>([]);
 
   useEffect(() => {
-    fetch('/api/waste-categories')
-      .then((r) => r.json())
-      .then((d) => setCategories(d.success ? d.data : []))
+    getCachedClientJson<{ success: boolean; data?: any[] }>(
+      'public-waste-categories',
+      '/api/waste-categories',
+      60_000,
+      { cache: 'force-cache' }
+    )
+      .then((d) =>
+        setCategories(
+          d.success
+            ? d.data.filter((category: any) => CUSTOMER_CATEGORY_NAMES.has(category.name?.trim()))
+            : []
+        )
+      )
       .catch(() => setCategories([]))
       .finally(() => setLoading(false));
   }, []);
@@ -76,19 +88,7 @@ export default function HomePage() {
     return () => window.removeEventListener(pickupCartEvent, refresh);
   }, []);
 
-  // Only show the four requested waste categories
-  const featured = useMemo(() => {
-    const allowedCategories = new Set([
-      'E-Waste',
-      'Household Dry Waste',
-      'Paper & Cardboard',
-      'Plastic Waste',
-    ]);
-
-    return categories.filter((category) =>
-      allowedCategories.has(category.name?.trim())
-    );
-  }, [categories]);
+  const featured = useMemo(() => categories, [categories]);
 
   const addCategory = (category: any) => {
     addToPickupCart(category.id);
@@ -328,19 +328,19 @@ export default function HomePage() {
                   return (
                     <article
                       key={category.id}
-                      className="flex h-[360px] w-full flex-col justify-between rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm transition-all hover:-translate-y-1 hover:border-emerald-400 hover:shadow-md"
+                      className="flex w-full flex-col rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm transition-all hover:-translate-y-1 hover:border-emerald-400 hover:shadow-md"
                     >
 
                       <Link
                         href={`/book?category=${encodeURIComponent(
                           category.id
                         )}`}
-                        className="block"
+                        className="flex flex-col"
                       >
 
                         {category.name === 'Household Dry Waste' ? (
                           <>
-                            <div className="mb-3 overflow-hidden rounded-xl bg-emerald-50">
+                            <div className="mb-3 h-24 overflow-hidden rounded-xl bg-emerald-50">
                               <img
                                 src="/categories/household-waste.png"
                                 alt="Wet Waste and Dry Waste"
@@ -357,8 +357,8 @@ export default function HomePage() {
                               household clutter cleared out fast.
                             </p>
 
-                            <div className="mt-3 grid grid-cols-2 gap-2">
-                              <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-2.5">
+                            <div className="mt-2.5 grid grid-cols-2 gap-2">
+                              <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-2">
                                 <p className="text-xs font-bold text-emerald-700">
                                   Wet Waste
                                 </p>
@@ -367,7 +367,7 @@ export default function HomePage() {
                                 </p>
                               </div>
 
-                              <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-2.5">
+                              <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-2">
                                 <p className="text-xs font-bold text-emerald-700">
                                   Dry Waste
                                 </p>
@@ -377,12 +377,6 @@ export default function HomePage() {
                               </div>
                             </div>
 
-                            <p className="mt-3 text-sm font-extrabold text-emerald-700">
-                              ₹{category.pricePerKg}{' '}
-                              <span className="text-[10px] font-normal text-slate-500">
-                                / kg
-                              </span>
-                            </p>
                           </>
                         ) : (
                           <>
@@ -400,34 +394,40 @@ export default function HomePage() {
                               </div>
                             )}
 
-                            <h3 className="min-h-10 text-sm font-bold leading-tight text-slate-900">
+                            <h3 className="text-sm font-bold leading-tight text-slate-900">
                               {category.name}
                             </h3>
 
-                            <p className="mt-2 text-sm font-extrabold text-emerald-700">
-                              ₹{category.pricePerKg}{' '}
-                              <span className="text-xs font-normal text-slate-500">
-                                / kg
-                              </span>
+                            <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+                              {category.description || 'Standard waste collection category.'}
                             </p>
+
                           </>
                         )}
 
                       </Link>
 
-                      {quantity === 0 ? (
+                      <div className="mt-3">
+                        <p className="mb-2 text-sm font-extrabold text-emerald-700">
+                          ₹{category.pricePerKg}{' '}
+                          <span className="text-xs font-normal text-slate-500">
+                            / kg
+                          </span>
+                        </p>
 
-                        <button
-                          onClick={() => addCategory(category)}
-                          className="mt-3 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-slate-900 text-sm font-bold text-white transition-colors hover:bg-emerald-600 active:scale-95"
-                        >
-                          <Plus className="h-4 w-4" />
-                          ADD
-                        </button>
+                        {quantity === 0 ? (
 
-                      ) : (
+                          <button
+                            onClick={() => addCategory(category)}
+                            className="inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-slate-900 text-sm font-bold text-white transition-colors hover:bg-emerald-600 active:scale-95"
+                          >
+                            <Plus className="h-4 w-4" />
+                            ADD
+                          </button>
 
-                        <div className="mt-4 flex h-10 items-center justify-between rounded-lg border border-emerald-300 bg-emerald-50/80 px-1">
+                        ) : (
+
+                          <div className="flex h-10 items-center justify-between rounded-lg border border-emerald-300 bg-emerald-50/80 px-1">
 
                           <button
                             onClick={() => {
@@ -469,9 +469,10 @@ export default function HomePage() {
                             <Plus className="h-4 w-4" />
                           </button>
 
-                        </div>
+                          </div>
 
-                      )}
+                        )}
+                      </div>
 
                     </article>
                   );

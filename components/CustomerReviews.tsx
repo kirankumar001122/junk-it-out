@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Star, CheckCircle2, MessageSquareQuote, ArrowRight, ShieldCheck } from 'lucide-react';
+import { getCachedClientJson } from '@/lib/clientRequestCache';
 
 interface ReviewItem {
   id: string;
@@ -21,8 +22,12 @@ export default function CustomerReviews() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/reviews?public=true')
-      .then((r) => r.json())
+    getCachedClientJson<{ success: boolean; data?: ReviewItem[] }>(
+      'public-reviews',
+      '/api/reviews?public=true',
+      60_000,
+      { cache: 'force-cache' }
+    )
       .then((d) => {
         if (d.success && Array.isArray(d.data)) {
           setReviews(d.data);
@@ -137,4 +142,3 @@ export default function CustomerReviews() {
     </section>
   );
 }
-

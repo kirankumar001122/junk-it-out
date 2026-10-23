@@ -11,6 +11,28 @@ export class RazorpayApiError extends Error {
   }
 }
 
+export class RazorpayRefundError extends RazorpayApiError {
+  constructor(
+    message: string,
+    public readonly uncertain: boolean,
+    statusCode: number = 502,
+  ) {
+    super(message, statusCode);
+    this.name = "RazorpayRefundError";
+  }
+}
+
+export class RazorpayOrderCreationError extends RazorpayApiError {
+  constructor(
+    message: string,
+    public readonly uncertain: boolean,
+    statusCode: number = 502,
+  ) {
+    super(message, statusCode);
+    this.name = "RazorpayOrderCreationError";
+  }
+}
+
 function requireCredentials() {
   // Resolve a key ID and secret from the same naming convention so a stale
   // variable from another deployment cannot silently create a mixed pair.
@@ -52,7 +74,7 @@ function isValidSignature(payload: string, signature: string, secret: string) {
   }
 }
 
-// Low-level HTTPS helper that bypasses Node's fetch issues
+// Low-level HTTPS helper that bypasses Node's fetch issues and works with tests
 function razorpayRequest(
   method: string,
   path: string,
@@ -76,7 +98,7 @@ function razorpayRequest(
           "Content-Length": Buffer.byteLength(payload),
           ...additionalHeaders,
         },
-        timeout: 5000,
+        timeout: 15000,
       },
       (res) => {
         let raw = "";
@@ -140,19 +162,43 @@ export async function createRazorpayOrder(input: {
     throw new Error("Razorpay order receipt is required.");
   }
 
-  const data = await razorpayRequest("POST", "/orders", {
-    amount: input.amountInPaise,
-    currency: "INR",
-    receipt: input.receipt,
-    notes: input.notes,
-  });
+  try {
+    const data = await razorpayRequest("POST", "/orders", {
+      amount: input.amountInPaise,
+      currency: "INR",
+      receipt: input.receipt.trim(),
+      notes: input.notes,
+    });
 
-  return {
-    id: data.id as string,
-    amount: data.amount as number,
-    currency: data.currency as string,
-    keyId,
-  };
+    return {
+      id: data.id as string,
+      amount: data.amount as number,
+      currency: data.currency as string,
+      keyId,
+    };
+  } catch (error: any) {
+    if (error instanceof RazorpayOrderCreationError) throw error;
+    if (
+      error instanceof RazorpayApiError &&
+      (error.statusCode === 401 || error.statusCode === 403)
+    ) {
+      throw new RazorpayOrderCreationError(
+        "Razorpay authentication failed.",
+        false,
+        error.statusCode,
+      );
+    }
+    if (error instanceof RazorpayApiError) {
+      throw new RazorpayOrderCreationError(error.message, false, error.statusCode);
+    }
+    const isUncertain =
+      error?.message && /abort|timeout|network|socket|econn/i.test(error.message);
+    throw new RazorpayOrderCreationError(
+      error?.message || "Razorpay order creation failed.",
+      Boolean(isUncertain),
+      502,
+    );
+  }
 }
 
 // ---------------------------------------------------------
@@ -164,10 +210,19 @@ export async function fetchRazorpayPayment(paymentId: string) {
     throw new Error("Razorpay payment ID is required.");
   }
 
-  return await razorpayRequest(
+  return (await razorpayRequest(
     "GET",
-    `/payments/${encodeURIComponent(paymentId)}`,
-  );
+    `/payments/${encodeURIComponent(paymentId.trim())}`,
+  )) as {
+    id: string;
+    order_id: string;
+    amount: number;
+    currency: string;
+    status: string;
+    method?: string;
+    refund_status?: string | null;
+    amount_refunded?: number;
+  };
 }
 
 // ---------------------------------------------------------
@@ -182,7 +237,7 @@ export async function fetchRazorpayOrderPayments(gatewayOrderId: string) {
   try {
     return await razorpayRequest(
       "GET",
-      `/orders/${encodeURIComponent(gatewayOrderId)}/payments`,
+      `/orders/${encodeURIComponent(gatewayOrderId.trim())}/payments`,
     );
   } catch {
     return { entity: "collection", count: 0, items: [] };
@@ -207,7 +262,7 @@ export function verifyRazorpayWebhookSignature(
   rawBody: string,
   signature: string,
 ) {
-  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+  const webhookSecret = (process.env.RAZORPAY_WEBHOOK_SECRET || "").trim();
   if (!webhookSecret || !signature || !rawBody) return false;
   return isValidSignature(rawBody, signature, webhookSecret);
 }
@@ -228,21 +283,50 @@ export async function refundRazorpayPayment(
   }
 
   const body: any = {};
-  if (amountInPaise !== undefined) body.amount = amountInPaise;
+  if (amountInPaise !== undefined) {
+    if (!Number.isInteger(amountInPaise) || amountInPaise <= 0) {
+      throw new Error("Invalid refund amount.");
+    }
+    body.amount = amountInPaise;
+  }
   if (notes) body.notes = notes;
 
-  return await razorpayRequest(
-    "POST",
-    `/payments/${encodeURIComponent(paymentId)}/refund`,
-    body,
-    idempotencyKey ? { "X-Refund-Idempotency": idempotencyKey } : {},
-  );
+  try {
+    const data = await razorpayRequest(
+      "POST",
+      `/payments/${encodeURIComponent(paymentId.trim())}/refund`,
+      body,
+      idempotencyKey ? { "X-Refund-Idempotency": idempotencyKey } : {},
+    );
+
+    return {
+      id: data.id as string,
+      entity: data.entity as string,
+      amount: data.amount as number,
+      currency: data.currency as string,
+      payment_id: data.payment_id as string,
+      status: data.status as string,
+      notes: data.notes,
+    };
+  } catch (error: any) {
+    if (error instanceof RazorpayRefundError) throw error;
+    if (error instanceof RazorpayApiError) {
+      throw new RazorpayRefundError(error.message, false, error.statusCode);
+    }
+    const isUncertain =
+      error?.message && /abort|timeout|network|socket|econn/i.test(error.message);
+    throw new RazorpayRefundError(
+      error?.message || "Razorpay refund failed.",
+      Boolean(isUncertain),
+      502,
+    );
+  }
 }
 
 export async function fetchRazorpayPaymentRefunds(paymentId: string) {
   if (!paymentId?.trim()) throw new Error("Razorpay payment ID is required.");
   return await razorpayRequest(
     "GET",
-    `/payments/${encodeURIComponent(paymentId)}/refunds?count=100&skip=0`,
+    `/payments/${encodeURIComponent(paymentId.trim())}/refunds?count=100&skip=0`,
   );
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, isAdminRole } from '@/lib/auth/middleware';
+import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 
 const BATCH_SIZE = 500;
 const MAX_EXPORT_LIMIT = 50000;
@@ -25,11 +25,18 @@ const csvCell = (value: unknown) => {
 
 export async function GET(req: NextRequest) {
   const authUser = await getAuthUser(req);
-  if (!authUser) {
-    return NextResponse.json({ success: false, message: 'Authentication required.' }, { status: 401 });
+  const authorizationStatus = getAdminAuthorizationStatus(authUser);
+  if (authorizationStatus === 401) {
+    return NextResponse.json(
+      { success: false, message: 'Authentication is required.' },
+      { status: 401 },
+    );
   }
-  if (!isAdminRole(authUser)) {
-    return NextResponse.json({ success: false, message: 'Admin access required.' }, { status: 403 });
+  if (authorizationStatus === 403) {
+    return NextResponse.json(
+      { success: false, message: 'Admin access required.' },
+      { status: 403 },
+    );
   }
 
   try {
@@ -127,7 +134,10 @@ export async function GET(req: NextRequest) {
         'Content-Disposition': `attachment; filename=junkitout_orders_report_${Date.now()}.csv`,
       },
     });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, message: 'An unexpected error occurred. Please try again.' }, { status: 500 });
+  } catch {
+    return NextResponse.json(
+      { success: false, message: 'Failed to generate the orders report.' },
+      { status: 500 },
+    );
   }
 }

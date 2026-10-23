@@ -1,42 +1,54 @@
-import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { getAuthUser } from "@/lib/auth/middleware";
+import { NextRequest, NextResponse } from 'next/server';
+import { db } from '@/lib/db';
+import { getAuthUser } from '@/lib/auth/middleware';
 import {
   createRazorpayOrder,
-  RazorpayApiError,
-} from "@/lib/payments/razorpay";
-import { reconcilePaymentForOrder } from "@/lib/payments/verification";
+  RazorpayOrderCreationError,
+} from '@/lib/payments/razorpay';
+
+const ACTIVE_PAYMENT_STATUSES = [
+  'CREATION_PENDING',
+  'INITIATED',
+  'AUTHORIZED',
+] as const;
 
 export async function POST(req: NextRequest) {
+  const startedAt = Date.now();
+  const logTiming = (phase: string) =>
+    console.info(`[api/payments/create] ${phase} elapsedMs=${Date.now() - startedAt}`);
+
   try {
+    logTiming('request start');
     const authUser = await getAuthUser(req);
-    if (!authUser || authUser.role !== "CUSTOMER" || !authUser.customerId) {
+    logTiming('authentication complete');
+
+    if (!authUser || authUser.role !== 'CUSTOMER' || !authUser.customerId) {
       return NextResponse.json(
         {
           success: false,
-          message: "Authenticated customer access is required.",
+          message: 'Authenticated customer access is required.',
         },
         { status: 401 },
       );
     }
 
     const { orderId } = await req.json();
-
     if (!orderId) {
       return NextResponse.json(
-        { success: false, message: "Order ID is required." },
+        { success: false, message: 'Order ID is required.' },
         { status: 400 },
       );
     }
 
     const order = await db.order.findUnique({
       where: { id: orderId },
-      include: { payments: { orderBy: { createdAt: "desc" } } },
+      include: { payments: { orderBy: { createdAt: 'desc' } } },
     });
+    logTiming('order lookup complete');
 
     if (!order) {
       return NextResponse.json(
-        { success: false, message: "Order not found" },
+        { success: false, message: 'Order not found' },
         { status: 404 },
       );
     }
@@ -45,48 +57,45 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          message: "You are not authorized to pay for this order.",
+          message: 'You are not authorized to pay for this order.',
         },
         { status: 403 },
       );
     }
 
-    if (order.financialDirection !== "CUSTOMER_PAYS") {
+    if (order.financialDirection !== 'CUSTOMER_PAYS') {
       return NextResponse.json(
         {
           success: false,
-          message: "This order does not require a customer payment.",
+          message: 'This order does not require a customer payment.',
         },
         { status: 400 },
       );
     }
 
     if (
-      order.status === "CANCELLED" ||
-      order.status === "SETTLEMENT_COMPLETED" ||
-      order.paymentStatus === "REFUNDED" ||
-      order.paymentStatus === "PARTIALLY_REFUNDED" ||
-      order.paymentStatus.startsWith("REFUND_")
+      order.status === 'CANCELLED' ||
+      order.status === 'SETTLEMENT_COMPLETED' ||
+      order.paymentStatus === 'REFUNDED' ||
+      order.paymentStatus === 'PARTIALLY_REFUNDED' ||
+      (order.paymentStatus && order.paymentStatus.startsWith('REFUND_'))
     ) {
       return NextResponse.json(
-        { success: false, message: "This order is no longer payable." },
+        { success: false, message: 'This order is no longer payable.' },
         { status: 400 },
       );
     }
 
     // 1. Order already paid check
-    if (
-      order.paymentStatus === "CAPTURED" ||
-      order.paymentStatus === "SUCCESS"
-    ) {
+    if (order.paymentStatus === 'CAPTURED' || order.paymentStatus === 'SUCCESS') {
       return NextResponse.json({
         success: true,
         alreadyPaid: true,
-        message: "This order has already been paid and verified.",
+        message: 'This order has already been paid and verified.',
         data: {
           orderId: order.id,
-          status: "CAPTURED",
-          paymentStatus: "CAPTURED",
+          status: 'CAPTURED',
+          paymentStatus: 'CAPTURED',
         },
       });
     }
@@ -94,111 +103,147 @@ export async function POST(req: NextRequest) {
     const amount = Number(order.finalAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
       return NextResponse.json(
-        { success: false, message: "This order has no valid payable amount." },
+        { success: false, message: 'This order has no valid payable amount.' },
         { status: 400 },
       );
     }
 
-    // 2. Safely attempt reconciliation if a previous payment attempt exists
-    try {
-      const candidatePayment = order.payments.find(
-        (payment) =>
-          payment.direction === "CUSTOMER_PAYS" &&
-          payment.status !== "FAILED" &&
-          payment.status !== "REFUNDED" &&
-          payment.status !== "PARTIALLY_REFUNDED" &&
-          !payment.status.startsWith("REFUND_"),
-      );
+    const attempt = await db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${order.id}, 0))`;
 
-      if (candidatePayment?.gatewayOrderId) {
-        const reconciliation = await reconcilePaymentForOrder(
-          order.id,
-          authUser,
-        );
-        if (
-          reconciliation?.status === "CAPTURED" ||
-          reconciliation?.status === "SUCCESS"
-        ) {
-          return NextResponse.json({
-            success: true,
-            alreadyPaid: true,
-            message:
-              "Payment was previously completed and has been reconciled successfully.",
-            data: {
-              orderId: order.id,
-              status: "CAPTURED",
-              paymentStatus: "CAPTURED",
-            },
-          });
-        }
+      const activePayment = await tx.payment.findFirst({
+        where: {
+          orderId: order.id,
+          direction: 'CUSTOMER_PAYS',
+          status: { in: [...ACTIVE_PAYMENT_STATUSES] },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (activePayment) {
+        return { kind: 'existing' as const, payment: activePayment };
       }
-    } catch (reconcileErr) {
-      console.warn("[RECONCILE SKIPPED]", {
-        errorType: reconcileErr instanceof Error ? reconcileErr.name : 'UnknownError',
+
+      const payment = await tx.payment.create({
+        data: {
+          orderId,
+          amount,
+          direction: 'CUSTOMER_PAYS',
+          gateway: 'RAZORPAY',
+          status: 'CREATION_PENDING',
+        },
+      });
+
+      await tx.order.update({
+        where: { id: order.id },
+        data: { paymentStatus: 'INITIATED' },
+      });
+
+      return { kind: 'new' as const, payment };
+    });
+
+    if (attempt.kind === 'existing') {
+      if (attempt.payment.status === 'CREATION_PENDING') {
+        return NextResponse.json(
+          {
+            success: false,
+            message: 'A payment attempt is already being prepared. Please retry shortly.',
+          },
+          { status: 409 },
+        );
+      }
+
+      if (!attempt.payment.gatewayOrderId) {
+        return NextResponse.json(
+          { success: false, message: 'The payment attempt requires reconciliation.' },
+          { status: 409 },
+        );
+      }
+
+      const key = process.env.RAZORPAY_KEY_ID || process.env.PAYMENT_KEY_ID;
+      if (!key) {
+        throw new Error('Razorpay credentials are not configured on the server.');
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          paymentId: attempt.payment.id,
+          gatewayOrderId: attempt.payment.gatewayOrderId,
+          amount: attempt.payment.amount,
+          currency: 'INR',
+          key,
+          name: 'Junk It Out Waste Pickup',
+          description: `Pickup service charge #${order.orderNumber}`,
+        },
       });
     }
 
-    // 3. Create a fresh Razorpay order for payment checkout
-    const razorpayOrder = await createRazorpayOrder({
-      amountInPaise: Math.round(amount * 100),
-      receipt: order.orderNumber,
-      notes: { orderId: order.id, orderNumber: order.orderNumber },
-    });
+    let razorpayOrder;
+    try {
+      razorpayOrder = await createRazorpayOrder({
+        amountInPaise: Math.round(amount * 100),
+        receipt: order.orderNumber,
+        notes: { orderId: order.id, orderNumber: order.orderNumber },
+      });
+      logTiming('razorpay order created');
+    } catch (error) {
+      if (!(error instanceof RazorpayOrderCreationError) || !error.uncertain) {
+        await db.payment.update({
+          where: { id: attempt.payment.id },
+          data: { status: 'FAILED' },
+        });
+      }
+      throw error;
+    }
 
-    const payment = await db.payment.create({
+    const payment = await db.payment.update({
+      where: { id: attempt.payment.id },
       data: {
-        orderId: order.id,
-        amount,
-        direction: "CUSTOMER_PAYS",
-        gateway: "RAZORPAY",
         gatewayOrderId: razorpayOrder.id,
-        status: "INITIATED",
+        status: 'INITIATED',
       },
     });
-
-    await db.order.update({
-      where: { id: order.id },
-      data: { paymentStatus: "INITIATED" },
-    });
+    logTiming('database persistence complete');
 
     return NextResponse.json({
       success: true,
       data: {
         paymentId: payment.id,
-        gatewayOrderId: razorpayOrder.id,
+        gatewayOrderId: payment.gatewayOrderId,
         amount: payment.amount,
-        currency: "INR",
+        currency: 'INR',
         key: razorpayOrder.keyId,
-        name: "Junk It Out Waste Pickup",
+        name: 'Junk It Out Waste Pickup',
         description: `Pickup service charge #${order.orderNumber}`,
       },
     });
   } catch (error: any) {
-    console.error("[PAYMENT CREATE ERROR]", { errorType: error instanceof Error ? error.name : 'UnknownError' });
-    if (error instanceof RazorpayApiError) {
-      const authenticationFailed =
-        error.statusCode === 401 ||
-        error.statusCode === 403 ||
-        /authentication failed|invalid .*key|invalid .*credential/i.test(
-          error.message,
-        );
-      return NextResponse.json(
-        {
-          success: false,
-          message: authenticationFailed
-            ? "Razorpay rejected the configured credentials. Set a matching active key ID and secret from the same Razorpay account and mode, then restart the server."
-            : "Razorpay could not create the payment order. Please try again shortly.",
-        },
-        { status: 502 },
-      );
-    }
+    console.error(
+      '[PAYMENT_CREATE_ERROR]',
+      error?.message || error,
+    );
+
+    const isRazorpayAuthError =
+      error instanceof RazorpayOrderCreationError &&
+      (error.message === 'Razorpay authentication failed.' ||
+        (error as any).statusCode === 401 ||
+        (error as any).statusCode === 403 ||
+        /authentication failed|invalid .*key|invalid .*credential/i.test(error.message));
+
+    const isUncertain =
+      error instanceof RazorpayOrderCreationError && error.uncertain;
 
     return NextResponse.json(
       {
         success: false,
-        message: 'Failed to initialize payment gateway.',
+        message: isUncertain
+          ? 'Payment provider response is uncertain. Please contact support before retrying.'
+          : isRazorpayAuthError
+            ? 'Unable to authenticate with the payment provider.'
+            : 'Unable to create Razorpay payment.',
       },
-      { status: 500 },
+      { status: isUncertain || isRazorpayAuthError ? 502 : 500 },
     );
   }
 }

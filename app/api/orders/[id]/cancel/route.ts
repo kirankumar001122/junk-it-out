@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, isAdminRole } from '@/lib/auth/middleware';
-import { isCustomerOrderOwner } from '@/lib/orderAccess';
+import { getAuthUser } from '@/lib/auth/middleware';
+import {
+  CANCELLABLE_ORDER_STATUSES,
+  canCancelOrder,
+} from '@/lib/orders/cancellation';
 import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
-import { errorResponse } from '@/lib/utils/apiResponse';
 import { refundAttemptId, refundEventId } from '@/lib/payments/refundWorkflow';
+import { createRefundRequestForCapturedPayment } from '@/lib/payments/refundRequests';
+
+class CancellationConflictError extends Error {}
 
 const CUSTOMER_CANCELLABLE_STATUSES = new Set([
   'BOOKING_RECEIVED',
@@ -22,117 +27,198 @@ export async function POST(
   try {
     const authUser = await getAuthUser(req);
     if (!authUser?.userId) {
-      return errorResponse('UNAUTHORIZED', 'Authentication is required to cancel an order.', 401);
-    }
-
-    const isAdmin = isAdminRole(authUser);
-    if (authUser.role !== 'CUSTOMER' && !isAdmin) {
-      return errorResponse('FORBIDDEN', 'You are not authorized to cancel orders.', 403);
+      return NextResponse.json(
+        { success: false, message: 'Authentication is required.' },
+        { status: 401 },
+      );
     }
 
     const { id } = await params;
+    const body = await req.json().catch(() => ({}));
+    const cancellationReason =
+      typeof body.cancellationReason === 'string'
+        ? body.cancellationReason.trim().slice(0, 500)
+        : '';
+    const reason = cancellationReason || 'Order cancellation requested.';
+
     const order = await db.order.findUnique({
       where: { id },
       include: { customer: { include: { user: true } } },
     });
 
     if (!order) {
-      return errorResponse('ORDER_NOT_FOUND', 'Order not found.', 404);
+      return NextResponse.json(
+        { success: false, message: 'Order not found.' },
+        { status: 404 },
+      );
     }
 
-    if (authUser.role === 'CUSTOMER' && !isCustomerOrderOwner(order, authUser)) {
-      return errorResponse('FORBIDDEN', 'You are not authorized to cancel this order.', 403);
+    const isAuthorized = canCancelOrder(
+      {
+        userId: authUser.userId,
+        role: authUser.role as any,
+        customerId: authUser.customerId,
+        agentId: authUser.agentId,
+      },
+      order,
+    );
+
+    if (
+      (authUser.role === 'ADMIN' || authUser.role === 'SUPER_ADMIN') &&
+      (order.status === 'CANCELLED' || !validateStatusTransition(order.status, 'CANCELLED'))
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: 'The order is no longer eligible for cancellation.',
+        },
+        { status: 409 },
+      );
+    }
+
+    if (!isAuthorized) {
+      // Do not disclose another customer's order to customer/agent callers.
+      const status =
+        authUser.role === 'ADMIN' || authUser.role === 'SUPER_ADMIN'
+          ? 403
+          : 404;
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            status === 404
+              ? 'Order not found.'
+              : 'You are not allowed to cancel this order.',
+        },
+        { status },
+      );
+    }
+
+    if (
+      authUser.role === 'CUSTOMER' &&
+      !CUSTOMER_CANCELLABLE_STATUSES.has(order.status)
+    ) {
+      return NextResponse.json(
+        { success: false, message: 'This order can no longer be cancelled.' },
+        { status: 409 },
+      );
     }
 
     if (
       order.status === 'CANCELLED' ||
-      !validateStatusTransition(order.status, 'CANCELLED') ||
-      (authUser.role === 'CUSTOMER' && !CUSTOMER_CANCELLABLE_STATUSES.has(order.status))
+      !validateStatusTransition(order.status, 'CANCELLED')
     ) {
-      return errorResponse(
-        'INVALID_ORDER_STATE',
-        'This order can no longer be cancelled.',
-        409,
+      return NextResponse.json(
+        {
+          success: false,
+          message: 'The order is no longer eligible for cancellation.',
+        },
+        { status: 409 },
       );
     }
 
-    const body = await req.json().catch(() => ({}));
-    const cancellationReason =
-      typeof body?.cancellationReason === 'string' && body.cancellationReason.trim()
-        ? body.cancellationReason.trim().slice(0, 500)
-        : 'Customer requested cancellation';
+    const isPaid = order.paymentStatus === 'CAPTURED';
 
-    const result = await db.$transaction(async (tx) => {
-      const isPaid = order.paymentStatus === 'CAPTURED';
+    const cancelledOrder = await db.$transaction(async (tx) => {
       const orderUpdateData: Record<string, unknown> = {
         status: 'CANCELLED',
-        cancellationReason,
+        cancellationReason: reason,
       };
       if (isPaid) {
         orderUpdateData.paymentStatus = 'REFUND_PENDING';
       }
 
-      // A conditional write makes the state check concurrency-safe. If another
-      // request changes the order first, no history or audit rows are written.
-      const changed = await tx.order.updateMany({
-        where: { id: order.id, status: order.status, agentId: order.agentId },
+      const claimed = await tx.order.updateMany({
+        where: {
+          id: order.id,
+          status: order.status,
+          ...(order.agentId !== undefined ? { agentId: order.agentId } : {}),
+        },
         data: orderUpdateData,
       });
 
-      if (changed.count !== 1) return null;
+      if (claimed.count !== 1) {
+        throw new CancellationConflictError(
+          'The order is no longer eligible for cancellation.',
+        );
+      }
 
-      if (isPaid && tx.payment) {
-        const payment = await tx.payment.findFirst({
-          where: { orderId: order.id, direction: 'CUSTOMER_PAYS', status: 'CAPTURED' },
-        });
+      if (isPaid) {
+        if ((tx as any).refundRequest) {
+          try {
+            await createRefundRequestForCapturedPayment(
+              tx,
+              id,
+              authUser.userId,
+            );
+          } catch (refundReqErr) {
+            console.warn(
+              '[CANCEL] createRefundRequestForCapturedPayment skipped:',
+              refundReqErr,
+            );
+          }
+        }
 
-        if (payment) {
-          await tx.payment.updateMany({
-            where: { id: payment.id, status: 'CAPTURED' },
-            data: { status: 'REFUND_PENDING' },
+        if (tx.payment) {
+          const payment = await tx.payment.findFirst({
+            where: {
+              orderId: order.id,
+              direction: 'CUSTOMER_PAYS',
+              status: 'CAPTURED',
+            },
           });
 
-          if (tx.refundAttempt) {
-            const attemptId = refundAttemptId(payment.id);
-            await tx.refundAttempt.upsert({
-              where: { id: attemptId },
-              create: {
-                id: attemptId,
-                orderId: order.id,
-                paymentId: payment.id,
-                amount: payment.amount,
-                status: 'RECONCILIATION_REQUIRED',
-                failureReason: `Order cancelled by customer: ${cancellationReason}`,
-              },
-              update: {
-                status: 'RECONCILIATION_REQUIRED',
-                failureReason: `Order cancelled by customer: ${cancellationReason}`,
-              },
+          if (payment) {
+            await tx.payment.updateMany({
+              where: { id: payment.id, status: 'CAPTURED' },
+              data: { status: 'REFUND_PENDING' },
             });
 
-            if (tx.refundAttemptEvent) {
-              await tx.refundAttemptEvent.create({
-                data: {
-                  id: refundEventId(attemptId, `order_cancelled_${Date.now()}`),
-                  refundAttemptId: attemptId,
-                  eventType: 'ORDER_CANCELLED',
-                  status: 'REFUND_PENDING',
-                  details: {
-                    source: 'customer_order_cancellation',
-                    cancellationReason,
-                    paymentId: payment.id,
-                    amount: payment.amount,
-                  },
+            if ((tx as any).refundAttempt) {
+              const attemptId = refundAttemptId(payment.id);
+              await (tx as any).refundAttempt.upsert({
+                where: { id: attemptId },
+                create: {
+                  id: attemptId,
+                  orderId: order.id,
+                  paymentId: payment.id,
+                  amount: payment.amount,
+                  status: 'RECONCILIATION_REQUIRED',
+                  failureReason: `Order cancelled by customer: ${reason}`,
+                },
+                update: {
+                  status: 'RECONCILIATION_REQUIRED',
+                  failureReason: `Order cancelled by customer: ${reason}`,
                 },
               });
+
+              if ((tx as any).refundAttemptEvent) {
+                await (tx as any).refundAttemptEvent.create({
+                  data: {
+                    id: refundEventId(
+                      attemptId,
+                      `order_cancelled_${Date.now()}`,
+                    ),
+                    refundAttemptId: attemptId,
+                    eventType: 'ORDER_CANCELLED',
+                    status: 'REFUND_PENDING',
+                    details: {
+                      source: 'customer_order_cancellation',
+                      cancellationReason: reason,
+                      paymentId: payment.id,
+                      amount: payment.amount,
+                    },
+                  },
+                });
+              }
             }
           }
         }
       }
 
       const historyNotes = isPaid
-        ? `Cancelled. Reason: ${cancellationReason}. Captured payment pending admin refund review.`
-        : `Cancelled. Reason: ${cancellationReason}`;
+        ? `Cancelled by ${authUser.role.toLowerCase()}. Reason: ${reason}. Captured payment pending refund review.`
+        : `Cancelled by ${authUser.role.toLowerCase()}. Reason: ${reason}`;
 
       await tx.orderStatusHistory.create({
         data: {
@@ -144,26 +230,26 @@ export async function POST(
         },
       });
 
-      await tx.auditLog.create({
-        data: {
-          userId: authUser.userId,
-          action: 'ORDER_CANCELLED',
-          oldValue: `Order ${order.orderNumber} (${order.status})`,
-          newValue: isPaid
-            ? `CANCELLED: ${cancellationReason} [Captured payment pending refund review]`
-            : `CANCELLED: ${cancellationReason}`,
-        },
-      });
-
       if (order.agentId) {
-        const otherActiveOrder = await tx.order.findFirst({
-          where: {
-            agentId: order.agentId,
-            id: { not: order.id },
-            status: { in: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WASTE_VERIFICATION', 'WEIGHING'] },
-          },
-          select: { id: true },
-        });
+        const otherActiveOrder = tx.order.findFirst
+          ? await tx.order.findFirst({
+              where: {
+                agentId: order.agentId,
+                id: { not: order.id },
+                status: {
+                  in: [
+                    'AGENT_ASSIGNED',
+                    'AGENT_ACCEPTED',
+                    'AGENT_ON_WAY',
+                    'AGENT_ARRIVED',
+                    'WASTE_VERIFICATION',
+                    'WEIGHING',
+                  ],
+                },
+              },
+              select: { id: true },
+            })
+          : null;
         if (!otherActiveOrder) {
           await tx.agent.update({
             where: { id: order.agentId },
@@ -172,30 +258,57 @@ export async function POST(
         }
       }
 
+      await tx.auditLog.create({
+        data: {
+          userId: authUser.userId,
+          userName:
+            (authUser as any).name || (authUser as any).phone || undefined,
+          action: 'ORDER_CANCELLED',
+          oldValue: `Order ${order.orderNumber} (${order.status})`,
+          newValue: isPaid
+            ? `CANCELLED: ${reason} [Captured payment pending refund review]`
+            : `CANCELLED: ${reason}`,
+        },
+      });
+
       return tx.order.findUnique({
         where: { id: order.id },
         include: { customer: { include: { user: true } } },
       });
     });
 
-    if (!result) {
-      return errorResponse('ORDER_STATE_CONFLICT', 'The order state changed; refresh and try again.', 409);
+    if (!cancelledOrder) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: 'The order state changed; refresh and try again.',
+        },
+        { status: 409 },
+      );
     }
 
-    broadcaster.broadcast('ORDER_UPDATED', result);
-
-    const hasCapturedPayment = order.paymentStatus === 'CAPTURED';
+    broadcaster.broadcast('ORDER_UPDATED', cancelledOrder);
 
     return NextResponse.json({
       success: true,
-      message: hasCapturedPayment
+      message: isPaid
         ? 'Order cancelled successfully. Captured payment is flagged for admin refund review.'
-        : 'Order cancelled successfully',
-      data: result,
-      refundReviewRequired: hasCapturedPayment,
+        : 'Order cancelled successfully.',
+      data: cancelledOrder,
+      refundReviewRequired: isPaid,
     });
   } catch (error) {
-    console.error('Cancel order error:');
-    return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to cancel order.', 500);
+    if (error instanceof CancellationConflictError) {
+      return NextResponse.json(
+        { success: false, message: error.message },
+        { status: 409 },
+      );
+    }
+
+    console.error('Order cancellation error:', error);
+    return NextResponse.json(
+      { success: false, message: 'Failed to cancel order.' },
+      { status: 500 },
+    );
   }
 }

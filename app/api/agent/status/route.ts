@@ -7,8 +7,12 @@ import { reconcileUndispatchedPaidOrders } from '@/lib/payments/dispatchRecovery
 const ALLOWED_STATUSES = ['AVAILABLE', 'OFFLINE'];
 
 export async function PATCH(req: NextRequest) {
+  const startedAt = Date.now();
+  const logTiming = (phase: string) =>
+    console.info(`[api/agent/status] ${phase} elapsedMs=${Date.now() - startedAt}`);
   try {
     const authUser = await getAuthUser(req);
+    logTiming('authentication complete');
     if (!authUser) {
       return errorResponse('UNAUTHORIZED', 'Authentication required.', 401);
     }
@@ -55,6 +59,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const updatedAgent = updateResult.updatedAgent;
+    logTiming('agent update complete');
 
     if (targetStatus === 'AVAILABLE') {
       try {

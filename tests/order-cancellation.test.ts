@@ -163,7 +163,7 @@ async function run() {
 
     await reset();
     const otherCustomer = await invoke(makeRequest({ userId: 'user-2', customerId: 'customer-2' }));
-    assert.equal(otherCustomer.status, 403);
+    assert.equal(otherCustomer.status, 404, 'unauthorized customer returns 404 for IDOR protection');
     assert.equal(state.status, 'BOOKING_RECEIVED');
 
     await reset();
