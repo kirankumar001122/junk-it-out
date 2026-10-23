@@ -1,5 +1,25 @@
 import { createHmac, timingSafeEqual } from 'crypto';
 
+export class RazorpayRefundError extends Error {
+  constructor(
+    message: string,
+    public readonly uncertain: boolean,
+  ) {
+    super(message);
+    this.name = 'RazorpayRefundError';
+  }
+}
+
+export class RazorpayOrderCreationError extends Error {
+  constructor(
+    message: string,
+    public readonly uncertain: boolean,
+  ) {
+    super(message);
+    this.name = 'RazorpayOrderCreationError';
+  }
+}
+
 function requireCredentials() {
   const keyId = (
     process.env.RAZORPAY_KEY_ID ||
@@ -74,25 +94,33 @@ export async function createRazorpayOrder(input: {
     throw new Error('Razorpay order receipt is required.');
   }
 
-  const response = await fetch(
-    'https://api.razorpay.com/v1/orders',
-    {
-      method: 'POST',
-      signal: AbortSignal.timeout(15_000),
-      headers: {
-        Authorization: `Basic ${Buffer.from(
-          `${keyId}:${secret}`
-        ).toString('base64')}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        amount: input.amountInPaise,
-        currency: 'INR',
-        receipt: input.receipt.trim(),
-        notes: input.notes,
-      }),
-    }
-  );
+  let response: Response;
+  try {
+    response = await fetch(
+      'https://api.razorpay.com/v1/orders',
+      {
+        method: 'POST',
+        signal: AbortSignal.timeout(15_000),
+        headers: {
+          Authorization: `Basic ${Buffer.from(
+            `${keyId}:${secret}`
+          ).toString('base64')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          amount: input.amountInPaise,
+          currency: 'INR',
+          receipt: input.receipt.trim(),
+          notes: input.notes,
+        }),
+      }
+    );
+  } catch (error) {
+    throw new RazorpayOrderCreationError(
+      error instanceof Error ? error.message : 'Razorpay order request failed.',
+      true,
+    );
+  }
 
   const data = await response
     .json()
@@ -111,14 +139,16 @@ export async function createRazorpayOrder(input: {
     });
 
     if (response.status === 401) {
-      throw new Error(
-        'Razorpay authentication failed. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET to a matching active pair from the same Razorpay account and mode, then restart the server.'
+      throw new RazorpayOrderCreationError(
+        'Razorpay authentication failed.',
+        false,
       );
     }
 
-    throw new Error(
+    throw new RazorpayOrderCreationError(
       data?.error?.description ||
-        `Razorpay order creation failed (${response.status}).`
+        `Razorpay order creation failed (${response.status}).`,
+      false,
     );
   }
 
@@ -291,21 +321,30 @@ export async function refundRazorpayPayment(
     body.notes = notes;
   }
 
-  const response = await fetch(
-    `https://api.razorpay.com/v1/payments/${encodeURIComponent(
-      paymentId.trim()
-    )}/refund`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${Buffer.from(
-          `${keyId}:${secret}`
-        ).toString('base64')}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    }
-  );
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://api.razorpay.com/v1/payments/${encodeURIComponent(
+        paymentId.trim()
+      )}/refund`,
+      {
+        method: 'POST',
+        signal: AbortSignal.timeout(15_000),
+        headers: {
+          Authorization: `Basic ${Buffer.from(
+            `${keyId}:${secret}`
+          ).toString('base64')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      }
+    );
+  } catch (error) {
+    throw new RazorpayRefundError(
+      error instanceof Error ? error.message : 'Razorpay refund request failed.',
+      true,
+    );
+  }
 
   const data = await response
     .json()
@@ -318,9 +357,10 @@ export async function refundRazorpayPayment(
       description: data?.error?.description,
     });
 
-    throw new Error(
+    throw new RazorpayRefundError(
       data?.error?.description ||
-        `Razorpay refund failed (${response.status}).`
+        `Razorpay refund failed (${response.status}).`,
+      false,
     );
   }
 
