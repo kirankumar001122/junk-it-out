@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser } from '@/lib/auth/middleware';
+import { getAuthUser, isAdminRole } from '@/lib/auth/middleware';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 
 export async function GET(req: NextRequest) {
@@ -59,6 +59,13 @@ export async function GET(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
+    if (!authUser) {
+      return errorResponse('UNAUTHORIZED', 'Authentication required.', 401);
+    }
+    if (!isAdminRole(authUser)) {
+      return errorResponse('FORBIDDEN', 'Admin access required.', 403);
+    }
+
     const body = await req.json().catch(() => ({}));
     const { id, pricePerKg, name, description, type, active } = body;
 
@@ -105,6 +112,13 @@ export async function PUT(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
+    if (!authUser) {
+      return errorResponse('UNAUTHORIZED', 'Authentication required.', 401);
+    }
+    if (!isAdminRole(authUser)) {
+      return errorResponse('FORBIDDEN', 'Admin access required.', 403);
+    }
+
     const body = await req.json().catch(() => ({}));
     const { name, description, type = 'RECYCLABLE_BUY', pricePerKg } = body;
 

@@ -1,8 +1,18 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { getAuthUser, isAdminRole } from '@/lib/auth/middleware';
+import { errorResponse } from '@/lib/utils/apiResponse';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const authUser = await getAuthUser(req);
+    if (!authUser) {
+      return errorResponse('UNAUTHORIZED', 'Authentication required.', 401);
+    }
+    if (!isAdminRole(authUser)) {
+      return errorResponse('FORBIDDEN', 'Admin access required.', 403);
+    }
+
     const orders = await db.order.findMany({
       include: {
         customer: { include: { user: true } },

@@ -1,11 +1,20 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { broadcaster } from '@/lib/realtime';
+import { getAuthUser, isAdminRole } from '@/lib/auth/middleware';
+import { isCustomerOrderOwner } from '@/lib/orderAccess';
+import { validateStatusTransition } from '@/lib/validations/schemas';
+import { errorResponse } from '@/lib/utils/apiResponse';
 
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const authUser = await getAuthUser(req);
+    if (!authUser) {
+      return errorResponse('UNAUTHORIZED', 'Authentication required.', 401);
+    }
+
     const { id } = await params;
-    const { cancellationReason, userId } = await req.json();
+    const { cancellationReason, userId } = await req.json().catch(() => ({}));
 
     const order = await db.order.findUnique({
       where: { id },
@@ -14,6 +23,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     if (!order) {
       return NextResponse.json({ success: false, message: 'Order not found' }, { status: 404 });
+    }
+
+    const isAdmin = isAdminRole(authUser);
+    const isOwner = authUser.role === 'CUSTOMER' && isCustomerOrderOwner(order, authUser);
+
+    if (!isAdmin && !isOwner) {
+      return errorResponse('FORBIDDEN', 'You are not authorized to cancel this order.', 403);
+    }
+
+    if (order.status === 'CANCELLED' || !validateStatusTransition(order.status, 'CANCELLED')) {
+      return errorResponse('INVALID_STATUS_TRANSITION', `Cannot cancel order with status ${order.status}.`, 400);
     }
 
     const updatedOrder = await db.order.update({
