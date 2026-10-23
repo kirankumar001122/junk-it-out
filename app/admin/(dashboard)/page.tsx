@@ -204,13 +204,17 @@ export default function AdminDashboardPage() {
 
           <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-slate-500 uppercase">Revenue / Payouts</span>
+              <span className="text-xs font-bold text-slate-500 uppercase">Revenue & Payouts</span>
               <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
                 <CreditCard className="w-4 h-4" />
               </div>
             </div>
-            <span className="text-3xl font-black text-slate-900">₹{stats?.totalCustomerPayouts || 0}</span>
-            <p className="text-xs text-slate-500 mt-2">Recyclable Customer Settlements</p>
+            <span className="text-3xl font-black text-slate-900">₹{stats?.totalRevenue || 0}</span>
+            <div className="flex items-center gap-2 mt-2 text-xs">
+              <span className="text-emerald-700 font-bold">₹{stats?.paidCustomerPayouts ?? stats?.totalCustomerPayouts ?? 0} Paid</span>
+              <span className="text-slate-300">|</span>
+              <span className="text-amber-700 font-bold">₹{stats?.approvedCustomerPayouts || 0} Approved</span>
+            </div>
           </div>
 
           <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">

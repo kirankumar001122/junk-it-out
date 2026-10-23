@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import {
   fetchRazorpayPayment,
+  fetchRazorpayOrderPayments,
   verifyRazorpayPaymentSignature,
 } from './razorpay';
 
@@ -9,6 +10,7 @@ import {
 } from '@/lib/services/agentService';
 
 import { broadcaster } from '@/lib/realtime';
+import { transitionOrder } from '@/lib/services/orderLifecycle';
 
 export class PaymentVerificationError extends Error {
   statusCode: number;
@@ -19,6 +21,35 @@ export class PaymentVerificationError extends Error {
   ) {
     super(message);
     this.statusCode = statusCode;
+  }
+}
+
+export type PaymentReconciliationActor = {
+  role: string;
+  customerId?: string | null;
+};
+
+export function isCustomerReconciliationActor(
+  actor: PaymentReconciliationActor,
+): actor is PaymentReconciliationActor & { role: 'CUSTOMER'; customerId: string } {
+  return actor.role === 'CUSTOMER' && Boolean(actor.customerId);
+}
+
+export function assertCanReconcileOrder(
+  order: { customerId: string },
+  actor: PaymentReconciliationActor,
+) {
+  if (!isCustomerReconciliationActor(actor)) {
+    throw new PaymentVerificationError(
+      'Authenticated customer access is required.',
+      403,
+    );
+  }
+  if (order.customerId !== actor.customerId) {
+    throw new PaymentVerificationError(
+      'You are not authorized to reconcile payment for this order.',
+      403,
+    );
   }
 }
 
@@ -36,7 +67,7 @@ export class PaymentVerificationError extends Error {
 // Therefore unpaid orders can never be sent to agents.
 // =========================================================
 
-async function dispatchPaidOrderToAgents(
+export async function dispatchPaidOrderToAgents(
   orderId: string
 ) {
   try {
@@ -51,10 +82,19 @@ async function dispatchPaidOrderToAgents(
 
       include: {
         address: true,
-
+        customer: {
+          include: {
+            user: true,
+          },
+        },
+        agent: {
+          include: {
+            user: true,
+          },
+        },
         items: {
-          select: {
-            estimatedWeight: true,
+          include: {
+            category: true,
           },
         },
       },
@@ -74,10 +114,6 @@ async function dispatchPaidOrderToAgents(
 
     // -------------------------------------------------------
     // 3. FINAL PAYMENT SAFETY CHECK
-    // -------------------------------------------------------
-    //
-    // Even if this function is accidentally called from
-    // somewhere else, an unpaid order will NOT be dispatched.
     // -------------------------------------------------------
 
     if (
@@ -106,24 +142,72 @@ async function dispatchPaidOrderToAgents(
     }
 
     // -------------------------------------------------------
-    // 5. GET SERVICE AREA
+    // 5. CASE A: ORDER IS ALREADY ASSIGNED TO AN AGENT
+    // -------------------------------------------------------
+
+    if (order.agentId) {
+      if (['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED'].includes(order.status)) {
+        const transition = await transitionOrder<any>({
+          orderId: order.id,
+          expectedStatus: order.status,
+          expectedAgentId: order.agentId,
+          newStatus: 'AGENT_ASSIGNED',
+          additionalWhere: { paymentStatus: 'CAPTURED' },
+          notes: 'Payment verified via Razorpay. Order confirmed and transitioned to AGENT_ASSIGNED.',
+          include: {
+            agent: { include: { user: true } },
+            customer: { include: { user: true } },
+            address: true,
+            items: { include: { category: true } },
+          },
+          afterHistory: async (tx) => {
+            await tx.agent.update({
+              where: { id: order.agentId! },
+              data: { status: 'ASSIGNED' },
+            });
+          },
+        });
+        if (transition.changed) {
+          const updated = transition.order;
+          broadcaster.broadcast('ORDER_UPDATED', updated);
+          broadcaster.broadcast('ORDER_ASSIGNED', {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            agentId: order.agentId,
+            agentName: order.agent?.user?.name,
+          });
+          broadcaster.broadcast('AGENT_ASSIGNED', {
+            type: 'AGENT_ASSIGNED',
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            customerId: order.customerId,
+            userId: order.customer?.userId,
+            agentId: order.agentId,
+            agentName: order.agent?.user?.name,
+            vehicleNumber: order.agent?.vehicleNumber,
+            status: 'AGENT_ASSIGNED',
+            assignedAt: new Date().toISOString(),
+          });
+        }
+      }
+      return;
+    }
+
+    if (!['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'].includes(order.status)) {
+      return;
+    }
+
+    // -------------------------------------------------------
+    // 6. GET SERVICE AREA & FIND ELIGIBLE AGENTS
     // -------------------------------------------------------
 
     const targetServiceArea =
-      order.address.area;
-
-    // -------------------------------------------------------
-    // 6. FIND ELIGIBLE AGENTS
-    // -------------------------------------------------------
+      order.address?.area || 'Bengaluru';
 
     const eligibleAgents =
       await findEligibleAgentsForServiceArea(
         targetServiceArea
       );
-
-    // -------------------------------------------------------
-    // 7. ONLY AVAILABLE AGENTS
-    // -------------------------------------------------------
 
     const availableEligibleAgents =
       (eligibleAgents || []).filter(
@@ -136,31 +220,108 @@ async function dispatchPaidOrderToAgents(
     );
 
     // -------------------------------------------------------
-    // 8. NO AVAILABLE AGENTS
+    // 7. CASE B: AVAILABLE ELIGIBLE AGENTS FOUND -> AUTO-ASSIGN
     // -------------------------------------------------------
 
-    if (
-      availableEligibleAgents.length === 0
-    ) {
-      console.log(
-        `[DISPATCH] No available eligible agents for paid order #${order.orderNumber}.`
+    if (availableEligibleAgents.length > 0) {
+      // Pick best agent (highest rating or first available)
+      const sortedAgents = [...availableEligibleAgents].sort(
+        (a: any, b: any) => (Number(b.rating) || 0) - (Number(a.rating) || 0)
       );
+      const selectedAgent = sortedAgents[0];
 
+      const freshOrder = await db.$transaction(async (tx) => {
+        const claimedOrder = await tx.order.updateMany({
+          where: {
+            id: order.id,
+            agentId: null,
+            status: order.status,
+            paymentStatus: 'CAPTURED',
+          },
+          data: {
+            agentId: selectedAgent.id,
+            status: 'AGENT_ASSIGNED',
+          },
+        });
+        if (claimedOrder.count !== 1) return null;
+
+        const claimedAgent = await tx.agent.updateMany({
+          where: { id: selectedAgent.id, status: 'AVAILABLE' },
+          data: { status: 'ASSIGNED' },
+        });
+        if (claimedAgent.count !== 1) throw new Error('Selected agent is no longer available.');
+
+        await tx.orderStatusHistory.create({
+          data: {
+            orderId: order.id,
+            oldStatus: order.status,
+            newStatus: 'AGENT_ASSIGNED',
+            notes: `Payment verified via Razorpay. Order automatically assigned to field agent ${selectedAgent.user?.name || selectedAgent.id}.`,
+          },
+        });
+
+        if (order.customer?.user) {
+          await tx.notification.create({
+            data: {
+              userId: order.customer.userId,
+              orderId: order.id,
+              type: 'WHATSAPP',
+              recipient: order.customer.user.phone,
+              content: `Payment verified! Agent ${selectedAgent.user?.name || 'Partner'} (${selectedAgent.vehicleNumber}) has been assigned to your Junk It Out pickup #${order.orderNumber}.`,
+              status: 'SENT',
+            },
+          });
+        }
+
+        return tx.order.findUnique({
+          where: { id: order.id },
+          include: {
+            agent: { include: { user: true } },
+            customer: { include: { user: true } },
+            address: true,
+            items: { include: { category: true } },
+          },
+        });
+      });
+
+      if (freshOrder) {
+        broadcaster.broadcast('ORDER_UPDATED', freshOrder);
+        broadcaster.broadcast('ORDER_ASSIGNED', {
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          agentId: selectedAgent.id,
+          agentName: selectedAgent.user?.name,
+        });
+        broadcaster.broadcast('AGENT_ASSIGNED', {
+          type: 'AGENT_ASSIGNED',
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          customerId: order.customerId,
+          userId: order.customer?.userId,
+          agentId: selectedAgent.id,
+          agentName: selectedAgent.user?.name,
+          vehicleNumber: selectedAgent.vehicleNumber,
+          status: 'AGENT_ASSIGNED',
+          assignedAt: new Date().toISOString(),
+        });
+        console.log(
+          `[DISPATCH] Paid order #${order.orderNumber} successfully auto-assigned to agent ${selectedAgent.id}.`
+        );
+        return;
+      }
+
+      // Another dispatcher changed the order while this instance selected an
+      // agent. Do not broadcast the stale order as available for pickup.
       return;
     }
 
     // -------------------------------------------------------
-    // 9. GET AGENT IDS
+    // 8. CASE C: NO IMMEDIATELY AVAILABLE AGENT -> BROADCAST
     // -------------------------------------------------------
 
-    const targetAgentIds =
-      availableEligibleAgents.map(
-        (agent: any) => agent.id
-      );
-
-    // -------------------------------------------------------
-    // 10. CALCULATE TOTAL ESTIMATED WEIGHT
-    // -------------------------------------------------------
+    const targetAgentIds = (eligibleAgents || []).map(
+      (agent: any) => agent.id
+    );
 
     const estimatedTotalWeight =
       order.items.reduce(
@@ -175,36 +336,16 @@ async function dispatchPaidOrderToAgents(
         0
       );
 
-    // -------------------------------------------------------
-    // 11. CREATE REALTIME NOTIFICATION
-    // -------------------------------------------------------
-
     const notificationPayload = {
       type: 'NEW_PICKUP_AVAILABLE',
-
       targetAgentIds,
-
       orderId: order.id,
-
-      orderNumber:
-        order.orderNumber,
-
-      serviceArea:
-        targetServiceArea,
-
-      estimatedQuantity:
-        `${estimatedTotalWeight.toFixed(1)} kg`,
-
-      itemsSummary:
-        `${order.items.length} category item(s)`,
-
-      createdAt:
-        order.createdAt.toISOString(),
+      orderNumber: order.orderNumber,
+      serviceArea: targetServiceArea,
+      estimatedQuantity: `${estimatedTotalWeight.toFixed(1)} kg`,
+      itemsSummary: `${order.items.length} category item(s)`,
+      createdAt: order.createdAt.toISOString(),
     };
-
-    // -------------------------------------------------------
-    // 12. SEND TO AGENT PORTAL
-    // -------------------------------------------------------
 
     broadcaster.broadcast(
       'NEW_PICKUP_AVAILABLE',
@@ -212,19 +353,13 @@ async function dispatchPaidOrderToAgents(
     );
 
     console.log(
-      `[DISPATCH] NEW_PICKUP_AVAILABLE sent for paid order #${order.orderNumber}.`
+      `[DISPATCH] No available agent immediately free. NEW_PICKUP_AVAILABLE broadcasted for paid order #${order.orderNumber}.`
     );
   } catch (error) {
-    // -------------------------------------------------------
-    // IMPORTANT:
-    // Do NOT undo a successful payment just because the
-    // realtime agent notification failed.
-    // -------------------------------------------------------
-
-    console.error(
-      `[DISPATCH ERROR] Failed to notify agents for paid order ${orderId}:`,
-      error
-    );
+    console.error(`[DISPATCH ERROR] Failed to dispatch paid order ${orderId}.`, {
+      errorType: error instanceof Error ? error.name : 'UnknownError',
+    });
+    throw error;
   }
 }
 
@@ -320,15 +455,30 @@ export async function verifyAndRecordPayment(
     );
   }
 
-  // -------------------------------------------------------
-  // 5. ALREADY CAPTURED
-  // -------------------------------------------------------
+  // 5. REFUND STATUS CHECK
+  if (
+    payment.status === 'REFUNDED' ||
+    payment.status === 'PARTIALLY_REFUNDED' ||
+    payment.status.startsWith('REFUND_') ||
+    payment.order.paymentStatus === 'REFUNDED' ||
+    payment.order.paymentStatus === 'PARTIALLY_REFUNDED' ||
+    payment.order.paymentStatus.startsWith('REFUND_')
+  ) {
+    throw new PaymentVerificationError(
+      'This payment has already been refunded or is undergoing refund reconciliation.',
+      409
+    );
+  }
 
+  // 6. ALREADY CAPTURED
   if (
     payment.status === 'CAPTURED' &&
     payment.paymentId ===
       input.razorpayPaymentId
   ) {
+    // Ensure dispatch completes if order is still awaiting assignment
+    await dispatchPaidOrderToAgents(payment.orderId);
+
     return {
       id: payment.id,
 
@@ -389,6 +539,22 @@ export async function verifyAndRecordPayment(
     throw new PaymentVerificationError(
       'Razorpay payment does not match the expected order amount.',
       400
+    );
+  }
+
+  // -------------------------------------------------------
+  // 8B. VERIFY PAYMENT IS NOT REFUNDED AT PROVIDER
+  // -------------------------------------------------------
+
+  if (
+    providerPayment.refund_status === 'full' ||
+    (typeof providerPayment.amount_refunded === 'number' &&
+      providerPayment.amount_refunded > 0 &&
+      providerPayment.amount_refunded >= providerPayment.amount)
+  ) {
+    throw new PaymentVerificationError(
+      'Razorpay reports that this payment has already been refunded.',
+      409
     );
   }
 
@@ -516,5 +682,214 @@ export async function verifyAndRecordPayment(
 
     status:
       result.payment.status,
+  };
+}
+
+// =========================================================
+// RECONCILE PAYMENT FOR ORDER
+// =========================================================
+
+export async function reconcilePaymentForOrder(
+  orderId: string,
+  actor: PaymentReconciliationActor,
+) {
+  if (!isCustomerReconciliationActor(actor)) {
+    throw new PaymentVerificationError(
+      'Authenticated customer access is required.',
+      403,
+    );
+  }
+
+  const order = await db.order.findUnique({
+    where: { id: orderId },
+    include: {
+      payments: {
+        orderBy: { createdAt: 'desc' },
+      },
+    },
+  });
+
+  if (!order) {
+    throw new PaymentVerificationError('Order not found.', 404);
+  }
+
+  assertCanReconcileOrder(order, actor);
+
+  if (order.financialDirection !== 'CUSTOMER_PAYS') {
+    return {
+      orderId: order.id,
+      status: 'NOT_REQUIRED',
+      paymentStatus: order.paymentStatus,
+      message: 'This order does not require customer payment.',
+    };
+  }
+
+  if (
+    order.paymentStatus === 'REFUNDED' ||
+    order.paymentStatus === 'PARTIALLY_REFUNDED' ||
+    order.paymentStatus.startsWith('REFUND_')
+  ) {
+    return {
+      orderId: order.id,
+      status: order.paymentStatus,
+      paymentStatus: order.paymentStatus,
+      reconciled: false,
+      message: 'This order payment has already been refunded or is in refund reconciliation.',
+    };
+  }
+
+  if (order.status === 'CANCELLED') {
+    return {
+      orderId: order.id,
+      status: 'CANCELLED',
+      paymentStatus: order.paymentStatus,
+      reconciled: false,
+      message: 'This order is cancelled and cannot be reconciled for payment.',
+    };
+  }
+
+  if (order.paymentStatus === 'CAPTURED') {
+    // If order is paid but not yet assigned, complete dispatch
+    await dispatchPaidOrderToAgents(order.id);
+
+    return {
+      orderId: order.id,
+      status: 'CAPTURED',
+      alreadyPaid: true,
+      paymentStatus: 'CAPTURED',
+      message: 'Payment is already confirmed.',
+    };
+  }
+
+  const candidatePayment = order.payments.find(
+    (p) =>
+      p.direction === 'CUSTOMER_PAYS' &&
+      p.status !== 'FAILED' &&
+      p.status !== 'REFUNDED' &&
+      p.status !== 'PARTIALLY_REFUNDED' &&
+      !p.status.startsWith('REFUND_')
+  );
+
+  if (!candidatePayment) {
+    return {
+      orderId: order.id,
+      status: 'PENDING',
+      paymentStatus: order.paymentStatus,
+      candidatePayment: null,
+    };
+  }
+
+  // 1. If we have a provider paymentId, check its status on Razorpay
+  if (candidatePayment.paymentId) {
+    try {
+      const providerPayment = await fetchRazorpayPayment(
+        candidatePayment.paymentId
+      );
+
+      const isRefundedAtProvider =
+        providerPayment.refund_status === 'full' ||
+        providerPayment.refund_status === 'partial' ||
+        (typeof providerPayment.amount_refunded === 'number' &&
+          providerPayment.amount_refunded > 0);
+
+      if (isRefundedAtProvider) {
+        const providerStatus = providerPayment.refund_status === 'full' ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
+        return {
+          orderId: order.id,
+          paymentId: candidatePayment.id,
+          gatewayOrderId: candidatePayment.gatewayOrderId,
+          status: providerStatus,
+          paymentStatus: order.paymentStatus,
+          reconciled: false,
+          message: 'Provider reports that this payment has been refunded or partially refunded.',
+        };
+      }
+
+      if (providerPayment.status === 'captured') {
+        await db.$transaction([
+          db.payment.update({
+            where: { id: candidatePayment.id },
+            data: { status: 'CAPTURED' },
+          }),
+          db.order.update({
+            where: { id: order.id },
+            data: { paymentStatus: 'CAPTURED' },
+          }),
+        ]);
+
+        await dispatchPaidOrderToAgents(order.id);
+
+        return {
+          orderId: order.id,
+          paymentId: candidatePayment.id,
+          gatewayOrderId: candidatePayment.gatewayOrderId,
+          status: 'CAPTURED',
+          paymentStatus: 'CAPTURED',
+          reconciled: true,
+        };
+      }
+    } catch (err) {
+      console.warn('[RECONCILE] Provider lookup by payment ID failed:', { errorType: err instanceof Error ? err.name : 'UnknownError' });
+    }
+  }
+
+  // 2. If we have a gatewayOrderId, check if any payment was captured under this order on Razorpay
+  if (candidatePayment.gatewayOrderId) {
+    try {
+      const paymentsList = await fetchRazorpayOrderPayments(
+        candidatePayment.gatewayOrderId
+      );
+
+      const capturedItem = paymentsList.items?.find(
+        (p) =>
+          p.status === 'captured' &&
+          p.refund_status !== 'full' &&
+          p.refund_status !== 'partial' &&
+          !(
+            typeof p.amount_refunded === 'number' &&
+            p.amount_refunded > 0
+          )
+      );
+
+      if (capturedItem) {
+        await db.$transaction([
+          db.payment.update({
+            where: { id: candidatePayment.id },
+            data: {
+              paymentId: capturedItem.id,
+              status: 'CAPTURED',
+            },
+          }),
+          db.order.update({
+            where: { id: order.id },
+            data: { paymentStatus: 'CAPTURED' },
+          }),
+        ]);
+
+        await dispatchPaidOrderToAgents(order.id);
+
+        return {
+          orderId: order.id,
+          paymentId: capturedItem.id,
+          gatewayOrderId: candidatePayment.gatewayOrderId,
+          status: 'CAPTURED',
+          paymentStatus: 'CAPTURED',
+          reconciled: true,
+        };
+      }
+    } catch (err) {
+      console.warn('[RECONCILE] Provider lookup by gateway order failed:', {
+        errorType: err instanceof Error ? err.name : 'UnknownError',
+      });
+    }
+  }
+
+  return {
+    orderId: order.id,
+    paymentId: candidatePayment.id,
+    gatewayOrderId: candidatePayment.gatewayOrderId,
+    status: candidatePayment.status,
+    paymentStatus: order.paymentStatus,
+    reconciled: false,
   };
 }

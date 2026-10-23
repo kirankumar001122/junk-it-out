@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     });
     return NextResponse.json({ success: true, data: settlements });
   } catch (error: any) {
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, message: 'An unexpected error occurred. Please try again.' }, { status: 500 });
   }
 }
 
@@ -30,16 +30,25 @@ export async function PATCH(req: NextRequest) {
 
   try {
     const { id, status } = await req.json();
-    if (!id || !['APPROVED', 'READY_FOR_PAYOUT'].includes(status)) {
-      return NextResponse.json({ success: false, message: 'Only APPROVED or READY_FOR_PAYOUT settlement states are supported.' }, { status: 400 });
+    const allowedStatuses = ['APPROVED', 'READY_FOR_PAYOUT', 'PAID', 'SETTLEMENT_COMPLETED'];
+    if (!id || !allowedStatuses.includes(status)) {
+      return NextResponse.json({ success: false, message: 'Only APPROVED, READY_FOR_PAYOUT, or PAID settlement states are supported.' }, { status: 400 });
+    }
+
+    const now = new Date();
+    const updateData: { status: string; approvedAt?: Date; paidAt?: Date } = { status };
+    if (status === 'APPROVED' || status === 'READY_FOR_PAYOUT') {
+      updateData.approvedAt = now;
+    } else if (status === 'PAID' || status === 'SETTLEMENT_COMPLETED') {
+      updateData.paidAt = now;
     }
 
     const settlement = await db.settlement.update({
       where: { id },
-      data: { status, approvedAt: status === 'APPROVED' || status === 'READY_FOR_PAYOUT' ? new Date() : undefined },
+      data: updateData,
     });
     return NextResponse.json({ success: true, data: settlement });
   } catch (error: any) {
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, message: 'An unexpected error occurred. Please try again.' }, { status: 500 });
   }
 }
