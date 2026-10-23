@@ -1,7 +1,24 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
+import { NextRequest } from 'next/server';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const authUser = await getAuthUser(req);
+  const authorizationStatus = getAdminAuthorizationStatus(authUser);
+  if (authorizationStatus === 401) {
+    return NextResponse.json(
+      { success: false, message: 'Authentication is required.' },
+      { status: 401 },
+    );
+  }
+  if (authorizationStatus === 403) {
+    return NextResponse.json(
+      { success: false, message: 'Admin access required.' },
+      { status: 403 },
+    );
+  }
+
   try {
     const orders = await db.order.findMany({
       include: {
@@ -34,7 +51,10 @@ export async function GET() {
         'Content-Disposition': `attachment; filename=junkitout_orders_report_${Date.now()}.csv`,
       },
     });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+  } catch {
+    return NextResponse.json(
+      { success: false, message: 'Failed to generate the orders report.' },
+      { status: 500 },
+    );
   }
 }

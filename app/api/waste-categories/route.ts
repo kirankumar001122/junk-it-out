@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser } from '@/lib/auth/middleware';
+import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 
 export async function GET(req: NextRequest) {
@@ -59,11 +59,35 @@ export async function GET(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
+    const authorizationStatus = getAdminAuthorizationStatus(authUser);
+    if (authorizationStatus === 401) {
+      return errorResponse('UNAUTHORIZED', 'Authentication is required.', 401);
+    }
+    if (authorizationStatus === 403) {
+      return errorResponse('FORBIDDEN', 'Admin access required.', 403);
+    }
+
     const body = await req.json().catch(() => ({}));
     const { id, pricePerKg, name, description, type, active } = body;
 
     if (!id || typeof id !== 'string') {
       return errorResponse('INVALID_INPUT', 'Waste category id is required.', 400);
+    }
+    if (pricePerKg !== undefined &&
+      (typeof pricePerKg !== 'number' || !Number.isFinite(pricePerKg) || pricePerKg < 0)) {
+      return errorResponse('INVALID_INPUT', 'Price per kilogram must be a non-negative number.', 400);
+    }
+    if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+      return errorResponse('INVALID_INPUT', 'Category name must be a non-empty string.', 400);
+    }
+    if (description !== undefined && (typeof description !== 'string' || !description.trim())) {
+      return errorResponse('INVALID_INPUT', 'Category description must be a non-empty string.', 400);
+    }
+    if (type !== undefined && (typeof type !== 'string' || !type.trim())) {
+      return errorResponse('INVALID_INPUT', 'Category type must be a non-empty string.', 400);
+    }
+    if (active !== undefined && typeof active !== 'boolean') {
+      return errorResponse('INVALID_INPUT', 'Category active value must be boolean.', 400);
     }
 
     const existing = await db.wasteCategory.findUnique({ where: { id } });
@@ -71,15 +95,13 @@ export async function PUT(req: NextRequest) {
       return errorResponse('NOT_FOUND', `Waste category #${id} not found.`, 404);
     }
 
-    const newRate = typeof pricePerKg === 'number' && !isNaN(pricePerKg) ? Math.max(0, pricePerKg) : existing.pricePerKg;
-
     const updatedCategory = await db.wasteCategory.update({
       where: { id },
       data: {
-        ...(pricePerKg !== undefined ? { pricePerKg: newRate } : {}),
-        ...(name ? { name } : {}),
-        ...(description ? { description } : {}),
-        ...(type ? { type } : {}),
+        ...(pricePerKg !== undefined ? { pricePerKg } : {}),
+        ...(name !== undefined ? { name: name.trim() } : {}),
+        ...(description !== undefined ? { description: description.trim() } : {}),
+        ...(type !== undefined ? { type: type.trim() } : {}),
         ...(active !== undefined ? { active } : {}),
       },
     });
@@ -105,23 +127,35 @@ export async function PUT(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
+    const authorizationStatus = getAdminAuthorizationStatus(authUser);
+    if (authorizationStatus === 401) {
+      return errorResponse('UNAUTHORIZED', 'Authentication is required.', 401);
+    }
+    if (authorizationStatus === 403) {
+      return errorResponse('FORBIDDEN', 'Admin access required.', 403);
+    }
+
     const body = await req.json().catch(() => ({}));
     const { name, description, type = 'RECYCLABLE_BUY', pricePerKg } = body;
 
-    if (!name || !description) {
+    if (typeof name !== 'string' || !name.trim() ||
+      typeof description !== 'string' || !description.trim()) {
       return errorResponse('INVALID_INPUT', 'Category name and description are required.', 400);
     }
-
-    const parsedPrice = typeof pricePerKg === 'number' && !isNaN(pricePerKg) 
-      ? Math.max(0, pricePerKg) 
-      : (pricePerKg !== undefined && !isNaN(Number(pricePerKg)) ? Math.max(0, Number(pricePerKg)) : 20.0);
+    if (typeof type !== 'string' || !type.trim()) {
+      return errorResponse('INVALID_INPUT', 'Category type must be a non-empty string.', 400);
+    }
+    if (pricePerKg !== undefined &&
+      (typeof pricePerKg !== 'number' || !Number.isFinite(pricePerKg) || pricePerKg < 0)) {
+      return errorResponse('INVALID_INPUT', 'Price per kilogram must be a non-negative number.', 400);
+    }
 
     const createdCategory = await db.wasteCategory.create({
       data: {
-        name,
-        description,
-        type,
-        pricePerKg: parsedPrice,
+        name: name.trim(),
+        description: description.trim(),
+        type: type.trim(),
+        pricePerKg: pricePerKg ?? 20.0,
       },
     });
 
