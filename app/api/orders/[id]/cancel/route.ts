@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
-import {
-  CANCELLABLE_ORDER_STATUSES,
-  canCancelOrder,
-} from '@/lib/orders/cancellation';
+import { CANCELLABLE_ORDER_STATUSES } from '@/lib/orders/cancellation';
 import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
 import { refundAttemptId, refundEventId } from '@/lib/payments/refundWorkflow';
@@ -43,7 +40,14 @@ export async function POST(
 
     const order = await db.order.findUnique({
       where: { id },
-      include: { customer: { include: { user: true } } },
+      select: {
+        id: true,
+        orderNumber: true,
+        customerId: true,
+        agentId: true,
+        status: true,
+        paymentStatus: true,
+      },
     });
 
     if (!order) {
@@ -53,31 +57,16 @@ export async function POST(
       );
     }
 
-    const isAuthorized = canCancelOrder(
-      {
-        userId: authUser.userId,
-        role: authUser.role as any,
-        customerId: authUser.customerId,
-        agentId: authUser.agentId,
-      },
-      order,
-    );
-
-    if (
-      (authUser.role === 'ADMIN' || authUser.role === 'SUPER_ADMIN') &&
-      (order.status === 'CANCELLED' || !validateStatusTransition(order.status, 'CANCELLED'))
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: 'The order is no longer eligible for cancellation.',
-        },
-        { status: 409 },
-      );
-    }
+    const isAdmin =
+      authUser.role === 'ADMIN' || authUser.role === 'SUPER_ADMIN';
+    const isAuthorized =
+      isAdmin ||
+      (authUser.role === 'CUSTOMER' &&
+        authUser.customerId === order.customerId) ||
+      (authUser.role === 'AGENT' &&
+        Boolean(authUser.agentId && authUser.agentId === order.agentId));
 
     if (!isAuthorized) {
-      // Do not disclose another customer's order to customer/agent callers.
       const status =
         authUser.role === 'ADMIN' || authUser.role === 'SUPER_ADMIN'
           ? 403
@@ -85,12 +74,28 @@ export async function POST(
       return NextResponse.json(
         {
           success: false,
-          message:
-            status === 404
-              ? 'Order not found.'
-              : 'You are not allowed to cancel this order.',
+          message: status === 404
+            ? 'Order not found.'
+            : 'You are not allowed to cancel this order.',
         },
         { status },
+      );
+    }
+
+    const statusCanBeCancelled =
+      CANCELLABLE_ORDER_STATUSES.includes(
+        order.status as (typeof CANCELLABLE_ORDER_STATUSES)[number],
+      ) && validateStatusTransition(order.status, 'CANCELLED');
+    if (!statusCanBeCancelled) {
+      if (!isAdmin) {
+        return NextResponse.json(
+          { success: false, message: 'Order not found.' },
+          { status: 404 },
+        );
+      }
+      return NextResponse.json(
+        { success: false, message: 'The order is no longer eligible for cancellation.' },
+        { status: 409 },
       );
     }
 
@@ -104,37 +109,19 @@ export async function POST(
       );
     }
 
-    if (
-      order.status === 'CANCELLED' ||
-      !validateStatusTransition(order.status, 'CANCELLED')
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: 'The order is no longer eligible for cancellation.',
-        },
-        { status: 409 },
-      );
-    }
-
     const isPaid = order.paymentStatus === 'CAPTURED';
-
     const cancelledOrder = await db.$transaction(async (tx) => {
-      const orderUpdateData: Record<string, unknown> = {
-        status: 'CANCELLED',
-        cancellationReason: reason,
-      };
-      if (isPaid) {
-        orderUpdateData.paymentStatus = 'REFUND_PENDING';
-      }
-
       const claimed = await tx.order.updateMany({
         where: {
           id: order.id,
           status: order.status,
-          ...(order.agentId !== undefined ? { agentId: order.agentId } : {}),
+          agentId: order.agentId,
         },
-        data: orderUpdateData,
+        data: {
+          status: 'CANCELLED',
+          cancellationReason: reason,
+          ...(isPaid ? { paymentStatus: 'REFUND_PENDING' } : {}),
+        },
       });
 
       if (claimed.count !== 1) {
@@ -144,81 +131,82 @@ export async function POST(
       }
 
       if (isPaid) {
-        if ((tx as any).refundRequest) {
-          try {
-            await createRefundRequestForCapturedPayment(
-              tx,
-              id,
-              authUser.userId,
-            );
-          } catch (refundReqErr) {
-            console.warn(
-              '[CANCEL] createRefundRequestForCapturedPayment skipped:',
-              refundReqErr,
-            );
+        const refundRequestModel = (
+          tx as unknown as {
+            refundRequest?: typeof tx.refundRequest;
           }
+        ).refundRequest;
+        if (refundRequestModel) {
+          await createRefundRequestForCapturedPayment(
+            tx,
+            order.id,
+            authUser.userId,
+          );
         }
 
-        if (tx.payment) {
-          const payment = await tx.payment.findFirst({
-            where: {
-              orderId: order.id,
-              direction: 'CUSTOMER_PAYS',
-              status: 'CAPTURED',
-            },
+        const payment = await tx.payment.findFirst({
+          where: {
+            orderId: order.id,
+            direction: 'CUSTOMER_PAYS',
+            status: 'CAPTURED',
+          },
+        });
+        if (payment) {
+          await tx.payment.updateMany({
+            where: { id: payment.id, status: 'CAPTURED' },
+            data: { status: 'REFUND_PENDING' },
           });
 
-          if (payment) {
-            await tx.payment.updateMany({
-              where: { id: payment.id, status: 'CAPTURED' },
-              data: { status: 'REFUND_PENDING' },
+          const refundAttemptModel = (
+            tx as unknown as {
+              refundAttempt?: typeof tx.refundAttempt;
+            }
+          ).refundAttempt;
+          if (refundAttemptModel) {
+            const attemptId = refundAttemptId(payment.id);
+            await refundAttemptModel.upsert({
+              where: { id: attemptId },
+              create: {
+                id: attemptId,
+                orderId: order.id,
+                paymentId: payment.id,
+                amount: payment.amount,
+                status: 'RECONCILIATION_REQUIRED',
+                failureReason: `Order cancelled by ${authUser.role.toLowerCase()}: ${reason}`,
+              },
+              update: {
+                status: 'RECONCILIATION_REQUIRED',
+                failureReason: `Order cancelled by ${authUser.role.toLowerCase()}: ${reason}`,
+              },
             });
 
-            if ((tx as any).refundAttempt) {
-              const attemptId = refundAttemptId(payment.id);
-              await (tx as any).refundAttempt.upsert({
-                where: { id: attemptId },
-                create: {
-                  id: attemptId,
-                  orderId: order.id,
-                  paymentId: payment.id,
-                  amount: payment.amount,
-                  status: 'RECONCILIATION_REQUIRED',
-                  failureReason: `Order cancelled by customer: ${reason}`,
-                },
-                update: {
-                  status: 'RECONCILIATION_REQUIRED',
-                  failureReason: `Order cancelled by customer: ${reason}`,
+            const refundAttemptEventModel = (
+              tx as unknown as {
+                refundAttemptEvent?: typeof tx.refundAttemptEvent;
+              }
+            ).refundAttemptEvent;
+            if (refundAttemptEventModel) {
+              await refundAttemptEventModel.create({
+                data: {
+                  id: refundEventId(
+                    attemptId,
+                    `order_cancelled_${Date.now()}`,
+                  ),
+                  refundAttemptId: attemptId,
+                  eventType: 'ORDER_CANCELLED',
+                  status: 'REFUND_PENDING',
+                  details: {
+                    source: 'order_cancellation',
+                    cancellationReason: reason,
+                    paymentId: payment.id,
+                    amount: payment.amount,
+                  },
                 },
               });
-
-              if ((tx as any).refundAttemptEvent) {
-                await (tx as any).refundAttemptEvent.create({
-                  data: {
-                    id: refundEventId(
-                      attemptId,
-                      `order_cancelled_${Date.now()}`,
-                    ),
-                    refundAttemptId: attemptId,
-                    eventType: 'ORDER_CANCELLED',
-                    status: 'REFUND_PENDING',
-                    details: {
-                      source: 'customer_order_cancellation',
-                      cancellationReason: reason,
-                      paymentId: payment.id,
-                      amount: payment.amount,
-                    },
-                  },
-                });
-              }
             }
           }
         }
       }
-
-      const historyNotes = isPaid
-        ? `Cancelled by ${authUser.role.toLowerCase()}. Reason: ${reason}. Captured payment pending refund review.`
-        : `Cancelled by ${authUser.role.toLowerCase()}. Reason: ${reason}`;
 
       await tx.orderStatusHistory.create({
         data: {
@@ -226,31 +214,30 @@ export async function POST(
           oldStatus: order.status,
           newStatus: 'CANCELLED',
           changedByUserId: authUser.userId,
-          notes: historyNotes,
+          notes: isPaid
+            ? `Cancelled by ${authUser.role.toLowerCase()}. Reason: ${reason}. Captured payment pending refund review.`
+            : `Cancelled by ${authUser.role.toLowerCase()}. Reason: ${reason}`,
         },
       });
 
       if (order.agentId) {
-        const otherActiveOrder = tx.order.findFirst
-          ? await tx.order.findFirst({
-              where: {
-                agentId: order.agentId,
-                id: { not: order.id },
-                status: {
-                  in: [
-                    'AGENT_ASSIGNED',
-                    'AGENT_ACCEPTED',
-                    'AGENT_ON_WAY',
-                    'AGENT_ARRIVED',
-                    'WASTE_VERIFICATION',
-                    'WEIGHING',
-                  ],
-                },
-              },
-              select: { id: true },
-            })
-          : null;
-        if (!otherActiveOrder) {
+        const activeAssignmentCount = await tx.order.count({
+          where: {
+            agentId: order.agentId,
+            id: { not: order.id },
+            status: {
+              in: [
+                'AGENT_ASSIGNED',
+                'AGENT_ACCEPTED',
+                'AGENT_ON_WAY',
+                'AGENT_ARRIVED',
+                'WASTE_VERIFICATION',
+                'WEIGHING',
+              ],
+            },
+          },
+        });
+        if (activeAssignmentCount === 0) {
           await tx.agent.update({
             where: { id: order.agentId },
             data: { status: 'AVAILABLE' },
@@ -261,8 +248,7 @@ export async function POST(
       await tx.auditLog.create({
         data: {
           userId: authUser.userId,
-          userName:
-            (authUser as any).name || (authUser as any).phone || undefined,
+          userName: authUser.name || authUser.phone,
           action: 'ORDER_CANCELLED',
           oldValue: `Order ${order.orderNumber} (${order.status})`,
           newValue: isPaid
@@ -279,16 +265,12 @@ export async function POST(
 
     if (!cancelledOrder) {
       return NextResponse.json(
-        {
-          success: false,
-          message: 'The order state changed; refresh and try again.',
-        },
+        { success: false, message: 'The order state changed; refresh and try again.' },
         { status: 409 },
       );
     }
 
     broadcaster.broadcast('ORDER_UPDATED', cancelledOrder);
-
     return NextResponse.json({
       success: true,
       message: isPaid

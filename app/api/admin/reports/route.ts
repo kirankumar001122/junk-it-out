@@ -50,7 +50,10 @@ export async function GET(req: NextRequest) {
       ? Math.min(Math.max(1, parseInt(limitParam, 10) || MAX_EXPORT_LIMIT), MAX_EXPORT_LIMIT)
       : null;
 
-    const where: any = {};
+    const where: {
+      status?: string;
+      createdAt?: { gte?: Date; lte?: Date };
+    } = {};
     if (statusParam) {
       where.status = statusParam;
     }
@@ -61,7 +64,7 @@ export async function GET(req: NextRequest) {
     }
 
     const csvLines: string[] = [headers.map(csvCell).join(',')];
-    let cursorId: string | undefined = undefined;
+    let cursorId: string | undefined;
     let totalExported = 0;
 
     while (true) {
@@ -80,23 +83,9 @@ export async function GET(req: NextRequest) {
           status: true,
           estimatedTotal: true,
           finalAmount: true,
-          customer: {
-            select: {
-              user: {
-                select: { name: true, phone: true },
-              },
-            },
-          },
-          agent: {
-            select: {
-              user: {
-                select: { name: true },
-              },
-            },
-          },
-          address: {
-            select: { area: true },
-          },
+          customer: { select: { user: { select: { name: true, phone: true } } } },
+          agent: { select: { user: { select: { name: true } } } },
+          address: { select: { area: true } },
         },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: takeSize,
@@ -105,30 +94,26 @@ export async function GET(req: NextRequest) {
 
       if (batch.length === 0) break;
 
-      for (const o of batch) {
-        const row = [
-          o.orderNumber,
-          new Date(o.createdAt).toLocaleString(),
-          o.customer?.user?.name ?? 'N/A',
-          o.customer?.user?.phone ?? 'N/A',
-          o.address?.area || 'N/A',
-          o.status,
-          o.estimatedTotal,
-          o.finalAmount,
-          o.agent ? o.agent.user?.name ?? 'Unassigned' : 'Unassigned',
-        ];
-        csvLines.push(row.map(csvCell).join(','));
+      for (const order of batch) {
+        csvLines.push([
+          order.orderNumber,
+          new Date(order.createdAt).toLocaleString(),
+          order.customer?.user?.name ?? 'N/A',
+          order.customer?.user?.phone ?? 'N/A',
+          order.address?.area || 'N/A',
+          order.status,
+          order.estimatedTotal,
+          order.finalAmount,
+          order.agent?.user?.name ?? 'Unassigned',
+        ].map(csvCell).join(','));
       }
 
       totalExported += batch.length;
       cursorId = batch[batch.length - 1].id;
-
       if (batch.length < takeSize) break;
     }
 
-    const csvContent = csvLines.join('\n');
-
-    return new Response(csvContent, {
+    return new Response(csvLines.join('\n'), {
       headers: {
         'Content-Type': 'text/csv',
         'Content-Disposition': `attachment; filename=junkitout_orders_report_${Date.now()}.csv`,
