@@ -1214,7 +1214,13 @@ export default function OrderTrackingPage() {
             <div className="flex items-center justify-between">
               <span>Settlement Status</span>
 
-              <strong>{order.settlement.status}</strong>
+              <strong>
+                {order.settlement.status === 'READY_FOR_PAYOUT'
+                  ? 'Approved (Pending Disbursal)'
+                  : order.settlement.status === 'PAID' || order.settlement.status === 'SETTLEMENT_COMPLETED'
+                  ? 'Disbursed / Paid'
+                  : order.settlement.status}
+              </strong>
             </div>
           </div>
         )}

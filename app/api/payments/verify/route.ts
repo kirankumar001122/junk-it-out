@@ -22,8 +22,17 @@ export async function POST(req: NextRequest) {
       customerId: authUser.customerId,
     });
     return NextResponse.json({ success: true, data: updated });
-  } catch (error: any) {
-    const status = error instanceof PaymentVerificationError ? error.statusCode : 500;
-    return NextResponse.json({ success: false, message: error.message || 'Payment verification failed.' }, { status });
+  } catch (error: unknown) {
+    if (error instanceof PaymentVerificationError) {
+      return NextResponse.json(
+        { success: false, message: error.message },
+        { status: error.statusCode },
+      );
+    }
+
+    return NextResponse.json(
+      { success: false, message: 'Payment verification failed.' },
+      { status: 500 },
+    );
   }
 }
