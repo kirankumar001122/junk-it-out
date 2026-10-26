@@ -25,7 +25,6 @@ describe('request error instrumentation', () => {
         routeType: 'route',
         renderSource: 'server-rendering',
         revalidateReason: undefined,
-        renderType: 'dynamic',
       },
     );
 
@@ -57,7 +56,6 @@ describe('request error instrumentation', () => {
         routeType: 'render',
         renderSource: 'server-rendering',
         revalidateReason: undefined,
-        renderType: 'dynamic',
       },
     );
 
