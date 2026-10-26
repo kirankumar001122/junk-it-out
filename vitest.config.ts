@@ -28,6 +28,8 @@ export default defineConfig({
     include: [
       'tests/security-route-handlers.test.ts',
       'tests/payment-idempotency.test.ts',
+      'tests/payment-retry-and-feedback.test.ts',
+      'tests/booking-coupon-support.test.ts',
     ],
   },
 });

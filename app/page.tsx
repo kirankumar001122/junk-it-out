@@ -36,8 +36,8 @@ import CustomerReviews from '@/components/CustomerReviews';
 import { getCachedClientJson } from '@/lib/clientRequestCache';
 
 const categoryImages: Record<string, string> = {
-  'E-Waste': '/categories/e-waste.png',
-  'Household Dry Waste': '/categories/household-waste.png',
+  'E-Waste': '/categories/e-waste.webp',
+  'Household Dry Waste': '/categories/household-waste.webp',
   'Paper & Cardboard': '/categories/paper-carboard.jpg',
   'Plastic Waste': '/categories/plastic-waste.jpg?v=2',
 };
@@ -115,7 +115,7 @@ export default function HomePage() {
       <section
         className="relative overflow-hidden border-b border-slate-800 bg-cover bg-center bg-no-repeat"
         style={{
-          backgroundImage: "url('/images/junk_it_out.png')",
+          backgroundImage: "url('/images/junk_it_out.webp')",
         }}
       >
         {/* Dark overlay for readability */}
@@ -342,8 +342,10 @@ export default function HomePage() {
                           <>
                             <div className="mb-3 h-24 overflow-hidden rounded-xl bg-emerald-50">
                               <img
-                                src="/categories/household-waste.png"
+                                src="/categories/household-waste.webp"
                                 alt="Wet Waste and Dry Waste"
+                                loading="lazy"
+                                decoding="async"
                                 className="h-24 w-full object-cover"
                               />
                             </div>
@@ -385,6 +387,8 @@ export default function HomePage() {
                                 <img
                                   src={categoryImages[category.name]}
                                   alt={category.name}
+                                  loading="lazy"
+                                  decoding="async"
                                   className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
                                 />
                               </div>

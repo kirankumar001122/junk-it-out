@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import {
   Package,
@@ -38,15 +38,29 @@ export default function AdminDashboardPage() {
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
 
+  // In-flight concurrency and debouncing guards
+  const assignInFlightRef = useRef(false);
+  const isFetchingRef = useRef(false);
+  const pendingRefreshRef = useRef(false);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Manual order state
   const [manualPhone, setManualPhone] = useState('+919888777666');
   const [manualName, setManualName] = useState('Ravi Shankar');
   const [manualArea, setManualArea] = useState('JP Nagar');
   const [manualHouse, setManualHouse] = useState('Plot 42, 10th Cross');
 
-  const loadAdminData = async () => {
+  const loadAdminData = async (isBackground = false) => {
+    if (isFetchingRef.current) {
+      pendingRefreshRef.current = true;
+      return;
+    }
+    isFetchingRef.current = true;
+
     try {
-      setAgentsLoading(true);
+      if (!isBackground) {
+        setAgentsLoading(true);
+      }
       setAgentsError(null);
 
       const [statsRes, ordersRes, agentsRes] = await Promise.all([
@@ -56,30 +70,50 @@ export default function AdminDashboardPage() {
       ]);
 
       if (statsRes.success) setStats(statsRes.data);
-      if (ordersRes.success) setOrders(ordersRes.data);
+      if (ordersRes.success) setOrders(ordersRes.data || []);
       if (agentsRes.success) {
         setAgents(agentsRes.data || []);
-      } else {
+      } else if (!isBackground) {
         setAgentsError(agentsRes.error?.message || agentsRes.message || 'Failed to load field agents.');
       }
     } catch (e: any) {
       console.error(e);
-      setAgentsError('Error loading operations data.');
+      if (!isBackground) {
+        setAgentsError('Error loading operations data.');
+      }
     } finally {
       setLoading(false);
       setAgentsLoading(false);
+      isFetchingRef.current = false;
+
+      if (pendingRefreshRef.current) {
+        pendingRefreshRef.current = false;
+        loadAdminData(true);
+      }
     }
   };
 
+  const triggerDebouncedRefresh = () => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      loadAdminData(true);
+    }, 400);
+  };
+
   useEffect(() => {
-    loadAdminData();
+    loadAdminData(false);
 
     const eventSource = new EventSource('/api/realtime/stream');
-    eventSource.addEventListener('ORDER_CREATED', () => loadAdminData());
-    eventSource.addEventListener('ORDER_UPDATED', () => loadAdminData());
-    eventSource.addEventListener('AGENT_LOCATION_UPDATED', () => loadAdminData());
+    eventSource.addEventListener('ORDER_CREATED', triggerDebouncedRefresh);
+    eventSource.addEventListener('ORDER_UPDATED', triggerDebouncedRefresh);
+    eventSource.addEventListener('AGENT_LOCATION_UPDATED', triggerDebouncedRefresh);
 
     return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
       eventSource.close();
     };
   }, []);
@@ -97,6 +131,7 @@ export default function AdminDashboardPage() {
   };
 
   const handleAssignAgent = async () => {
+    if (assignInFlightRef.current || assignLoading) return;
     if (!selectedOrderForAssign) return;
     if (!selectedAgentId) {
       setAssignError('Please select a valid registered field agent from the dropdown.');
@@ -108,6 +143,7 @@ export default function AdminDashboardPage() {
       return;
     }
 
+    assignInFlightRef.current = true;
     setAssignLoading(true);
     setAssignError(null);
 
@@ -121,7 +157,7 @@ export default function AdminDashboardPage() {
       if (res.ok && data.success) {
         setSelectedOrderForAssign(null);
         setSelectedAgentId('');
-        await loadAdminData();
+        await loadAdminData(true);
       } else {
         setAssignError(data.error?.message || data.message || 'Failed to assign agent to this order.');
       }
@@ -129,6 +165,7 @@ export default function AdminDashboardPage() {
       console.error(e);
       setAssignError('Network error while assigning agent.');
     } finally {
+      assignInFlightRef.current = false;
       setAssignLoading(false);
     }
   };

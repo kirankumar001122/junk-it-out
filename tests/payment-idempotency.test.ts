@@ -144,6 +144,7 @@ vi.mock('@/lib/db', () => {
       await previous;
       try {
         return await callback({
+          $executeRaw: vi.fn(async () => 1),
           $queryRaw: vi.fn(async () => []),
           payment,
           order: database.order,

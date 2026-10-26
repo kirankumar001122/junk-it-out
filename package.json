@@ -13,7 +13,7 @@
     "test": "npm run test:security && npm run test:payments && npm run test:standalone",
     "test:security": "vitest run tests/security-route-handlers.test.ts",
     "test:payments": "vitest run tests/payment-idempotency.test.ts",
-    "test:standalone": "tsx tests/security-authorization.test.ts && tsx tests/cancellation.test.ts && tsx tests/photo-url.test.ts && tsx tests/contact-api.test.ts && tsx tests/tracking-location.test.ts && tsx tests/customer-pickups-response.test.ts && tsx tests/sse.test.ts && tsx tests/refund-workflow.test.ts && tsx tests/agent-location-route.test.ts"
+    "test:standalone": "tsx tests/order-cancellation.test.ts && tsx tests/order-tracking-access.test.ts && tsx tests/tracking-location.test.ts && tsx tests/customer-pickups-response.test.ts && tsx tests/sse.test.ts && tsx tests/refund-workflow.test.ts && tsx tests/agent-location-route.test.ts && tsx tests/order-idempotency.test.ts && tsx tests/booking-payload-idempotency.test.ts"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"

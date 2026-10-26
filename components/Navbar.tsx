@@ -120,7 +120,7 @@ export default function Navbar() {
       <div className="mx-auto flex max-w-7xl items-center gap-2 sm:gap-3 px-3 sm:px-6 py-2.5">
         <Link href="/" className="flex shrink-0 items-center gap-2 transition-opacity hover:opacity-90" aria-label="Junk It Out home">
           <span className="relative grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl bg-white border border-slate-200 shadow-sm overflow-hidden shrink-0">
-            <img src="/logo.png" alt="Junk It Out Logo" className="h-full w-full object-contain p-1" />
+            <img src="/logo.png" alt="Junk It Out Logo" decoding="async" className="h-full w-full object-contain p-1" />
           </span>
           <span className="hidden text-base sm:text-lg font-bold tracking-tight text-slate-900 md:block">
             JUNK IT <span className="text-emerald-600 font-extrabold">OUT</span>
@@ -149,6 +149,7 @@ export default function Navbar() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search waste categories..."
+            aria-label="Search waste categories"
             className="h-10 w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50/70 pl-10 pr-3 text-xs sm:text-sm font-medium text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20"
           />
         </form>

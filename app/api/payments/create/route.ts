@@ -109,7 +109,11 @@ export async function POST(req: NextRequest) {
     }
 
     const attempt = await db.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${order.id}, 0))`;
+      if (typeof (tx as any).$executeRaw === 'function') {
+        await (tx as any).$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${order.id}, 0))`;
+      } else {
+        await (tx as any).$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${order.id}, 0))`;
+      }
 
       const activePayment = await tx.payment.findFirst({
         where: {

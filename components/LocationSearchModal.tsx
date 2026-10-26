@@ -95,6 +95,15 @@ export default function LocationSearchModal({
       });
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
+
   // Initialize Google Maps Places & Geocoder Services asynchronously
   useEffect(() => {
     if (!open) return;
@@ -543,6 +552,7 @@ export default function LocationSearchModal({
               value={query}
               onChange={(e) => handleQueryChange(e.target.value)}
               placeholder="Search area, zone name, apartment..."
+              aria-label="Search area, zone name, or apartment"
               className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-9 text-xs sm:text-sm font-medium text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 placeholder:text-slate-400"
             />
             {query && (

@@ -223,6 +223,19 @@ export default function AgentDashboardPage() {
     };
   }, [agent?.id, isOnline]);
 
+  // Keyboard accessibility: dismiss active modal with Escape key
+  useEffect(() => {
+    if (!showWeighModal && !viewPickupModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showWeighModal && !submittingWeigh) setShowWeighModal(false);
+        if (viewPickupModal) setViewPickupModal(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showWeighModal, viewPickupModal, submittingWeigh]);
+
   const fetchOrderDetails = async (orderId: string) => {
     const res = await fetch(`/api/orders/${orderId}`);
     const data = await res.json().catch(() => ({}));
@@ -559,7 +572,7 @@ export default function AgentDashboardPage() {
           </div>
 
           {loginError && (
-            <div className="p-3 bg-rose-950/60 border border-rose-800/80 text-rose-300 rounded-2xl text-xs font-bold flex items-center gap-2">
+            <div role="alert" className="p-3 bg-rose-950/60 border border-rose-800/80 text-rose-300 rounded-2xl text-xs font-bold flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
               <span>{loginError}</span>
             </div>
@@ -568,10 +581,11 @@ export default function AgentDashboardPage() {
           {!otpSent ? (
             <form onSubmit={handleSendOtp} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-400 uppercase">Agent Mobile Number</label>
+                <label htmlFor="agent-login-phone" className="block text-xs font-bold text-slate-400 uppercase">Agent Mobile Number</label>
                 <div className="relative">
                   <Smartphone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                   <input
+                    id="agent-login-phone"
                     type="tel"
                     required
                     value={loginPhone}
@@ -595,7 +609,7 @@ export default function AgentDashboardPage() {
             <form onSubmit={handleVerifyOtp} className="space-y-4">
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="block text-xs font-bold text-slate-400 uppercase">Enter Verification OTP</label>
+                  <label htmlFor="agent-login-otp" className="block text-xs font-bold text-slate-400 uppercase">Enter Verification OTP</label>
                   <button
                     type="button"
                     onClick={() => setOtpSent(false)}
@@ -607,6 +621,7 @@ export default function AgentDashboardPage() {
                 <div className="relative">
                   <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                   <input
+                    id="agent-login-otp"
                     type="text"
                     required
                     autoFocus
@@ -914,7 +929,12 @@ export default function AgentDashboardPage() {
 
       {/* WEIGHING MODAL */}
       {showWeighModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Record Digital Scale Weights"
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+        >
           <div className="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-extrabold text-white flex items-center gap-2">
@@ -1029,7 +1049,12 @@ export default function AgentDashboardPage() {
 
       {/* READ-ONLY VIEW PICKUP MODAL */}
       {viewPickupModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Pickup Details"
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+        >
           <div className="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>

@@ -26,8 +26,8 @@ import {
 } from '@/lib/pickupCart';
 
 const categoryImages: Record<string, string> = {
-  'E-Waste': '/categories/e-waste.png',
-  'Household Dry Waste': '/categories/household-waste.png',
+  'E-Waste': '/categories/e-waste.webp',
+  'Household Dry Waste': '/categories/household-waste.webp',
   'Paper & Cardboard': '/categories/paper-carboard.jpg',
   'Plastic Waste': '/categories/plastic-waste.jpg?v=2',
 };
@@ -159,6 +159,8 @@ export default function CategoriesPage() {
                   <img
                     src={categoryImages[category.name]}
                     alt={category.name}
+                    loading="lazy"
+                    decoding="async"
                     className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
                   />
                 ) : (

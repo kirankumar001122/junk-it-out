@@ -148,6 +148,15 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
     return () => window.clearInterval(timer);
   }, [cooldown]);
 
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
+
   const handleSendOtp = async (e?: FormEvent) => {
     if (e) e.preventDefault();
     if (otpRequestRef.current) return;

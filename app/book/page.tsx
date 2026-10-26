@@ -20,6 +20,8 @@ import {
   CreditCard,
   Plus,
   Minus,
+  Ticket,
+  X,
 } from 'lucide-react';
 import CustomerOtpLogin from '@/components/CustomerOtpLogin';
 import LocationSearchModal from '@/components/LocationSearchModal';
@@ -30,8 +32,8 @@ import { loadRazorpayScript } from '@/lib/razorpayClient';
 
 // Small category images used in the booking cards.
 const CATEGORY_IMAGES: Record<string, string> = {
-  'E-Waste': '/categories/e-waste.png',
-  'Household Dry Waste': '/categories/household-waste.png',
+  'E-Waste': '/categories/e-waste.webp',
+  'Household Dry Waste': '/categories/household-waste.webp',
   'Paper & Cardboard': '/categories/paper-carboard.jpg',
   'Plastic Waste': '/categories/plastic-waste.jpg?v=2',
 };
@@ -102,9 +104,27 @@ export default function BookingPage() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successOrder, setSuccessOrder] = useState<any>(null);
+  const [pendingOrder, setPendingOrder] = useState<any | null>(null);
+
+  // Coupon State
+  const [couponInput, setCouponInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<{
+    code: string;
+    discountType?: string;
+    discountValue?: number;
+    discountAmount: number;
+    finalAmount?: number;
+    minOrderValue?: number;
+    message?: string;
+  } | null>(null);
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [couponSuccessMsg, setCouponSuccessMsg] = useState<string | null>(null);
 
   // Idempotency Protection Ref
   const idempotencyKeyRef = useRef<string>('');
+  const lastPayloadSignatureRef = useRef<string>('');
+  const isRetryingRef = useRef(false);
 
   // Generate 4 available dates dynamically starting today
   const availableDates = [0, 1, 2, 3].map((offset) => {
@@ -299,6 +319,15 @@ export default function BookingPage() {
   };
 
   const toggleCategory = (catId: string) => {
+    idempotencyKeyRef.current = '';
+    lastPayloadSignatureRef.current = '';
+    setPendingOrder(null);
+    setAppliedCoupon(null);
+    setCouponSuccessMsg(null);
+    setCouponError(null);
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('jio_pending_order');
+    }
     const exists = selectedItems.find((i) => i.categoryId === catId);
     if (exists) {
       if (selectedItems.length === 1) return; // Maintain at least 1 selected category
@@ -309,6 +338,15 @@ export default function BookingPage() {
   };
 
   const updateItemWeight = (catId: string, weight: number) => {
+    idempotencyKeyRef.current = '';
+    lastPayloadSignatureRef.current = '';
+    setPendingOrder(null);
+    setAppliedCoupon(null);
+    setCouponSuccessMsg(null);
+    setCouponError(null);
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('jio_pending_order');
+    }
     if (weight <= 0) {
       if (selectedItems.length > 1) {
         setSelectedItems(selectedItems.filter((i) => i.categoryId !== catId));
@@ -332,12 +370,16 @@ export default function BookingPage() {
       }
     });
 
-    const rawPayable = totalWasteItemsValue + baseCharge;
+    const subtotal = totalWasteItemsValue + baseCharge;
+    const discountAmount = appliedCoupon ? appliedCoupon.discountAmount : 0;
+    const rawPayable = subtotal - discountAmount;
     const netPayable = Math.max(1, Math.round(rawPayable * 100) / 100);
 
     return {
       totalWasteItemsValue: Math.round(totalWasteItemsValue * 100) / 100,
       baseCharge,
+      subtotal: Math.round(subtotal * 100) / 100,
+      discountAmount: Math.round(discountAmount * 100) / 100,
       netAmount: netPayable,
       direction: 'CUSTOMER_PAYS' as const,
     };
@@ -351,9 +393,235 @@ export default function BookingPage() {
   const formattedScheduledSlot = `${curDateObj.dayLabel} (${curDateObj.dateStr}), ${curSlotObj.label}`;
 
   // Preload Razorpay checkout SDK as soon as booking page mounts to ensure zero-delay checkout opening
+  // Also recover pending unpaid order from sessionStorage if customer dismissed or refreshed
   useEffect(() => {
     loadRazorpayScript().catch(() => {});
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = sessionStorage.getItem('jio_pending_order');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.id && parsed?.orderNumber) {
+            setPendingOrder(parsed);
+          }
+        }
+      }
+    } catch {}
   }, []);
+
+  const handleApplyCoupon = async (codeToApply?: string) => {
+    const code = (codeToApply || couponInput).trim().toUpperCase();
+    if (!code) {
+      setCouponError('Please enter a coupon code.');
+      setCouponSuccessMsg(null);
+      return;
+    }
+
+    if (couponLoading) return;
+    setCouponLoading(true);
+    setCouponError(null);
+    setCouponSuccessMsg(null);
+
+    // Compute raw subtotal before discounts
+    let totalWasteItemsValue = 0;
+    const baseCharge = geofenceResult?.zone?.basePickupCharge || 69.0;
+    selectedItems.forEach((item) => {
+      const cat = categories.find((c) => c.id === item.categoryId);
+      if (cat) {
+        totalWasteItemsValue += item.estimatedWeight * cat.pricePerKg;
+      }
+    });
+    const subtotal = totalWasteItemsValue + baseCharge;
+
+    try {
+      const res = await fetch('/api/coupons/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, subtotal }),
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success && data.data?.valid) {
+        setAppliedCoupon(data.data);
+        setCouponInput(data.data.code);
+        setCouponSuccessMsg(data.data.message || `Coupon ${data.data.code} applied! Saved ₹${data.data.discountAmount.toFixed(2)}.`);
+        setCouponError(null);
+        // Clear idempotency key to prevent collision with non-discounted payload
+        idempotencyKeyRef.current = '';
+        lastPayloadSignatureRef.current = '';
+        setPendingOrder(null);
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('jio_pending_order');
+        }
+      } else {
+        setAppliedCoupon(null);
+        setCouponError(data.message || `Coupon code "${code}" is invalid for this order.`);
+        setCouponSuccessMsg(null);
+      }
+    } catch {
+      setCouponError('Network error validating coupon. Please check connection and try again.');
+      setCouponSuccessMsg(null);
+    } finally {
+      setCouponLoading(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponInput('');
+    setCouponError(null);
+    setCouponSuccessMsg(null);
+    idempotencyKeyRef.current = '';
+    lastPayloadSignatureRef.current = '';
+    setPendingOrder(null);
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('jio_pending_order');
+    }
+  };
+
+  const handleStartFresh = () => {
+    setPendingOrder(null);
+    setErrorMsg('');
+    setAppliedCoupon(null);
+    setCouponInput('');
+    setCouponError(null);
+    setCouponSuccessMsg(null);
+    idempotencyKeyRef.current = '';
+    lastPayloadSignatureRef.current = '';
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('jio_pending_order');
+    }
+    setStep(1);
+  };
+
+  // Safe retry payment for existing unpaid order (no duplicate order creation)
+  const handleRetryPayment = async (orderToRetry?: any) => {
+    const targetOrder = orderToRetry || pendingOrder;
+    if (!targetOrder?.id) return;
+    if (isRetryingRef.current || loading) return;
+    isRetryingRef.current = true;
+    setLoading(true);
+    setErrorMsg('');
+
+    const scriptPromise = loadRazorpayScript();
+
+    try {
+      const payRes = await fetch('/api/payments/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: targetOrder.id }),
+      });
+
+      const payData = await payRes.json();
+      if (!payRes.ok || !payData.success) {
+        setLoading(false);
+        isRetryingRef.current = false;
+        setErrorMsg(payData.message || 'Unable to resume payment for this order.');
+        return;
+      }
+
+      if (payData.alreadyPaid) {
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('jio_pending_order');
+        }
+        setPendingOrder(null);
+        setLoading(false);
+        isRetryingRef.current = false;
+        setSuccessOrder({
+          ...targetOrder,
+          paymentStatus: 'CAPTURED',
+          status: 'BOOKING_RECEIVED',
+        });
+        return;
+      }
+
+      const scriptLoaded = await scriptPromise;
+      if (!scriptLoaded) {
+        setLoading(false);
+        isRetryingRef.current = false;
+        setErrorMsg('Failed to load Razorpay payment SDK. Please check your network connection.');
+        return;
+      }
+
+      const razorpayConfig = payData.data;
+      const options = {
+        key: razorpayConfig.key,
+        amount: Math.round(razorpayConfig.amount * 100),
+        currency: razorpayConfig.currency || 'INR',
+        name: 'Junk It Out',
+        description: razorpayConfig.description || `Pickup Order #${targetOrder.orderNumber}`,
+        image: typeof window !== 'undefined' ? `${window.location.origin}/logo.png` : '/logo.png',
+        order_id: razorpayConfig.gatewayOrderId,
+        handler: async function (response: any) {
+          setLoading(true);
+          try {
+            const verifyRes = await fetch('/api/payments/verify', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                orderId: targetOrder.id,
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              }),
+            });
+
+            const verifyData = await verifyRes.json();
+            setLoading(false);
+            isRetryingRef.current = false;
+
+            if (verifyRes.ok && verifyData.success) {
+              idempotencyKeyRef.current = '';
+              lastPayloadSignatureRef.current = '';
+              setPendingOrder(null);
+              if (typeof window !== 'undefined') {
+                sessionStorage.removeItem('jio_pending_order');
+              }
+              setSuccessOrder({
+                ...targetOrder,
+                paymentStatus: 'CAPTURED',
+                status: 'BOOKING_RECEIVED',
+              });
+            } else {
+              setErrorMsg(verifyData.message || 'Payment verification failed server-side. Your booking has not been confirmed.');
+            }
+          } catch {
+            setLoading(false);
+            isRetryingRef.current = false;
+            setErrorMsg('Network error verifying payment. Please check your order in My Pickups.');
+          }
+        },
+        prefill: {
+          name: name || 'Customer',
+          contact: phone || '',
+        },
+        theme: {
+          color: '#059669',
+        },
+        modal: {
+          ondismiss: function () {
+            setLoading(false);
+            isRetryingRef.current = false;
+            setErrorMsg(`Checkout was cancelled or dismissed. Order #${targetOrder.orderNumber} is saved. You can retry payment whenever ready.`);
+          },
+        },
+      };
+
+      const rzp = new (window as any).Razorpay(options);
+      rzp.on('payment.failed', function (response: any) {
+        setLoading(false);
+        isRetryingRef.current = false;
+        const reason = response?.error?.description || response?.error?.reason || 'Transaction declined.';
+        setErrorMsg(`Payment failed: ${reason} Order #${targetOrder.orderNumber} is saved. You can retry payment whenever ready.`);
+      });
+
+      rzp.open();
+    } catch {
+      setLoading(false);
+      isRetryingRef.current = false;
+      setErrorMsg('Network error while retrying payment. Please try again.');
+    }
+  };
 
   // Master Customer Booking & Razorpay Payment Handler
   const handleConfirmOrder = async () => {
@@ -373,9 +641,60 @@ export default function BookingPage() {
       return;
     }
 
-    // Ensure session-stable idempotency key
-    if (!idempotencyKeyRef.current) {
-      idempotencyKeyRef.current = `booking-${phone.replace(/[\s+]/g, '')}-${Date.now()}`;
+    // If an unpaid order is already pending for this booking session, retry payment safely without creating a duplicate order
+    if (pendingOrder?.id) {
+      await handleRetryPayment(pendingOrder);
+      return;
+    }
+
+    const bookingPayload = {
+      phone,
+      name,
+      address: {
+        label: addressLabel || 'Home',
+        houseNo: houseNo || area || 'Pickup Location',
+        building: building || undefined,
+        street: street || area || 'Main Road',
+        area,
+        landmark: landmark || undefined,
+        pincode: pincode || '560001',
+        lat,
+        lng,
+        googlePlaceId: placeId,
+      },
+      items: selectedItems,
+      pickupType,
+      scheduledSlot: pickupType === 'SCHEDULED' ? formattedScheduledSlot : null,
+      photos: [], // Photo upload removed per user requirement
+      notes: instructions,
+      financialDirection: 'CUSTOMER_PAYS' as const,
+      couponCode: appliedCoupon?.code || undefined,
+    };
+
+    const currentPayloadSignature = JSON.stringify({
+      phone: phone.trim(),
+      name: name.trim(),
+      area: area.trim(),
+      houseNo: (houseNo || area || 'Pickup Location').trim(),
+      street: (street || area || 'Main Road').trim(),
+      pincode: (pincode || '560001').trim(),
+      lat,
+      lng,
+      items: selectedItems
+        .map((i) => ({ categoryId: i.categoryId, weight: i.estimatedWeight }))
+        .sort((a, b) => a.categoryId.localeCompare(b.categoryId)),
+      pickupType,
+      scheduledSlot: pickupType === 'SCHEDULED' ? formattedScheduledSlot : null,
+      notes: instructions.trim(),
+      couponCode: appliedCoupon?.code || '',
+    });
+
+    // Ensure session-stable idempotency key:
+    // If the booking payload was edited since last submission, or no key was assigned yet, generate a new key.
+    // If the exact same booking is retried, preserve the key so duplicate orders are prevented.
+    if (!idempotencyKeyRef.current || lastPayloadSignatureRef.current !== currentPayloadSignature) {
+      idempotencyKeyRef.current = `booking-${phone.replace(/[\s+]/g, '')}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      lastPayloadSignatureRef.current = currentPayloadSignature;
     }
 
     setLoading(true);
@@ -392,35 +711,24 @@ export default function BookingPage() {
           'Content-Type': 'application/json',
           'Idempotency-Key': idempotencyKeyRef.current,
         },
-        body: JSON.stringify({
-          phone,
-          name,
-          address: {
-            label: addressLabel || 'Home',
-            houseNo: houseNo || area || 'Pickup Location',
-            building: building || undefined,
-            street: street || area || 'Main Road',
-            area,
-            landmark: landmark || undefined,
-            pincode: pincode || '560001',
-            lat,
-            lng,
-            googlePlaceId: placeId,
-          },
-          items: selectedItems,
-          pickupType,
-          scheduledSlot: pickupType === 'SCHEDULED' ? formattedScheduledSlot : null,
-          photos: [], // Photo upload removed per user requirement
-          notes: instructions,
-          financialDirection: 'CUSTOMER_PAYS',
-        }),
+        body: JSON.stringify(bookingPayload),
       });
 
       const data = await res.json();
 
       if (!res.ok || !data.success) {
+        const errorCode = data.error?.code || data.code;
+        const errorMsg = data.error?.message || data.message || 'Failed to place order. Please verify your details and try again.';
+        if (res.status === 409 || errorCode === 'IDEMPOTENCY_CONFLICT') {
+          idempotencyKeyRef.current = '';
+          lastPayloadSignatureRef.current = '';
+        }
+        if (errorCode === 'INVALID_COUPON') {
+          setAppliedCoupon(null);
+          setCouponError(errorMsg);
+        }
         setLoading(false);
-        setErrorMsg(data.message || 'Failed to place order. Please verify your details and try again.');
+        setErrorMsg(errorMsg);
         return;
       }
 
@@ -435,15 +743,49 @@ export default function BookingPage() {
 
       const payData = await payRes.json();
       if (!payRes.ok || !payData.success) {
+        setPendingOrder(orderData);
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('jio_pending_order', JSON.stringify({
+            id: orderData.id,
+            orderNumber: orderData.orderNumber,
+            finalAmount: orderData.finalAmount,
+            area: orderData.address?.area || area,
+          }));
+        }
         setLoading(false);
-        setErrorMsg(payData.message || 'Failed to initialize Razorpay payment order.');
+        setErrorMsg(payData.message || 'Failed to initialize Razorpay payment order. Your order is saved and you can retry payment.');
+        return;
+      }
+
+      if (payData.alreadyPaid) {
+        idempotencyKeyRef.current = '';
+        lastPayloadSignatureRef.current = '';
+        setPendingOrder(null);
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('jio_pending_order');
+        }
+        setLoading(false);
+        setSuccessOrder({
+          ...orderData,
+          paymentStatus: 'CAPTURED',
+          status: 'BOOKING_RECEIVED',
+        });
         return;
       }
 
       const scriptLoaded = await scriptPromise;
       if (!scriptLoaded) {
+        setPendingOrder(orderData);
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('jio_pending_order', JSON.stringify({
+            id: orderData.id,
+            orderNumber: orderData.orderNumber,
+            finalAmount: orderData.finalAmount,
+            area: orderData.address?.area || area,
+          }));
+        }
         setLoading(false);
-        setErrorMsg('Failed to load Razorpay payment SDK. Please check your network connection.');
+        setErrorMsg('Failed to load Razorpay payment SDK. Please check your network connection and retry payment below.');
         return;
       }
 
@@ -475,16 +817,40 @@ export default function BookingPage() {
             setLoading(false);
 
             if (verifyRes.ok && verifyData.success) {
+              idempotencyKeyRef.current = '';
+              lastPayloadSignatureRef.current = '';
+              setPendingOrder(null);
+              if (typeof window !== 'undefined') {
+                sessionStorage.removeItem('jio_pending_order');
+              }
               setSuccessOrder({
                 ...orderData,
                 paymentStatus: 'CAPTURED',
                 status: 'BOOKING_RECEIVED',
               });
             } else {
+              setPendingOrder(orderData);
+              if (typeof window !== 'undefined') {
+                sessionStorage.setItem('jio_pending_order', JSON.stringify({
+                  id: orderData.id,
+                  orderNumber: orderData.orderNumber,
+                  finalAmount: orderData.finalAmount,
+                  area: orderData.address?.area || area,
+                }));
+              }
               setErrorMsg(verifyData.message || 'Payment verification failed server-side. Your booking has not been confirmed.');
             }
           } catch {
             setLoading(false);
+            setPendingOrder(orderData);
+            if (typeof window !== 'undefined') {
+              sessionStorage.setItem('jio_pending_order', JSON.stringify({
+                id: orderData.id,
+                orderNumber: orderData.orderNumber,
+                finalAmount: orderData.finalAmount,
+                area: orderData.address?.area || area,
+              }));
+            }
             setErrorMsg('Network error verifying payment. Please check your order in My Pickups.');
           }
         },
@@ -498,7 +864,16 @@ export default function BookingPage() {
         modal: {
           ondismiss: function () {
             setLoading(false);
-            setErrorMsg('Payment process was cancelled. Your booking has not been confirmed.');
+            setPendingOrder(orderData);
+            if (typeof window !== 'undefined') {
+              sessionStorage.setItem('jio_pending_order', JSON.stringify({
+                id: orderData.id,
+                orderNumber: orderData.orderNumber,
+                finalAmount: orderData.finalAmount,
+                area: orderData.address?.area || area,
+              }));
+            }
+            setErrorMsg(`Checkout was cancelled or dismissed. Order #${orderData.orderNumber} is saved. You can retry payment below or view it anytime.`);
           },
         },
       };
@@ -506,7 +881,17 @@ export default function BookingPage() {
       const rzp = new (window as any).Razorpay(options);
       rzp.on('payment.failed', function (response: any) {
         setLoading(false);
-        setErrorMsg(`Payment failed: ${response?.error?.description || 'Transaction declined.'} Your booking has not been confirmed.`);
+        setPendingOrder(orderData);
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('jio_pending_order', JSON.stringify({
+            id: orderData.id,
+            orderNumber: orderData.orderNumber,
+            finalAmount: orderData.finalAmount,
+            area: orderData.address?.area || area,
+          }));
+        }
+        const reason = response?.error?.description || response?.error?.reason || 'Transaction declined.';
+        setErrorMsg(`Payment failed: ${reason} Order #${orderData.orderNumber} is saved. Please retry payment below.`);
       });
 
       // Open Razorpay Checkout (BEFORE confirming booking)
@@ -650,7 +1035,7 @@ export default function BookingPage() {
       </div>
 
       {errorMsg && (
-        <div className="mb-6 p-3.5 bg-rose-50 border border-rose-200 text-rose-900 rounded-xl text-xs font-medium flex items-center gap-2.5 animate-scale-in">
+        <div role="alert" aria-live="assertive" className="mb-6 p-3.5 bg-rose-50 border border-rose-200 text-rose-900 rounded-xl text-xs font-medium flex items-center gap-2.5 animate-scale-in">
           <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
           <span>{errorMsg}</span>
         </div>
@@ -695,6 +1080,8 @@ export default function BookingPage() {
                         <img
                           src={CATEGORY_IMAGES[cat.name.trim()]}
                           alt={cat.name}
+                          loading="lazy"
+                          decoding="async"
                           className="h-full w-full object-cover"
                         />
                       ) : (
@@ -1081,6 +1468,124 @@ export default function BookingPage() {
             </div>
           </div>
 
+          {/* PROMO / COUPON CODE SECTION */}
+          <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-200/80 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
+                <Ticket className="w-4 h-4 text-emerald-600" />
+                Have a Promo Coupon?
+              </span>
+              <Link
+                href="/customer/coupons"
+                target="_blank"
+                className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 hover:underline flex items-center gap-1"
+              >
+                View Available Offers →
+              </Link>
+            </div>
+
+            {appliedCoupon ? (
+              <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-3 flex items-center justify-between animate-scale-in">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+                    <Check className="w-4 h-4 text-emerald-600 stroke-[2.5]" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-black text-emerald-900 bg-emerald-200/80 px-2 py-0.5 rounded">
+                        {appliedCoupon.code}
+                      </span>
+                      <span className="text-xs font-bold text-emerald-700">
+                        ₹{appliedCoupon.discountAmount.toFixed(2)} OFF
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-emerald-800 mt-0.5">
+                      {couponSuccessMsg || 'Coupon successfully applied!'}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleRemoveCoupon}
+                  className="text-xs font-bold text-slate-500 hover:text-rose-600 p-1.5 rounded-lg hover:bg-white/80 transition-colors flex items-center gap-1 cursor-pointer"
+                  title="Remove coupon"
+                  aria-label="Remove applied coupon"
+                >
+                  <X className="w-4 h-4" />
+                  <span className="hidden sm:inline">Remove</span>
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      id="coupon-code-input"
+                      type="text"
+                      value={couponInput}
+                      onChange={(e) => {
+                        setCouponInput(e.target.value.toUpperCase());
+                        if (couponError) setCouponError(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleApplyCoupon();
+                        }
+                      }}
+                      placeholder="e.g. WELCOME50 or SOUTHBLR20"
+                      aria-label="Enter promo coupon code"
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold uppercase text-slate-900 placeholder:text-slate-400 placeholder:normal-case placeholder:font-normal focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={couponLoading || !couponInput.trim()}
+                    onClick={() => handleApplyCoupon()}
+                    className="bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
+                  >
+                    {couponLoading ? (
+                      <>
+                        <Clock className="w-3.5 h-3.5 animate-spin" />
+                        Checking...
+                      </>
+                    ) : (
+                      'Apply'
+                    )}
+                  </button>
+                </div>
+
+                {/* Popular suggestions chips */}
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 pt-0.5">
+                  <span className="font-medium">Quick apply:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyCoupon('WELCOME50')}
+                    className="font-mono font-bold text-[10px] text-emerald-700 bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 px-2 py-0.5 rounded-md cursor-pointer transition-colors"
+                  >
+                    WELCOME50 (₹50 off)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyCoupon('SOUTHBLR20')}
+                    className="font-mono font-bold text-[10px] text-emerald-700 bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 px-2 py-0.5 rounded-md cursor-pointer transition-colors"
+                  >
+                    SOUTHBLR20 (20% off)
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {couponError && (
+              <div role="alert" className="p-2.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg text-xs font-medium flex items-center gap-2 animate-scale-in">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{couponError}</span>
+              </div>
+            )}
+          </div>
+
           {/* FINANCIAL SUMMARY BOX */}
           <div className="bg-slate-900 text-white p-4 sm:p-5 rounded-xl space-y-2.5 shadow-sm border border-slate-800">
             <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800 pb-2">
@@ -1094,6 +1599,12 @@ export default function BookingPage() {
               <span>Pickup Service Charge:</span>
               <span>₹{estimate.baseCharge.toFixed(2)}</span>
             </div>
+            {estimate.discountAmount > 0 && (
+              <div className="flex items-center justify-between text-xs text-emerald-400 font-bold bg-emerald-950/60 p-2 rounded-lg border border-emerald-800/60">
+                <span>Coupon Discount ({appliedCoupon?.code}):</span>
+                <span>-₹{estimate.discountAmount.toFixed(2)}</span>
+              </div>
+            )}
             <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between text-sm font-bold">
               <span>Total Amount Payable:</span>
               <span className="text-lg text-emerald-400 font-extrabold">₹{estimate.netAmount.toFixed(2)}</span>
@@ -1108,38 +1619,99 @@ export default function BookingPage() {
             </span>
           </div>
 
-          {/* ACTION BUTTONS */}
-          <div className="flex flex-col gap-2 pt-2">
-            <div className="flex items-center justify-between gap-3">
-              <button
-                onClick={() => setStep(2)}
-                className="text-slate-600 font-bold text-xs px-3 py-2 hover:bg-slate-100 rounded-lg shrink-0 cursor-pointer"
-              >
-                Back
-              </button>
-              <button
-                disabled={loading}
-                onClick={handleConfirmOrder}
-                className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-300 text-slate-950 font-bold text-sm py-3.5 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
-              >
-                {loading ? (
-                  <>
-                    <Clock className="w-4 h-4 animate-spin text-slate-950" />
-                    Opening secure payment...
-                  </>
-                ) : (
-                  <>
-                    Pay ₹{estimate.netAmount.toFixed(2)} & Confirm Pickup
-                    <ArrowRight className="w-4 h-4" />
-                  </>
-                )}
-              </button>
-            </div>
+          {/* PENDING / FAILED PAYMENT RETRY BANNER */}
+          {pendingOrder ? (
+            <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 sm:p-5 space-y-4 animate-scale-in">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 bg-amber-100 text-amber-700 rounded-xl shrink-0 mt-0.5 border border-amber-200">
+                  <AlertTriangle className="w-5 h-5 text-amber-600" />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-[10px] uppercase tracking-wider text-amber-900 bg-amber-200/80 px-2 py-0.5 rounded font-mono">
+                      Payment Action Required
+                    </span>
+                    <span className="font-mono text-xs font-bold text-slate-900">
+                      Order #{pendingOrder.orderNumber}
+                    </span>
+                  </div>
+                  <p className="text-xs text-amber-900 font-medium">
+                    {errorMsg || 'Your pickup request was recorded, but payment was cancelled, dismissed, or could not be completed. Your order is safely preserved and waiting for payment.'}
+                  </p>
+                </div>
+              </div>
 
-            <p className="text-[10px] text-center text-slate-500 font-medium mt-1">
-              🔒 Secure payment powered by Razorpay. Booking confirmed only after verified successful payment.
-            </p>
-          </div>
+              <div className="pt-2 border-t border-amber-200 flex flex-col sm:flex-row items-center gap-2.5">
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => handleRetryPayment(pendingOrder)}
+                  className="w-full sm:flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-300 text-white font-bold text-xs py-3.5 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
+                >
+                  {loading ? (
+                    <>
+                      <Clock className="w-4 h-4 animate-spin text-white" />
+                      Opening secure payment...
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard className="w-4 h-4" />
+                      Retry Payment (₹{Number(pendingOrder.finalAmount || estimate.netAmount).toFixed(2)})
+                    </>
+                  )}
+                </button>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <Link
+                    href={`/orders/${pendingOrder.id}`}
+                    className="flex-1 sm:flex-initial w-full sm:w-auto text-center bg-white hover:bg-slate-50 text-slate-800 font-bold text-xs px-4 py-3 rounded-xl border border-slate-300 shadow-sm transition-colors"
+                  >
+                    View Order Details
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={handleStartFresh}
+                    className="flex-1 sm:flex-initial w-full sm:w-auto text-center text-slate-600 hover:text-slate-900 font-semibold text-xs px-3 py-3 rounded-xl hover:bg-amber-100/60 transition-colors cursor-pointer"
+                  >
+                    Start Fresh
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* STANDARD ACTION BUTTONS */
+            <div className="flex flex-col gap-2 pt-2">
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  onClick={() => setStep(2)}
+                  className="text-slate-600 font-bold text-xs px-3 py-2 hover:bg-slate-100 rounded-lg shrink-0 cursor-pointer"
+                >
+                  Back
+                </button>
+                <button
+                  disabled={loading}
+                  onClick={handleConfirmOrder}
+                  className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-300 text-slate-950 font-bold text-sm py-3.5 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
+                >
+                  {loading ? (
+                    <>
+                      <Clock className="w-4 h-4 animate-spin text-slate-950" />
+                      Opening secure payment...
+                    </>
+                  ) : (
+                    <>
+                      Pay ₹{estimate.netAmount.toFixed(2)} & Confirm Pickup
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <p className="text-[10px] text-center text-slate-500 font-medium mt-1">
+                🔒 Secure payment powered by Razorpay. Booking confirmed only after verified successful payment.
+              </p>
+            </div>
+          )}
         </div>
       )}
 

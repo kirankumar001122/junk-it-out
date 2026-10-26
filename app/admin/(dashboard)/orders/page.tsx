@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import {
   Package,
@@ -31,8 +31,14 @@ export default function AdminOrdersPage() {
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
 
+  const assignInFlightRef = useRef(false);
+  const loadingRef = useRef(false);
+
   const loadOrdersAndAgents = async () => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     try {
+      setLoading(true);
       setAgentsLoading(true);
       setAgentsError(null);
       const [ordersRes, agentsRes] = await Promise.all([
@@ -53,6 +59,7 @@ export default function AdminOrdersPage() {
     } finally {
       setLoading(false);
       setAgentsLoading(false);
+      loadingRef.current = false;
     }
   };
 
@@ -73,6 +80,7 @@ export default function AdminOrdersPage() {
   };
 
   const handleAssignAgent = async () => {
+    if (assignInFlightRef.current || assignLoading) return;
     if (!selectedOrderForAssign) return;
     if (!selectedAgentId) {
       setAssignError('Please select a valid registered field agent from the dropdown.');
@@ -84,6 +92,7 @@ export default function AdminOrdersPage() {
       return;
     }
 
+    assignInFlightRef.current = true;
     setAssignLoading(true);
     setAssignError(null);
 
@@ -105,6 +114,7 @@ export default function AdminOrdersPage() {
       console.error(e);
       setAssignError('Network error while assigning agent.');
     } finally {
+      assignInFlightRef.current = false;
       setAssignLoading(false);
     }
   };
@@ -132,10 +142,12 @@ export default function AdminOrdersPage() {
         </div>
 
         <button
+          type="button"
           onClick={loadOrdersAndAgents}
-          className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl border border-slate-200 flex items-center gap-2"
+          disabled={loading}
+          className="bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl border border-slate-200 flex items-center gap-2 transition-opacity"
         >
-          <RefreshCw className="w-4 h-4 text-slate-600" />
+          <RefreshCw className={`w-4 h-4 text-slate-600 ${loading ? 'animate-spin' : ''}`} />
           Refresh List
         </button>
       </div>

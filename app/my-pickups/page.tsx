@@ -18,9 +18,22 @@ import {
   Layers,
   Smartphone,
   ShieldCheck,
+  XCircle,
+  X,
+  CreditCard,
 } from 'lucide-react';
 import CustomerOtpLogin from '@/components/CustomerOtpLogin';
 import { readCustomerPickupsResponse } from '@/lib/customerPickupsResponse';
+
+const isCustomerCancellable = (status?: string): boolean => {
+  return [
+    'BOOKING_RECEIVED',
+    'AGENT_BEING_ASSIGNED',
+    'AGENT_ASSIGNED',
+    'AGENT_ACCEPTED',
+    'AGENT_ON_WAY',
+  ].includes(status || '');
+};
 
 export default function MyPickupsPage() {
   const [orders, setOrders] = useState<any[]>([]);
@@ -31,6 +44,28 @@ export default function MyPickupsPage() {
   const [sessionReady, setSessionReady] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const [agentNotice, setAgentNotice] = useState<any | null>(null);
+  const [pendingNotice, setPendingNotice] = useState<any | null>(null);
+
+  // Cancellation State
+  const [cancellingOrder, setCancellingOrder] = useState<any | null>(null);
+  const [cancelReason, setCancelReason] = useState('Need to reschedule for another time');
+  const [customCancelReason, setCustomCancelReason] = useState('');
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const cancelInFlightRef = useRef(false);
+
+  // Keyboard accessibility: dismiss cancellation modal with Escape key
+  useEffect(() => {
+    if (!cancellingOrder) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !cancelLoading) {
+        setCancellingOrder(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [cancellingOrder, cancelLoading]);
+
   const requestInFlight = useRef(false);
   const mounted = useRef(false);
 
@@ -53,6 +88,18 @@ export default function MyPickupsPage() {
         setUnauthenticated(false);
         setOrders(result.orders);
         setErrorMsg(null);
+        try {
+          if (typeof window !== 'undefined') {
+            const raw = sessionStorage.getItem('jio_pending_order');
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (parsed?.id && result.orders.some((o: any) => o.id === parsed.id)) {
+                sessionStorage.removeItem('jio_pending_order');
+                setPendingNotice(null);
+              }
+            }
+          }
+        } catch {}
       } else {
         setErrorMsg(result.message);
       }
@@ -67,8 +114,58 @@ export default function MyPickupsPage() {
     }
   };
 
+  const handleCancelOrder = async () => {
+    if (!cancellingOrder?.id || cancelInFlightRef.current || cancelLoading) return;
+    cancelInFlightRef.current = true;
+    setCancelLoading(true);
+    setCancelError(null);
+
+    const finalReason =
+      cancelReason === 'Other'
+        ? (customCancelReason.trim() || 'Order cancelled by customer')
+        : customCancelReason.trim()
+          ? `${cancelReason}: ${customCancelReason.trim()}`
+          : cancelReason;
+
+    try {
+      const res = await fetch(`/api/orders/${cancellingOrder.id}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cancellationReason: finalReason }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.success) {
+        setCancellingOrder(null);
+        setCustomCancelReason('');
+        await fetchOrders();
+      } else {
+        setCancelError(
+          data.message || 'Failed to cancel order. Please verify order status and try again.'
+        );
+      }
+    } catch {
+      setCancelError('Network error while submitting cancellation request.');
+    } finally {
+      cancelInFlightRef.current = false;
+      setCancelLoading(false);
+    }
+  };
+
   useEffect(() => {
     mounted.current = true;
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = sessionStorage.getItem('jio_pending_order');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.id && parsed?.orderNumber) {
+            setPendingNotice(parsed);
+          }
+        }
+      }
+    } catch {}
     void fetchOrders();
 
     return () => {
@@ -279,6 +376,51 @@ export default function MyPickupsPage() {
         ))}
       </div>
 
+      {/* PENDING PAYMENT NOTICE FOR RECENT BOOKING */}
+      {pendingNotice && (
+        <div className="p-4 bg-amber-50 border-2 border-amber-300 text-amber-950 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm animate-scale-in">
+          <div className="flex items-start gap-3">
+            <div className="p-2.5 bg-amber-100 text-amber-800 rounded-xl shrink-0 mt-0.5 border border-amber-200">
+              <Clock className="w-5 h-5 text-amber-700" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-[10px] uppercase tracking-wider text-amber-900 bg-amber-200/80 px-2 py-0.5 rounded font-mono">
+                  Payment Pending
+                </span>
+                <span className="font-mono text-xs font-bold text-slate-900">
+                  Order #{pendingNotice.orderNumber}
+                </span>
+              </div>
+              <p className="text-xs text-amber-900 font-medium">
+                Your pickup request for {pendingNotice.area || 'Bengaluru'} is awaiting payment of ₹{Number(pendingNotice.finalAmount || 0).toFixed(2)}. Complete payment to assign your pickup agent.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+            <Link
+              href={`/orders/${pendingNotice.id}`}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-sm flex items-center gap-1.5"
+            >
+              <CreditCard className="w-3.5 h-3.5" />
+              Complete Payment
+            </Link>
+            <button
+              onClick={() => {
+                if (typeof window !== 'undefined') {
+                  sessionStorage.removeItem('jio_pending_order');
+                }
+                setPendingNotice(null);
+              }}
+              className="text-slate-400 hover:text-slate-600 text-xs p-2 rounded-lg cursor-pointer"
+              title="Dismiss notice"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {errorMsg && (
         <div className="p-4 bg-rose-50 border border-rose-200 text-rose-900 rounded-2xl text-xs font-bold flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -413,7 +555,7 @@ export default function MyPickupsPage() {
                 )}
 
                 {/* CARD FOOTER */}
-                <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <span className="text-[11px] text-slate-400 block font-medium">Total Booking Amount</span>
                     <span className="text-base font-black text-emerald-600">
@@ -421,17 +563,146 @@ export default function MyPickupsPage() {
                     </span>
                   </div>
 
-                  <Link
-                    href={`/orders/${o.id}`}
-                    className="hover-lift bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl flex items-center gap-1.5 shadow-sm uppercase tracking-wider"
-                  >
-                    TRACK PICKUP
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    {isCustomerCancellable(o.status) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCancelError(null);
+                          setCancellingOrder(o);
+                        }}
+                        className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold px-3 py-2.5 rounded-xl transition-colors flex items-center gap-1"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        Cancel
+                      </button>
+                    )}
+
+                    <Link
+                      href={`/orders/${o.id}`}
+                      className="hover-lift bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl flex items-center gap-1.5 shadow-sm uppercase tracking-wider"
+                    >
+                      TRACK PICKUP
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </Link>
+                  </div>
                 </div>
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* CANCELLATION MODAL */}
+      {cancellingOrder && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cancel-pickup-dialog-title"
+          className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in"
+        >
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl border border-slate-100">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-2 text-rose-600 font-extrabold text-base">
+                <AlertTriangle className="w-5 h-5" />
+                <h3 id="cancel-pickup-dialog-title" className="text-slate-900 font-black">
+                  Cancel Pickup Order
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !cancelLoading && setCancellingOrder(null)}
+                disabled={cancelLoading}
+                className="p-1 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                aria-label="Close dialog"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Are you sure you want to cancel pickup order{" "}
+              <strong className="text-slate-900 font-mono">#{cancellingOrder.orderNumber}</strong>?
+            </p>
+
+            {cancellingOrder.paymentStatus === 'CAPTURED' && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-xs text-amber-900">
+                <span className="font-bold block">Prepaid Order Refund</span>
+                Your paid amount of ₹{(cancellingOrder.finalAmount || cancellingOrder.estimatedTotal || 0).toFixed(2)} will be automatically queued for a 100% refund to your original payment method.
+              </div>
+            )}
+
+            {cancelError && (
+              <div role="alert" className="bg-rose-50 border border-rose-200 rounded-2xl p-3 text-xs text-rose-800 font-semibold flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <span>{cancelError}</span>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label htmlFor="modal-cancel-reason-select" className="text-xs font-bold text-slate-700 block">
+                Reason for cancellation:
+              </label>
+              <select
+                id="modal-cancel-reason-select"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                disabled={cancelLoading}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-rose-500"
+              >
+                <option value="Need to reschedule for another time">Need to reschedule for another time</option>
+                <option value="Scrap/junk items are no longer available">Scrap/junk items are no longer available</option>
+                <option value="Placed order by mistake / testing">Placed order by mistake / testing</option>
+                <option value="Assigned agent is delayed or taking too long">Assigned agent is delayed or taking too long</option>
+                <option value="Found alternative disposal method">Found alternative disposal method</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+
+            {cancelReason === 'Other' && (
+              <div className="space-y-1.5">
+                <label htmlFor="modal-custom-cancel-reason" className="text-xs font-bold text-slate-700 block">
+                  Please specify:
+                </label>
+                <textarea
+                  id="modal-custom-cancel-reason"
+                  value={customCancelReason}
+                  onChange={(e) => setCustomCancelReason(e.target.value)}
+                  placeholder="Tell us why you are cancelling this pickup..."
+                  rows={3}
+                  disabled={cancelLoading}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-800 focus:ring-2 focus:ring-rose-500"
+                />
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setCancellingOrder(null)}
+                disabled={cancelLoading}
+                className="w-1/2 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 font-bold text-xs py-3 rounded-xl transition-colors"
+              >
+                Keep Pickup
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCancelOrder}
+                disabled={cancelLoading}
+                className="w-1/2 bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white font-bold text-xs py-3 rounded-xl shadow-md transition-colors flex items-center justify-center gap-1.5"
+              >
+                {cancelLoading ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Cancelling...
+                  </>
+                ) : (
+                  'Confirm Cancellation'
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

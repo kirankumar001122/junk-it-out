@@ -55,6 +55,16 @@ export default function CustomerOtpLogin({
     return () => window.clearInterval(timer);
   }, [cooldown]);
 
+  // Keyboard accessibility: dismiss with Escape key
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   // ---------------------------------------------------------
@@ -350,7 +360,7 @@ export default function CustomerOtpLogin({
 
               {/* Error */}
               {error && (
-                <p className="rounded-lg border border-rose-100 bg-rose-50 p-2.5 text-xs font-medium text-rose-700">
+                <p role="alert" aria-live="assertive" className="rounded-lg border border-rose-100 bg-rose-50 p-2.5 text-xs font-medium text-rose-700">
                   {error}
                 </p>
               )}

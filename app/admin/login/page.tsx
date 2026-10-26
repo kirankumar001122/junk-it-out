@@ -163,10 +163,11 @@ export default function AdminLoginPage() {
           className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-xl"
         >
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">Admin Phone</label>
+            <label htmlFor="admin-phone" className="text-xs font-bold text-slate-300 uppercase tracking-wider">Admin Phone</label>
             <div className="relative">
               <Smartphone className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
+                id="admin-phone"
                 type="tel"
                 value={otpSent ? sentPhone : phone}
                 onChange={(e) => setPhone(e.target.value)}
@@ -180,10 +181,11 @@ export default function AdminLoginPage() {
 
           {otpSent && (
             <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">OTP Code</label>
+              <label htmlFor="admin-otp" className="text-xs font-bold text-slate-300 uppercase tracking-wider">OTP Code</label>
               <div className="relative">
                 <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
+                  id="admin-otp"
                   type="text"
                   inputMode="numeric"
                   value={otp}
@@ -198,13 +200,13 @@ export default function AdminLoginPage() {
           )}
 
           {error && (
-            <div className="text-xs font-semibold text-rose-300 bg-rose-950/50 border border-rose-900 rounded-xl px-3 py-2">
+            <div role="alert" className="text-xs font-semibold text-rose-300 bg-rose-950/50 border border-rose-900 rounded-xl px-3 py-2">
               {error}
             </div>
           )}
 
           {info && (
-            <div className="text-xs font-semibold text-emerald-300 bg-emerald-950/40 border border-emerald-900 rounded-xl px-3 py-2">
+            <div role="status" aria-live="polite" className="text-xs font-semibold text-emerald-300 bg-emerald-950/40 border border-emerald-900 rounded-xl px-3 py-2">
               {info}
             </div>
           )}
