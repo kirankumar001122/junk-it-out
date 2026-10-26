@@ -23,13 +23,10 @@ function getDatabaseUrl() {
 }
 
 function createPrismaClient() {
+  const databaseUrl = getDatabaseUrl();
   const client = new PrismaClient({
     log: [{ emit: 'event', level: 'warn' }],
-    datasources: {
-      db: {
-        url: getDatabaseUrl(),
-      },
-    },
+    ...(databaseUrl ? { datasources: { db: { url: databaseUrl } } } : {}),
   });
 
   client.$on('warn', () => {
