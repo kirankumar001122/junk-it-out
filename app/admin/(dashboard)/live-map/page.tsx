@@ -45,9 +45,11 @@ export default function AdminLiveMapPage() {
     id: `order-${o.id}`,
     lat: o.address?.lat || 12.9077,
     lng: o.address?.lng || 77.5854,
-    title: `Order ${o.orderNumber}`,
+    title: `Order #${o.orderNumber}`,
     subtitle: `Status: ${o.status} | Customer: ${o.customer?.user?.name || 'Customer'}`,
     type: 'PICKUP' as const,
+    status: o.status,
+    orderId: o.id,
   }));
 
   const allMarkers = [...agentMarkers, ...orderMarkers];
