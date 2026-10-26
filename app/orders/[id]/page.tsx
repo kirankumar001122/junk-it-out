@@ -437,14 +437,14 @@ export default function OrderTrackingPage() {
         <div className="pt-2 flex justify-center gap-3">
           <button
             onClick={() => router.push("/my-pickups")}
-            className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-sm uppercase tracking-wider"
+            className="btn-glossy-primary rounded-full text-xs font-bold px-6 py-3 shadow-md uppercase tracking-wider"
           >
             My Pickups
           </button>
 
           <button
             onClick={() => router.push("/")}
-            className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-5 py-3 rounded-xl border border-slate-200 uppercase tracking-wider"
+            className="btn-glossy-secondary rounded-full text-xs font-bold px-6 py-3 border border-slate-300 uppercase tracking-wider"
           >
             Return Home
           </button>
@@ -860,7 +860,7 @@ export default function OrderTrackingPage() {
                 setCancelError(null);
                 setShowCancelModal(true);
               }}
-              className="text-xs font-bold bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-300 px-3 py-2 rounded-xl transition-colors flex items-center gap-1.5"
+              className="btn-glossy-danger rounded-full text-xs font-bold px-4 py-2 shadow-sm flex items-center gap-1.5"
             >
               <XCircle className="w-4 h-4" />
               Cancel Pickup
@@ -1364,16 +1364,16 @@ export default function OrderTrackingPage() {
                 <button
                   onClick={handlePayNow}
                   disabled={paymentLoading}
-                  className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-60 text-slate-950 font-bold text-xs px-5 py-3 rounded-xl shadow-md transition-all flex items-center gap-2"
+                  className="btn-glossy-primary rounded-full text-slate-950 font-extrabold text-xs px-6 py-3.5 shadow-lg shadow-emerald-500/25 flex items-center gap-2 tracking-wider"
                 >
                   {paymentLoading ? (
                     <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
                       Processing payment...
                     </>
                   ) : (
                     <>
-                      <CreditCard className="w-4 h-4" />
+                      <CreditCard className="w-4 h-4 shrink-0" />
                       PAY NOW (RAZORPAY)
                     </>
                   )}
@@ -1384,7 +1384,7 @@ export default function OrderTrackingPage() {
               <a
                 href={`/orders/${order.id}/receipt`}
                 target="_blank"
-                className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-4 py-3 rounded-xl border border-slate-700 flex items-center gap-2"
+                className="btn-glossy-dark rounded-full text-white text-xs font-bold px-5 py-3 border border-slate-700 flex items-center gap-2"
               >
                 <FileText className="w-4 h-4 text-emerald-400" />
                 RECEIPT ({order.invoices[0].invoiceNumber})
@@ -1416,12 +1416,12 @@ export default function OrderTrackingPage() {
               className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3 text-xs"
             />
 
-            <div className="flex gap-2">
+            <div className="flex gap-2.5">
               <button
                 type="button"
                 onClick={() => setShowComplaintModal(false)}
                 disabled={complaintSubmitting}
-                className="w-1/2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 font-bold text-xs py-3 rounded-xl transition-colors"
+                className="w-1/2 btn-glossy-secondary rounded-full font-bold text-xs py-3 shadow-xs"
               >
                 Cancel
               </button>
@@ -1430,7 +1430,7 @@ export default function OrderTrackingPage() {
                 type="button"
                 onClick={handleSubmitComplaint}
                 disabled={complaintSubmitting || !complaintText.trim()}
-                className="w-1/2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-bold text-xs py-3 rounded-xl transition-colors flex items-center justify-center gap-1.5"
+                className="w-1/2 btn-glossy-danger rounded-full font-bold text-xs py-3 shadow-md flex items-center justify-center gap-1.5"
               >
                 {complaintSubmitting ? (
                   <>

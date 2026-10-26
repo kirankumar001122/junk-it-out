@@ -369,10 +369,10 @@ export default function CustomerOtpLogin({
               <button
                 type="submit"
                 disabled={loading}
-                className="flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-slate-900 text-xs font-bold text-white shadow-sm transition-all hover:bg-slate-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+                className="btn-glossy-primary rounded-full w-full h-11 text-xs font-bold tracking-wide shadow-md disabled:opacity-60"
               >
                 {loading && (
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                  <LoaderCircle className="h-4 w-4 animate-spin shrink-0" />
                 )}
 
                 {step === 'details'
@@ -391,7 +391,7 @@ export default function CustomerOtpLogin({
                       setError('');
                       setCooldown(0);
                     }}
-                    className="cursor-pointer text-slate-500 hover:text-slate-900"
+                    className="cursor-pointer text-slate-500 hover:text-slate-900 px-2 py-1 rounded-full hover:bg-slate-100 transition-colors"
                   >
                     Change details
                   </button>
@@ -406,7 +406,7 @@ export default function CustomerOtpLogin({
                         preventDefault: () => undefined,
                       } as FormEvent)
                     }
-                    className="cursor-pointer text-emerald-600 hover:text-emerald-700 hover:underline disabled:cursor-default disabled:text-slate-400 disabled:no-underline"
+                    className="cursor-pointer text-emerald-600 hover:text-emerald-700 hover:underline disabled:cursor-default disabled:text-slate-400 disabled:no-underline px-2 py-1 rounded-full hover:bg-emerald-50 transition-colors"
                   >
                     {cooldown > 0
                       ? `Resend in ${cooldown}s`
@@ -464,7 +464,7 @@ export default function CustomerOtpLogin({
             <button
               type="button"
               onClick={closeServiceNotice}
-              className="mt-5 flex h-10 w-full cursor-pointer items-center justify-center rounded-xl bg-slate-900 text-xs font-bold text-white transition-colors hover:bg-emerald-600"
+              className="mt-5 btn-glossy-primary rounded-full w-full h-11 text-xs font-bold"
             >
               Got it
             </button>

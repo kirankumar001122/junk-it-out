@@ -145,7 +145,7 @@ export default function AdminOrdersPage() {
           type="button"
           onClick={loadOrdersAndAgents}
           disabled={loading}
-          className="bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl border border-slate-200 flex items-center gap-2 transition-opacity"
+          className="btn-glossy-secondary rounded-full disabled:opacity-50 text-slate-800 font-bold text-xs px-5 py-2.5 border border-slate-200 flex items-center gap-2 shadow-2xs"
         >
           <RefreshCw className={`w-4 h-4 text-slate-600 ${loading ? 'animate-spin' : ''}`} />
           Refresh List
@@ -253,14 +253,14 @@ export default function AdminOrdersPage() {
                       <div className="flex items-center gap-2">
                         <Link
                           href={`/admin/orders/${o.id}`}
-                          className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-3 py-1.5 rounded-xl text-[11px] font-bold inline-flex items-center gap-1"
+                          className="btn-glossy-secondary rounded-full text-slate-800 px-3.5 py-1.5 text-[11px] font-bold inline-flex items-center gap-1 shadow-2xs border border-slate-200"
                         >
                           <Eye className="w-3.5 h-3.5" />
                           View
                         </Link>
                         <button
                           onClick={() => openAssignModal(o)}
-                          className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-xl text-[11px] font-bold inline-flex items-center gap-1"
+                          className="btn-glossy-primary rounded-full text-white px-3.5 py-1.5 text-[11px] font-bold inline-flex items-center gap-1 shadow-2xs"
                         >
                           <UserPlus className="w-3.5 h-3.5" />
                           Assign
@@ -346,7 +346,7 @@ export default function AdminOrdersPage() {
                   setAssignError(null);
                 }}
                 disabled={assignLoading}
-                className="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 rounded-xl disabled:opacity-50"
+                className="w-1/2 btn-glossy-secondary rounded-full text-slate-700 font-bold text-xs py-3 shadow-2xs disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -354,7 +354,7 @@ export default function AdminOrdersPage() {
                 type="button"
                 onClick={handleAssignAgent}
                 disabled={assignLoading || agents.length === 0 || !selectedAgentId}
-                className="w-1/2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 rounded-xl shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-1/2 btn-glossy-primary rounded-full text-white font-bold text-xs py-3 shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {assignLoading ? 'Assigning...' : 'Confirm Assignment'}
               </button>

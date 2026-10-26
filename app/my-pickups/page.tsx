@@ -571,7 +571,7 @@ export default function MyPickupsPage() {
                           setCancelError(null);
                           setCancellingOrder(o);
                         }}
-                        className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold px-3 py-2.5 rounded-xl transition-colors flex items-center gap-1"
+                        className="btn-glossy-danger rounded-full text-xs font-bold px-4 py-2 shadow-xs flex items-center gap-1"
                       >
                         <XCircle className="w-3.5 h-3.5" />
                         Cancel
@@ -580,7 +580,7 @@ export default function MyPickupsPage() {
 
                     <Link
                       href={`/orders/${o.id}`}
-                      className="hover-lift bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl flex items-center gap-1.5 shadow-sm uppercase tracking-wider"
+                      className="btn-glossy-dark rounded-full text-white text-xs font-extrabold px-5 py-2.5 flex items-center gap-1.5 shadow-sm uppercase tracking-wider"
                     >
                       TRACK PICKUP
                       <ArrowRight className="w-3.5 h-3.5" />
@@ -676,12 +676,12 @@ export default function MyPickupsPage() {
               </div>
             )}
 
-            <div className="flex gap-2 pt-2">
+            <div className="flex gap-2.5 pt-2">
               <button
                 type="button"
                 onClick={() => setCancellingOrder(null)}
                 disabled={cancelLoading}
-                className="w-1/2 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 font-bold text-xs py-3 rounded-xl transition-colors"
+                className="w-1/2 btn-glossy-secondary rounded-full font-bold text-xs py-3 shadow-xs"
               >
                 Keep Pickup
               </button>
@@ -690,11 +690,11 @@ export default function MyPickupsPage() {
                 type="button"
                 onClick={handleCancelOrder}
                 disabled={cancelLoading}
-                className="w-1/2 bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white font-bold text-xs py-3 rounded-xl shadow-md transition-colors flex items-center justify-center gap-1.5"
+                className="w-1/2 btn-glossy-danger rounded-full font-bold text-xs py-3 shadow-md flex items-center justify-center gap-1.5"
               >
                 {cancelLoading ? (
                   <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
                     Cancelling...
                   </>
                 ) : (

@@ -214,9 +214,9 @@ export default function AdminLoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-extrabold text-sm py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            className="w-full btn-glossy-primary rounded-full text-white font-extrabold text-sm py-4 flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 cursor-pointer disabled:opacity-60"
           >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+            {loading ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : <ArrowRight className="w-4 h-4 shrink-0" />}
             {loading
               ? otpSent
                 ? 'Verifying OTP...'
@@ -232,7 +232,7 @@ export default function AdminLoginPage() {
                 type="button"
                 onClick={handleChangePhone}
                 disabled={loading}
-                className="text-xs font-bold text-slate-400 hover:text-white py-1 disabled:opacity-50 cursor-pointer"
+                className="text-xs font-bold text-slate-400 hover:text-white px-3 py-1.5 rounded-full hover:bg-slate-800 transition-colors disabled:opacity-50 cursor-pointer"
               >
                 Change phone number
               </button>
@@ -241,9 +241,9 @@ export default function AdminLoginPage() {
                 type="button"
                 onClick={handleResendOtp}
                 disabled={loading || cooldown > 0}
-                className="text-xs font-bold text-emerald-400 hover:text-emerald-300 disabled:text-slate-600 py-1 flex items-center gap-1 cursor-pointer"
+                className="text-xs font-bold text-emerald-400 hover:text-emerald-300 disabled:text-slate-600 px-3 py-1.5 rounded-full hover:bg-emerald-950/40 transition-colors flex items-center gap-1.5 cursor-pointer"
               >
-                <RotateCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+                <RotateCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
                 {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend OTP'}
               </button>
             </div>

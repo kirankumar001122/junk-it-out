@@ -124,9 +124,9 @@ export default function AdminSettlementsPage() {
                           type="button"
                           onClick={() => updateStatus(settlement.id, 'APPROVED')}
                           disabled={isAnyUpdating}
-                          className="px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-800 font-bold hover:bg-emerald-200 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                          className="btn-glossy-primary rounded-full px-3.5 py-1.5 text-white font-bold text-xs disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5 shadow-2xs"
                         >
-                          {isUpdating && <RefreshCw className="w-3 h-3 animate-spin" />}
+                          {isUpdating && <RefreshCw className="w-3 h-3 animate-spin shrink-0" />}
                           {isUpdating ? 'Approving...' : 'Approve'}
                         </button>
                       )}
@@ -135,9 +135,9 @@ export default function AdminSettlementsPage() {
                           type="button"
                           onClick={() => updateStatus(settlement.id, 'READY_FOR_PAYOUT')}
                           disabled={isAnyUpdating}
-                          className="px-3 py-1.5 rounded-lg bg-amber-100 text-amber-800 font-bold hover:bg-amber-200 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                          className="btn-glossy-amber rounded-full px-3.5 py-1.5 text-slate-950 font-bold text-xs disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5 shadow-2xs"
                         >
-                          {isUpdating && <RefreshCw className="w-3 h-3 animate-spin" />}
+                          {isUpdating && <RefreshCw className="w-3 h-3 animate-spin shrink-0" />}
                           {isUpdating ? 'Updating...' : 'Ready for payout'}
                         </button>
                       )}
@@ -146,9 +146,9 @@ export default function AdminSettlementsPage() {
                           type="button"
                           onClick={() => updateStatus(settlement.id, 'PAID')}
                           disabled={isAnyUpdating}
-                          className="px-3 py-1.5 rounded-lg bg-blue-100 text-blue-800 font-bold hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                          className="btn-glossy-blue rounded-full px-3.5 py-1.5 text-white font-bold text-xs disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5 shadow-2xs"
                         >
-                          {isUpdating && <RefreshCw className="w-3 h-3 animate-spin" />}
+                          {isUpdating && <RefreshCw className="w-3 h-3 animate-spin shrink-0" />}
                           {isUpdating ? 'Disbursing...' : 'Mark Paid / Disbursed'}
                         </button>
                       )}

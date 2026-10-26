@@ -51,7 +51,7 @@ export default function AdminHeader() {
       <div className="flex items-center gap-3">
         <Link
           href="/admin/notifications"
-          className="relative p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-slate-700"
+          className="relative p-2.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-slate-700 shadow-xs"
           title="System Alerts & Notifications"
         >
           <Bell className="w-4 h-4" />
@@ -59,8 +59,8 @@ export default function AdminHeader() {
         </Link>
 
         {/* Admin Profile */}
-        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700">
-          <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+        <div className="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-slate-800/80 border border-slate-700 shadow-xs">
+          <div className="w-7 h-7 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
             <User className="w-4 h-4" />
           </div>
           <div className="text-left">
@@ -72,7 +72,7 @@ export default function AdminHeader() {
         {/* Logout */}
         <button
           onClick={handleLogout}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800/80 text-xs font-bold transition-colors"
+          className="btn-glossy-danger rounded-full px-4 py-2 text-xs font-bold shadow-sm"
           title="Logout Admin Session"
         >
           <LogOut className="w-3.5 h-3.5" />

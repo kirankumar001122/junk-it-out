@@ -599,10 +599,10 @@ export default function AgentDashboardPage() {
               <button
                 type="submit"
                 disabled={loginLoading}
-                className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs py-4 rounded-2xl uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
+                className="w-full btn-glossy-primary rounded-full text-slate-950 font-black text-xs py-4 uppercase tracking-wider shadow-lg flex items-center justify-center gap-2"
               >
-                {loginLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'SEND AGENT LOGIN OTP'}
-                <ArrowRight className="w-4 h-4" />
+                {loginLoading ? <RefreshCw className="w-4 h-4 animate-spin shrink-0" /> : 'SEND AGENT LOGIN OTP'}
+                <ArrowRight className="w-4 h-4 shrink-0" />
               </button>
             </form>
           ) : (
@@ -636,10 +636,10 @@ export default function AgentDashboardPage() {
               <button
                 type="submit"
                 disabled={loginLoading}
-                className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs py-4 rounded-2xl uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
+                className="w-full btn-glossy-primary rounded-full text-slate-950 font-black text-xs py-4 uppercase tracking-wider shadow-lg flex items-center justify-center gap-2"
               >
-                {loginLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'VERIFY & ACCESS PORTAL'}
-                <ArrowRight className="w-4 h-4" />
+                {loginLoading ? <RefreshCw className="w-4 h-4 animate-spin shrink-0" /> : 'VERIFY & ACCESS PORTAL'}
+                <ArrowRight className="w-4 h-4 shrink-0" />
               </button>
             </form>
           )}
@@ -686,16 +686,16 @@ export default function AgentDashboardPage() {
             type="button"
             onClick={toggleAgentStatus}
             disabled={statusUpdating}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-extrabold border transition-all cursor-pointer disabled:opacity-50 ${
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-black border transition-all cursor-pointer disabled:opacity-50 ${
               isOnline
-                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+                ? 'btn-glossy-primary text-white shadow-emerald-500/20'
+                : 'btn-glossy-danger text-white shadow-rose-500/20'
             }`}
           >
             {statusUpdating ? (
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
             ) : (
-              <Power className="w-3.5 h-3.5" />
+              <Power className="w-3.5 h-3.5 shrink-0" />
             )}
             {isOnline ? 'ONLINE' : 'OFFLINE'}
           </button>
@@ -703,10 +703,10 @@ export default function AgentDashboardPage() {
           <button
             onClick={handleLogout}
             disabled={loggingOut}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl transition-colors disabled:opacity-50"
+            className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-full transition-colors disabled:opacity-50 border border-slate-700"
             title="Log Out"
           >
-            {loggingOut ? <RefreshCw className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
+            {loggingOut ? <RefreshCw className="w-4 h-4 animate-spin shrink-0" /> : <LogOut className="w-4 h-4 shrink-0" />}
           </button>
         </div>
       </div>
@@ -752,12 +752,12 @@ export default function AgentDashboardPage() {
             <button
               onClick={() => handleViewPickupDetails(newPickupNotice.orderId)}
               disabled={loadingPickupDetails}
-              className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-xs py-3.5 rounded-2xl uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.01]"
+              className="w-full btn-glossy-primary rounded-full text-slate-950 font-black text-xs py-4 uppercase tracking-wider shadow-lg flex items-center justify-center gap-2"
             >
               {loadingPickupDetails ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
+                <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
               ) : (
-                <Eye className="w-4 h-4" />
+                <Eye className="w-4 h-4 shrink-0" />
               )}
               VIEW PICKUP DETAILS
             </button>
@@ -809,9 +809,9 @@ export default function AgentDashboardPage() {
 
               <a
                 href={`tel:${activeOrder.customer?.user?.phone}`}
-                className="p-3 bg-emerald-600 text-white rounded-2xl shadow-lg shrink-0"
+                className="p-3.5 btn-glossy-primary rounded-full shadow-lg shrink-0 flex items-center justify-center"
               >
-                <Phone className="w-5 h-5" />
+                <Phone className="w-5 h-5 shrink-0" />
               </a>
             </div>
 
@@ -832,9 +832,9 @@ export default function AgentDashboardPage() {
               href={`https://maps.google.com/?q=${activeOrder.address?.lat},${activeOrder.address?.lng}`}
               target="_blank"
               rel="noreferrer"
-              className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs py-3 rounded-2xl flex items-center justify-center gap-2 border border-slate-600"
+              className="w-full btn-glossy-dark rounded-full text-white font-bold text-xs py-3.5 flex items-center justify-center gap-2 border border-slate-600 shadow-sm"
             >
-              <Navigation className="w-4 h-4 text-emerald-400" />
+              <Navigation className="w-4 h-4 text-emerald-400 shrink-0" />
               OPEN GOOGLE MAPS NAVIGATION
             </a>
           </div>
@@ -851,9 +851,9 @@ export default function AgentDashboardPage() {
                 <button
                   onClick={toggleAgentStatus}
                   disabled={statusUpdating}
-                  className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs py-3 rounded-xl uppercase tracking-wider shadow-md flex items-center justify-center gap-2"
+                  className="w-full btn-glossy-primary rounded-full text-slate-950 font-black text-xs py-3.5 uppercase tracking-wider shadow-md flex items-center justify-center gap-2"
                 >
-                  {statusUpdating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Power className="w-4 h-4" />}
+                  {statusUpdating ? <RefreshCw className="w-4 h-4 animate-spin shrink-0" /> : <Power className="w-4 h-4 shrink-0" />}
                   SWITCH STATUS TO ONLINE
                 </button>
               </div>
@@ -863,12 +863,12 @@ export default function AgentDashboardPage() {
               <button
                 onClick={() => handleCallEndpoint('accept')}
                 disabled={actionLoading}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
+                className="w-full btn-glossy-primary rounded-full text-white font-black text-sm py-4 shadow-lg flex items-center justify-center gap-2 tracking-wide"
               >
                 {actionLoading ? (
-                  <RefreshCw className="w-5 h-5 animate-spin" />
+                  <RefreshCw className="w-5 h-5 animate-spin shrink-0" />
                 ) : (
-                  <CheckCircle className="w-5 h-5" />
+                  <CheckCircle className="w-5 h-5 shrink-0" />
                 )}
                 {actionLoading ? 'ACCEPTING ASSIGNMENT...' : 'ACCEPT PICKUP ASSIGNMENT'}
               </button>
@@ -878,12 +878,12 @@ export default function AgentDashboardPage() {
               <button
                 onClick={() => handleCallEndpoint('start')}
                 disabled={actionLoading}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
+                className="w-full btn-glossy-primary rounded-full text-white font-black text-sm py-4 shadow-lg flex items-center justify-center gap-2 tracking-wide"
               >
                 {actionLoading ? (
-                  <RefreshCw className="w-5 h-5 animate-spin" />
+                  <RefreshCw className="w-5 h-5 animate-spin shrink-0" />
                 ) : (
-                  <Play className="w-5 h-5" />
+                  <Play className="w-5 h-5 shrink-0" />
                 )}
                 {actionLoading ? 'STARTING JOURNEY...' : 'START JOURNEY TO CUSTOMER'}
               </button>
@@ -893,12 +893,12 @@ export default function AgentDashboardPage() {
               <button
                 onClick={() => handleCallEndpoint('arrive')}
                 disabled={actionLoading}
-                className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
+                className="w-full btn-glossy-blue rounded-full text-white font-black text-sm py-4 shadow-lg flex items-center justify-center gap-2 tracking-wide"
               >
                 {actionLoading ? (
-                  <RefreshCw className="w-5 h-5 animate-spin" />
+                  <RefreshCw className="w-5 h-5 animate-spin shrink-0" />
                 ) : (
-                  <MapPin className="w-5 h-5" />
+                  <MapPin className="w-5 h-5 shrink-0" />
                 )}
                 {actionLoading ? 'MARKING ARRIVED...' : 'MARK ARRIVED AT DOORSTEP'}
               </button>
@@ -911,9 +911,9 @@ export default function AgentDashboardPage() {
                   setWeighModalError(null);
                   setShowWeighModal(true);
                 }}
-                className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 cursor-pointer transition-transform hover:scale-[1.01]"
+                className="w-full btn-glossy-amber rounded-full text-slate-950 font-black text-sm py-4 shadow-lg flex items-center justify-center gap-2 cursor-pointer tracking-wide"
               >
-                <Scale className="w-5 h-5" />
+                <Scale className="w-5 h-5 shrink-0" />
                 START WEIGHING & RECORD KG
               </button>
             )}
@@ -1029,16 +1029,16 @@ export default function AgentDashboardPage() {
               type="button"
               onClick={handleSubmitWeighingAndComplete}
               disabled={submittingWeigh}
-              className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-sm py-4 rounded-2xl shadow-xl flex items-center justify-center gap-2 transition-all cursor-pointer hover:scale-[1.01]"
+              className="w-full btn-glossy-primary rounded-full text-slate-950 font-black text-sm py-4 shadow-xl flex items-center justify-center gap-2 cursor-pointer"
             >
               {submittingWeigh ? (
                 <>
-                  <RefreshCw className="w-5 h-5 animate-spin" />
+                  <RefreshCw className="w-5 h-5 animate-spin shrink-0" />
                   <span>SAVING WEIGHTS & COMPLETING...</span>
                 </>
               ) : (
                 <>
-                  <CheckCircle className="w-5 h-5" />
+                  <CheckCircle className="w-5 h-5 shrink-0" />
                   <span>CONFIRM WEIGHTS & COMPLETE PICKUP</span>
                 </>
               )}
@@ -1121,19 +1121,19 @@ export default function AgentDashboardPage() {
             <button
               onClick={() => handleAcceptPickup(viewPickupModal.id)}
               disabled={acceptingPickup}
-              className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-xs py-4 rounded-2xl uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.01]"
+              className="w-full btn-glossy-primary rounded-full text-slate-950 font-black text-xs py-4 uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 cursor-pointer"
             >
               {acceptingPickup ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
+                <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
               ) : (
-                <CheckCircle className="w-4 h-4" />
+                <CheckCircle className="w-4 h-4 shrink-0" />
               )}
               ACCEPT PICKUP
             </button>
 
             <button
               onClick={() => setViewPickupModal(null)}
-              className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs py-3.5 rounded-2xl uppercase tracking-wider transition-colors"
+              className="w-full btn-glossy-dark rounded-full text-white font-bold text-xs py-3.5 uppercase tracking-wider transition-colors border border-slate-700"
             >
               CLOSE DETAILS
             </button>

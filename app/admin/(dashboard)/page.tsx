@@ -196,16 +196,16 @@ export default function AdminDashboardPage() {
           <div className="flex items-center gap-3">
             <button
               onClick={() => setShowManualModal(true)}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md flex items-center gap-2"
+              className="btn-glossy-primary rounded-full text-white font-extrabold text-xs px-5 py-3 shadow-md flex items-center gap-2"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-4 h-4 shrink-0" />
               CREATE MANUAL ORDER
             </button>
             <a
               href="/api/admin/reports"
-              className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2"
+              className="btn-glossy-dark rounded-full text-white font-bold text-xs px-5 py-3 flex items-center gap-2 shadow-sm"
             >
-              <FileBarChart className="w-4 h-4 text-emerald-400" />
+              <FileBarChart className="w-4 h-4 text-emerald-400 shrink-0" />
               EXPORT CSV REPORT
             </a>
           </div>
@@ -384,13 +384,13 @@ export default function AdminDashboardPage() {
                       <div className="flex items-center gap-2">
                         <Link
                           href={`/admin/orders/${o.id}`}
-                          className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-3 py-1.5 rounded-lg text-[11px] font-bold"
+                          className="btn-glossy-secondary rounded-full text-slate-800 px-3.5 py-1.5 text-[11px] font-bold shadow-2xs border border-slate-200"
                         >
                           View
                         </Link>
                         <button
                           onClick={() => openAssignModal(o)}
-                          className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg text-[11px] font-bold"
+                          className="btn-glossy-primary rounded-full text-white px-3.5 py-1.5 text-[11px] font-bold shadow-2xs"
                         >
                           Assign
                         </button>
@@ -474,7 +474,7 @@ export default function AdminDashboardPage() {
                   setAssignError(null);
                 }}
                 disabled={assignLoading}
-                className="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 rounded-xl disabled:opacity-50"
+                className="w-1/2 btn-glossy-secondary rounded-full text-slate-700 font-bold text-xs py-3 shadow-2xs disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -482,7 +482,7 @@ export default function AdminDashboardPage() {
                 type="button"
                 onClick={handleAssignAgent}
                 disabled={assignLoading || agents.length === 0 || !selectedAgentId}
-                className="w-1/2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 rounded-xl shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-1/2 btn-glossy-primary rounded-full text-white font-bold text-xs py-3 shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {assignLoading ? 'Assigning...' : 'Confirm Assignment'}
               </button>

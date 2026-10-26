@@ -1140,10 +1140,10 @@ export default function BookingPage() {
                 setErrorMsg('');
                 setStep(2);
               }}
-              className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white font-bold text-xs px-6 py-3 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
+              className="btn-glossy-primary rounded-full w-full sm:w-auto text-xs font-bold px-7 py-3.5 shadow-md flex items-center justify-center gap-2 cursor-pointer"
             >
               Continue to Location & Time
-              <ArrowRight className="w-4 h-4 text-emerald-400" />
+              <ArrowRight className="w-4 h-4 text-emerald-200" />
             </button>
           </div>
         </div>
@@ -1544,7 +1544,7 @@ export default function BookingPage() {
                     type="button"
                     disabled={couponLoading || !couponInput.trim()}
                     onClick={() => handleApplyCoupon()}
-                    className="bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
+                    className="btn-glossy-dark rounded-full text-xs font-bold px-5 py-2.5 shadow-sm transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
                   >
                     {couponLoading ? (
                       <>
@@ -1563,14 +1563,14 @@ export default function BookingPage() {
                   <button
                     type="button"
                     onClick={() => handleApplyCoupon('WELCOME50')}
-                    className="font-mono font-bold text-[10px] text-emerald-700 bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 px-2 py-0.5 rounded-md cursor-pointer transition-colors"
+                    className="font-mono font-bold text-[10px] text-emerald-800 bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 px-2.5 py-1 rounded-full cursor-pointer transition-all shadow-xs"
                   >
                     WELCOME50 (₹50 off)
                   </button>
                   <button
                     type="button"
                     onClick={() => handleApplyCoupon('SOUTHBLR20')}
-                    className="font-mono font-bold text-[10px] text-emerald-700 bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 px-2 py-0.5 rounded-md cursor-pointer transition-colors"
+                    className="font-mono font-bold text-[10px] text-emerald-800 bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 px-2.5 py-1 rounded-full cursor-pointer transition-all shadow-xs"
                   >
                     SOUTHBLR20 (20% off)
                   </button>
@@ -1646,7 +1646,7 @@ export default function BookingPage() {
                   type="button"
                   disabled={loading}
                   onClick={() => handleRetryPayment(pendingOrder)}
-                  className="w-full sm:flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-300 text-white font-bold text-xs py-3.5 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
+                  className="w-full sm:flex-1 btn-glossy-primary rounded-full text-xs font-bold py-3.5 shadow-md flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {loading ? (
                     <>
@@ -1664,14 +1664,14 @@ export default function BookingPage() {
                 <div className="flex items-center gap-2 w-full sm:w-auto">
                   <Link
                     href={`/orders/${pendingOrder.id}`}
-                    className="flex-1 sm:flex-initial w-full sm:w-auto text-center bg-white hover:bg-slate-50 text-slate-800 font-bold text-xs px-4 py-3 rounded-xl border border-slate-300 shadow-sm transition-colors"
+                    className="btn-glossy-secondary rounded-full flex-1 sm:flex-initial w-full sm:w-auto text-center font-bold text-xs px-5 py-3 border border-slate-300 shadow-xs"
                   >
                     View Order Details
                   </Link>
                   <button
                     type="button"
                     onClick={handleStartFresh}
-                    className="flex-1 sm:flex-initial w-full sm:w-auto text-center text-slate-600 hover:text-slate-900 font-semibold text-xs px-3 py-3 rounded-xl hover:bg-amber-100/60 transition-colors cursor-pointer"
+                    className="rounded-full flex-1 sm:flex-initial w-full sm:w-auto text-center text-slate-600 hover:text-slate-900 font-semibold text-xs px-3.5 py-3 hover:bg-amber-100/60 transition-colors cursor-pointer"
                   >
                     Start Fresh
                   </button>
@@ -1684,24 +1684,24 @@ export default function BookingPage() {
               <div className="flex items-center justify-between gap-3">
                 <button
                   onClick={() => setStep(2)}
-                  className="text-slate-600 font-bold text-xs px-3 py-2 hover:bg-slate-100 rounded-lg shrink-0 cursor-pointer"
+                  className="text-slate-600 font-bold text-xs px-4 py-2 hover:bg-slate-100 rounded-full shrink-0 cursor-pointer transition-colors"
                 >
                   Back
                 </button>
                 <button
                   disabled={loading}
                   onClick={handleConfirmOrder}
-                  className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-300 text-slate-950 font-bold text-sm py-3.5 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
+                  className="btn-glossy-primary rounded-full w-full py-4 text-sm font-extrabold shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {loading ? (
                     <>
-                      <Clock className="w-4 h-4 animate-spin text-slate-950" />
+                      <Clock className="w-4 h-4 animate-spin text-white" />
                       Opening secure payment...
                     </>
                   ) : (
                     <>
                       Pay ₹{estimate.netAmount.toFixed(2)} & Confirm Pickup
-                      <ArrowRight className="w-4 h-4" />
+                      <ArrowRight className="w-4 h-4 text-emerald-200" />
                     </>
                   )}
                 </button>

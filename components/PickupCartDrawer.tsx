@@ -455,15 +455,15 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
                 <button
                   type="submit"
                   disabled={otpLoading}
-                  className="flex h-13 min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 text-sm font-black text-white shadow-md hover:bg-emerald-700 disabled:opacity-60 transition-all uppercase tracking-wider"
+                  className="btn-glossy-primary rounded-full w-full h-13 min-h-12 text-sm font-black uppercase tracking-wider shadow-md"
                 >
                   {otpLoading ? (
-                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                    <LoaderCircle className="h-4 w-4 animate-spin shrink-0" />
                   ) : (
-                    <Lock className="h-4 w-4" />
+                    <Lock className="h-4 w-4 shrink-0" />
                   )}
                   {otpStep === 'details' ? 'Send OTP to Continue' : 'Verify OTP & Continue'}
-                  <ArrowRight className="h-4 w-4" />
+                  <ArrowRight className="h-4 w-4 shrink-0" />
                 </button>
 
                 {otpStep === 'code' && (
@@ -526,21 +526,21 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
 
                     <div className="mt-4 flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-500">Estimated quantity</span>
-                      <div className="flex items-center rounded-xl border border-slate-200 bg-slate-50">
+                      <div className="flex items-center rounded-full border border-slate-200 bg-slate-50 p-0.5 shadow-xs">
                         <button
                           onClick={() => updateQuantity(item.categoryId, item.quantity - 1)}
-                          className="grid h-9 w-9 place-items-center text-slate-700"
+                          className="btn-glossy-secondary rounded-full h-8 w-8 text-slate-700 p-0 grid place-items-center"
                           aria-label={`Decrease ${item.category.name}`}
                         >
-                          <Minus className="h-4 w-4" />
+                          <Minus className="h-3.5 w-3.5" />
                         </button>
                         <span className="min-w-16 text-center text-sm font-black text-slate-950">{item.quantity} kg</span>
                         <button
                           onClick={() => updateQuantity(item.categoryId, item.quantity + 1)}
-                          className="grid h-9 w-9 place-items-center text-emerald-700"
+                          className="btn-glossy-primary rounded-full h-8 w-8 text-white p-0 grid place-items-center"
                           aria-label={`Increase ${item.category.name}`}
                         >
-                          <Plus className="h-4 w-4" />
+                          <Plus className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>
@@ -551,7 +551,7 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
               <Link
                 onClick={onClose}
                 href="/categories"
-                className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-emerald-300 bg-white px-4 py-3 text-sm font-black text-emerald-700"
+                className="btn-glossy-secondary rounded-full flex items-center justify-center gap-2 px-4 py-3.5 text-xs font-black text-emerald-800 border border-emerald-300 shadow-sm"
               >
                 <Plus className="h-4 w-4" /> Add More Waste
               </Link>
@@ -630,7 +630,7 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
             <Link
               onClick={onClose}
               href="/book?cart=1"
-              className="flex min-h-14 items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 text-sm font-black text-white shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-colors uppercase tracking-wider"
+              className="btn-glossy-primary rounded-full flex min-h-14 items-center justify-center gap-2 px-6 text-sm font-black shadow-lg shadow-emerald-600/25 uppercase tracking-wider"
             >
               Complete Pickup Details <ArrowRight className="h-4 w-4" />
             </Link>
