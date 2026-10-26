@@ -1,4 +1,5 @@
 import 'server-only';
+import { getSafeErrorType, logStructured } from '../observability/structuredLogger';
 
 const FAST2SMS_WHATSAPP_URL = 'https://www.fast2sms.com/dev/whatsapp';
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -17,18 +18,6 @@ export interface WhatsAppServiceResult {
   requestId?: string;
   message?: string;
   error?: string;
-}
-
-/**
- * Safely masks a phone number for privacy in server logs.
- * Example: "+919876543210" -> "+91 98****3210"
- */
-function maskPhone(phone: string): string {
-  if (!phone || phone.length < 7) return '***';
-  const clean = phone.replace(/\s+/g, '');
-  const start = clean.slice(0, 4);
-  const end = clean.slice(-4);
-  return `${start}****${end}`;
 }
 
 /**
@@ -82,9 +71,7 @@ export async function sendDispatchUpdate(
     ).trim();
 
     if (!apiKey) {
-      console.warn(
-        '[WHATSAPP_CONFIG_NOTICE] Fast2SMS API key missing in environment variables. WhatsApp dispatch notification skipped.'
-      );
+      logStructured('warn', 'notification.whatsapp.configuration_missing', { dependency: 'fast2sms' });
       return {
         success: false,
         error: 'FAST2SMS_API_KEY missing in server environment.',
@@ -123,12 +110,7 @@ export async function sendDispatchUpdate(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-    console.log('[WHATSAPP_DISPATCH_REQUEST]', {
-      messageId,
-      phoneNumberId,
-      maskedCustomerPhone: maskPhone(input.customerPhone),
-      orderNumber: input.orderNumber || 'N/A',
-    });
+    logStructured('info', 'notification.whatsapp.request_started', { dependency: 'fast2sms' });
 
     const response = await fetch(targetUrl, {
       method: 'GET',
@@ -156,19 +138,18 @@ export async function sendDispatchUpdate(
       (Array.isArray(responseData.data) && responseData.data[0]?.request_id) ||
       undefined;
 
-    console.log('[WHATSAPP_DISPATCH_RESPONSE]', {
-      httpStatus: response.status,
-      returnStatus: responseData.return,
-      statusCode: responseData.status_code,
-      requestId: requestId || 'N/A',
-      orderNumber: input.orderNumber || 'N/A',
-    });
-
     const isSuccess =
       response.ok &&
       (responseData.return === true ||
         String(responseData.return).toLowerCase() === 'true' ||
         responseData.status_code === 200);
+
+    logStructured(isSuccess ? 'info' : 'warn', 'notification.whatsapp.response', {
+      dependency: 'fast2sms',
+      providerStatusCode: Number.isInteger(responseData.status_code)
+        ? responseData.status_code
+        : response.status,
+    });
 
     if (isSuccess) {
       return {
@@ -190,9 +171,9 @@ export async function sendDispatchUpdate(
       };
     }
   } catch (err: any) {
-    console.error('[WHATSAPP_SERVICE_ERROR]', {
-      error: err.message || 'Unknown network error',
-      orderNumber: input.orderNumber || 'N/A',
+    logStructured('error', 'notification.whatsapp.failed', {
+      dependency: 'fast2sms',
+      errorType: getSafeErrorType(err),
     });
 
     return {

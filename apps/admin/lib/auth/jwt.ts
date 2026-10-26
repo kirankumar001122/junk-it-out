@@ -9,15 +9,14 @@ export interface JwtPayload {
   agentId?: string | null;
   adminId?: string | null;
   iat?: number;
-  exp?: number;
+  exp: number;
 }
 
 function getJwtSecret(): string {
-  const secret =
-    process.env.JWT_SECRET?.trim() ||
-    process.env.RAZORPAY_SECRET?.trim() ||
-    process.env.PAYMENT_KEY_SECRET?.trim() ||
-    'junkitout_production_jwt_fallback_secret_key_2026';
+  const secret = process.env.JWT_SECRET?.trim();
+  if (!secret || Buffer.byteLength(secret, 'utf8') < 32) {
+    throw new Error('JWT_SECRET must be configured with at least 32 bytes.');
+  }
   return secret;
 }
 
@@ -49,9 +48,9 @@ export function verifyToken(token: string): JwtPayload | null {
     if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null;
 
     const payload: JwtPayload = JSON.parse(base64UrlDecode(encodedPayload));
-    const now = Math.floor(Date.now() / 1000);
-
-    if (payload.exp && payload.exp < now) return null;
+    const expiresAt = payload.exp;
+    if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return null;
+    if (expiresAt <= Date.now() / 1000) return null;
 
     return payload;
   } catch (err) {

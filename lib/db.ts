@@ -1,7 +1,9 @@
 import { PrismaClient } from '@prisma/client';
+import { logStructured, withDatabaseErrorLogging } from './observability/structuredLogger';
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
+  observabilityAttached?: boolean;
 };
 
 function getDatabaseUrl() {
@@ -23,12 +25,22 @@ function getDatabaseUrl() {
 export const db =
   globalForPrisma.prisma ??
   new PrismaClient({
-    log: ['error', 'warn'],
+    log: [{ emit: 'event', level: 'warn' }],
     datasources: {
       db: {
         url: getDatabaseUrl(),
       },
     },
   });
+
+if (!globalForPrisma.observabilityAttached) {
+  db.$use((_params, next) =>
+    withDatabaseErrorLogging(() => next(_params)),
+  );
+  db.$on('warn', () => {
+    logStructured('warn', 'database.client.warning', { dependency: 'database' });
+  });
+  globalForPrisma.observabilityAttached = true;
+}
 
 globalForPrisma.prisma = db;

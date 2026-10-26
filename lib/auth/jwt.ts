@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'crypto';
+import { getJwtSecret } from './jwtSecret';
 
 export interface JwtPayload {
   userId: string;
@@ -10,15 +11,7 @@ export interface JwtPayload {
   adminId?: string | null;
   tokenVersion?: number;
   iat?: number;
-  exp?: number;
-}
-
-function getJwtSecret(): string {
-  const secret = process.env.JWT_SECRET?.trim();
-  if (!secret) {
-    throw new Error('JWT_SECRET must be configured on the server.');
-  }
-  return secret;
+  exp: number;
 }
 
 function base64UrlEncode(str: string): string {
@@ -82,9 +75,9 @@ export function verifyToken(token: string): JwtPayload | null {
     if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null;
 
     const payload: JwtPayload = JSON.parse(base64UrlDecode(encodedPayload));
-    const now = Math.floor(Date.now() / 1000);
-
-    if (payload.exp && payload.exp < now) return null;
+    const expiresAt = payload.exp;
+    if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return null;
+    if (expiresAt <= Date.now() / 1000) return null;
 
     return payload;
   } catch (err) {

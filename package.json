@@ -10,10 +10,11 @@
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
     "db:seed:categories": "npx tsx prisma/seed-categories.ts",
-    "test": "npm run test:security && npm run test:payments && npm run test:standalone",
-    "test:security": "vitest run tests/security-route-handlers.test.ts",
+    "test": "npm run test:security && npm run test:payments && npm run test:observability && npm run test:standalone",
+    "test:security": "vitest run tests/security-route-handlers.test.ts tests/admin-jwt-config.test.ts",
     "test:payments": "vitest run tests/payment-idempotency.test.ts",
-    "test:standalone": "tsx tests/security-authorization.test.ts && tsx tests/cancellation.test.ts && tsx tests/photo-url.test.ts && tsx tests/contact-api.test.ts && tsx tests/tracking-location.test.ts && tsx tests/customer-pickups-response.test.ts && tsx tests/sse.test.ts && tsx tests/refund-workflow.test.ts && tsx tests/agent-location-route.test.ts"
+    "test:observability": "vitest run tests/health-routes.test.ts tests/structured-logger.test.ts tests/instrumentation.test.ts",
+    "test:standalone": "tsx tests/admin-login-demotion.test.ts && tsx tests/admin-reports.test.ts && tsx tests/admin-settlements.test.ts && tsx tests/admin-stats.test.ts && tsx tests/agent-location-route.test.ts && tsx tests/customer-pickups-response.test.ts && tsx tests/dispatch-recovery.test.ts && tsx tests/order-cancellation.test.ts && tsx tests/order-lifecycle.test.ts && tsx tests/payment-webhook-dispatch.test.ts && tsx tests/refund-routes.test.ts && tsx tests/refund-workflow.test.ts && tsx tests/sse.test.ts && tsx tests/tracking-location.test.ts"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"

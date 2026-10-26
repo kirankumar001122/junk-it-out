@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - feat/devops-production-readiness
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate applications
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      JWT_SECRET: ci-only-jwt-secret-not-valid-outside-tests
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/junkitout_ci?schema=public
+      DIRECT_URL: postgresql://ci:ci@127.0.0.1:5432/junkitout_ci?schema=public
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run isolated tests
+        run: npm test
+
+      - name: Type-check main application
+        run: npx tsc --noEmit --incremental false -p ./tsconfig.json
+
+      - name: Type-check standalone admin application
+        run: npx tsc --noEmit --incremental false -p ./apps/admin/tsconfig.json
+
+      - name: Build main application
+        run: npm run build
+
+      - name: Build standalone admin application
+        run: npm run build --prefix apps/admin

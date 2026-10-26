@@ -1,5 +1,10 @@
 import { db } from '@/lib/db';
 import {
+  getSafeErrorDependency,
+  getSafeErrorType,
+  logStructured,
+} from '@/lib/observability/structuredLogger';
+import {
   fetchRazorpayPayment,
   fetchRazorpayOrderPayments,
   verifyRazorpayPaymentSignature,
@@ -105,9 +110,7 @@ export async function dispatchPaidOrderToAgents(
     // -------------------------------------------------------
 
     if (!order) {
-      console.warn(
-        `[DISPATCH] Order ${orderId} not found.`
-      );
+      logStructured('warn', 'payment.dispatch.order_not_found', { dependency: 'database' });
 
       return;
     }
@@ -119,9 +122,7 @@ export async function dispatchPaidOrderToAgents(
     if (
       order.paymentStatus !== 'CAPTURED'
     ) {
-      console.log(
-        `[DISPATCH] Order #${order.orderNumber} not dispatched because paymentStatus is ${order.paymentStatus}.`
-      );
+      logStructured('info', 'payment.dispatch.skipped');
 
       return;
     }
@@ -134,9 +135,7 @@ export async function dispatchPaidOrderToAgents(
       order.financialDirection !==
       'CUSTOMER_PAYS'
     ) {
-      console.log(
-        `[DISPATCH] Order #${order.orderNumber} is not a CUSTOMER_PAYS order.`
-      );
+      logStructured('info', 'payment.dispatch.skipped');
 
       return;
     }
@@ -215,10 +214,6 @@ export async function dispatchPaidOrderToAgents(
           agent.status === 'AVAILABLE'
       );
 
-    console.log(
-      `[DISPATCH] Paid order #${order.orderNumber} for service area '${targetServiceArea}'. Available eligible agents count: ${availableEligibleAgents.length}`
-    );
-
     // -------------------------------------------------------
     // 7. NO AVAILABLE AGENTS
     // -------------------------------------------------------
@@ -226,9 +221,7 @@ export async function dispatchPaidOrderToAgents(
     if (
       availableEligibleAgents.length === 0
     ) {
-      console.log(
-        `[DISPATCH] No available eligible agents for paid order #${order.orderNumber}.`
-      );
+      logStructured('info', 'payment.dispatch.no_agents_available');
 
       return;
     }
@@ -276,14 +269,12 @@ export async function dispatchPaidOrderToAgents(
       notificationPayload
     );
 
-    console.log(
-      `[DISPATCH] NEW_PICKUP_AVAILABLE sent for paid order #${order.orderNumber}.`
-    );
+    logStructured('info', 'payment.dispatch.notification_queued');
   } catch (error) {
-    console.error(
-      `[DISPATCH ERROR] Failed to notify agents for paid order ${orderId}:`,
-      error
-    );
+    logStructured('error', 'payment.dispatch.failed', {
+      dependency: getSafeErrorDependency(error),
+      errorType: getSafeErrorType(error),
+    });
   }
 }
 
@@ -767,7 +758,10 @@ export async function reconcilePaymentForOrder(
         };
       }
     } catch (err) {
-      console.warn('[RECONCILE] Provider lookup by payment ID failed:', { errorType: err instanceof Error ? err.name : 'UnknownError' });
+      logStructured('warn', 'payment.reconcile.provider_lookup_failed', {
+        dependency: 'razorpay',
+        errorType: getSafeErrorType(err),
+      });
     }
   }
 
@@ -816,8 +810,9 @@ export async function reconcilePaymentForOrder(
         };
       }
     } catch (err) {
-      console.warn('[RECONCILE] Provider lookup by gateway order failed:', {
-        errorType: err instanceof Error ? err.name : 'UnknownError',
+      logStructured('warn', 'payment.reconcile.provider_lookup_failed', {
+        dependency: 'razorpay',
+        errorType: getSafeErrorType(err),
       });
     }
   }

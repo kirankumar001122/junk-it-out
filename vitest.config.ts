@@ -27,7 +27,11 @@ export default defineConfig({
     environment: 'node',
     include: [
       'tests/security-route-handlers.test.ts',
+      'tests/admin-jwt-config.test.ts',
       'tests/payment-idempotency.test.ts',
+      'tests/health-routes.test.ts',
+      'tests/structured-logger.test.ts',
+      'tests/instrumentation.test.ts',
     ],
   },
 });

@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
 import {
+  getSafeErrorDependency,
+  getSafeErrorType,
+  logStructured,
+  withApiRequestLogging,
+  type ApiRequestContext,
+} from '@/lib/observability/structuredLogger';
+import {
   createRazorpayOrder,
   RazorpayOrderCreationError,
 } from '@/lib/payments/razorpay';
@@ -12,15 +19,9 @@ const ACTIVE_PAYMENT_STATUSES = [
   'AUTHORIZED',
 ] as const;
 
-export async function POST(req: NextRequest) {
-  const startedAt = Date.now();
-  const logTiming = (phase: string) =>
-    console.info(`[api/payments/create] ${phase} elapsedMs=${Date.now() - startedAt}`);
-
+async function handlePost(req: NextRequest, context: ApiRequestContext) {
   try {
-    logTiming('request start');
     const authUser = await getAuthUser(req);
-    logTiming('authentication complete');
 
     if (!authUser || authUser.role !== 'CUSTOMER' || !authUser.customerId) {
       return NextResponse.json(
@@ -44,7 +45,6 @@ export async function POST(req: NextRequest) {
       where: { id: orderId },
       include: { payments: { orderBy: { createdAt: 'desc' } } },
     });
-    logTiming('order lookup complete');
 
     if (!order) {
       return NextResponse.json(
@@ -186,7 +186,6 @@ export async function POST(req: NextRequest) {
         receipt: order.orderNumber,
         notes: { orderId: order.id, orderNumber: order.orderNumber },
       });
-      logTiming('razorpay order created');
     } catch (error) {
       if (!(error instanceof RazorpayOrderCreationError) || !error.uncertain) {
         await db.payment.update({
@@ -204,7 +203,6 @@ export async function POST(req: NextRequest) {
         status: 'INITIATED',
       },
     });
-    logTiming('database persistence complete');
 
     return NextResponse.json({
       success: true,
@@ -219,10 +217,11 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error: any) {
-    console.error(
-      '[PAYMENT_CREATE_ERROR]',
-      error?.message || error,
-    );
+    logStructured('error', 'payment.create.failed', {
+      ...context,
+      dependency: getSafeErrorDependency(error),
+      errorType: getSafeErrorType(error),
+    });
 
     const isRazorpayAuthError =
       error instanceof RazorpayOrderCreationError &&
@@ -247,3 +246,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export const POST = withApiRequestLogging('/api/payments/create', handlePost);
