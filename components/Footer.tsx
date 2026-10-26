@@ -21,6 +21,8 @@ export default function Footer() {
                 <img
                   src="/logo.png"
                   alt="Junk It Out Logo"
+                  loading="lazy"
+                  decoding="async"
                   className="w-full h-full object-contain p-0.5"
                 />
               </div>

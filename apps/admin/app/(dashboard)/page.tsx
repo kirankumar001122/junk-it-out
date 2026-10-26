@@ -18,6 +18,23 @@ import InteractiveMap from '@/components/InteractiveMap';
 import { SOUTH_BENGALURU_ZONES } from '@/lib/geofence';
 import { adminFetch, getApiUrl } from '@/lib/api';
 
+type AdminDataResult = { status: number | null; body: any };
+
+async function fetchAdminData(path: string): Promise<AdminDataResult> {
+  try {
+    const response = await adminFetch(path);
+    let body: any = null;
+    try {
+      body = await response.json();
+    } catch {
+      // Keep the HTTP status so the dashboard can show a useful API diagnostic.
+    }
+    return { status: response.status, body };
+  } catch {
+    return { status: null, body: null };
+  }
+}
+
 export default function AdminDashboardPage() {
   const [stats, setStats] = useState<any>(null);
   const [orders, setOrders] = useState<any[]>([]);
@@ -25,6 +42,7 @@ export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [agentsLoading, setAgentsLoading] = useState(true);
   const [agentsError, setAgentsError] = useState<string | null>(null);
+  const [requestErrors, setRequestErrors] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [searchTerm, setSearchTerm] = useState('');
   const [showManualModal, setShowManualModal] = useState(false);
@@ -38,24 +56,61 @@ export default function AdminDashboardPage() {
       setAgentsLoading(true);
       setAgentsError(null);
 
-      const [statsRes, ordersRes, agentsRes] = await Promise.all([
-        adminFetch('/api/admin/stats').then((r) => r.json()).catch(() => ({ success: false })),
-        adminFetch('/api/orders').then((r) => r.json()).catch(() => ({ success: false })),
-        adminFetch('/api/admin/agents').then((r) => r.json()).catch(() => ({ success: false })),
+      const [statsResult, ordersResult, agentsResult] = await Promise.all([
+        fetchAdminData('/api/admin/stats'),
+        fetchAdminData('/api/orders'),
+        fetchAdminData('/api/admin/agents'),
       ]);
 
+      const results = [
+        { path: '/api/admin/stats', ...statsResult },
+        { path: '/api/orders', ...ordersResult },
+        { path: '/api/admin/agents', ...agentsResult },
+      ];
+      const errors = results
+        .filter(({ status, body }) => status === null || status < 200 || status >= 300 || body === null)
+        .map(({ path, status }) => `${path}: ${status === null ? 'request failed' : `HTTP ${status}`}`);
+
+      const statsRes = statsResult.body;
+      const ordersRes = ordersResult.body;
+      const agentsRes = agentsResult.body;
       const fetchedStats = statsRes?.data || (statsRes?.success ? statsRes.data : (statsRes?.todaysBookings !== undefined || statsRes?.totalBookings !== undefined ? statsRes : null));
       if (fetchedStats) {
         setStats(fetchedStats);
+      } else {
+        setStats(null);
+        if (statsResult.status !== null && statsResult.status >= 200 && statsResult.status < 300) {
+          errors.push('/api/admin/stats: unexpected response structure');
+        }
       }
-      if (ordersRes?.success || Array.isArray(ordersRes?.data) || Array.isArray(ordersRes)) {
-        setOrders(ordersRes?.data || (Array.isArray(ordersRes) ? ordersRes : []));
+      const fetchedOrders = Array.isArray(ordersRes?.data)
+        ? ordersRes.data
+        : Array.isArray(ordersRes)
+          ? ordersRes
+          : null;
+      if (fetchedOrders) {
+        setOrders(fetchedOrders);
+      } else {
+        setOrders([]);
+        if (ordersResult.status !== null && ordersResult.status >= 200 && ordersResult.status < 300) {
+          errors.push('/api/orders: unexpected response structure');
+        }
       }
-      if (agentsRes?.success || Array.isArray(agentsRes?.data) || Array.isArray(agentsRes)) {
-        setAgents(agentsRes?.data || (Array.isArray(agentsRes) ? agentsRes : []));
-      } else if (!agentsRes?.success) {
+      const fetchedAgents = Array.isArray(agentsRes?.data)
+        ? agentsRes.data
+        : Array.isArray(agentsRes)
+          ? agentsRes
+          : null;
+      if (fetchedAgents) {
+        setAgents(fetchedAgents);
+      } else {
+        setAgents([]);
         setAgentsError(agentsRes?.error?.message || agentsRes?.message || 'Failed to load field agents.');
+        if (agentsResult.status !== null && agentsResult.status >= 200 && agentsResult.status < 300) {
+          errors.push('/api/admin/agents: unexpected response structure');
+        }
       }
+      setRequestErrors(errors);
     } catch (e: any) {
       console.error(e);
       setAgentsError('Error loading operations data.');
@@ -75,7 +130,7 @@ export default function AdminDashboardPage() {
       eventSource.addEventListener('ORDER_UPDATED', () => loadAdminData());
       eventSource.addEventListener('AGENT_LOCATION_UPDATED', () => loadAdminData());
     } catch (e) {
-      console.error('SSE connection error:', e);
+      console.error('SSE connection failed.');
     }
 
     return () => {
@@ -142,25 +197,33 @@ export default function AdminDashboardPage() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-4 sm:space-y-6">
+      {requestErrors.length > 0 && (
+        <div role="alert" className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs font-semibold text-amber-900">
+          <p>Some dashboard data could not be loaded:</p>
+          <ul className="mt-1 list-inside list-disc">
+            {requestErrors.map((error) => <li key={error}>{error}</li>)}
+          </ul>
+        </div>
+      )}
       {/* TOP HEADER BAR */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-        <div>
+      <div className="flex min-w-0 flex-col justify-between gap-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:p-6">
+        <div className="min-w-0">
           <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-3 py-1 rounded-full uppercase">
             Control Center
           </span>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-1">
+          <h1 className="mt-1 break-words text-xl font-black tracking-tight text-slate-900 sm:text-2xl">
             Junk It Out Operations Dashboard
           </h1>
           <p className="text-xs text-slate-500">South Bengaluru Service Area Control & Live Monitoring</p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex w-full items-center gap-3 sm:w-auto">
           <a
             href={getApiUrl('/api/admin/reports')}
             target="_blank"
             rel="noopener noreferrer"
-            className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-800 px-4 py-3 text-center text-xs font-bold text-white hover:bg-slate-700 sm:w-auto sm:py-2.5"
           >
             <FileBarChart className="w-4 h-4 text-emerald-400" />
             EXPORT CSV REPORT
@@ -170,22 +233,22 @@ export default function AdminDashboardPage() {
 
       {/* METRICS WIDGET CARDS & SLA MONITORING */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+        <div className="min-w-0 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-bold text-slate-500 uppercase">Today's Bookings</span>
             <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
               <Package className="w-4 h-4" />
             </div>
           </div>
-          <span className="text-3xl font-black text-slate-900">{stats?.todaysBookings ?? stats?.totalBookings ?? 0}</span>
+          <span className="text-3xl font-black text-slate-900">{stats?.todaysBookings ?? stats?.totalBookings ?? '—'}</span>
           <div className="flex items-center gap-2 mt-2 text-xs">
-            <span className="text-amber-600 font-bold">{stats?.activePickups ?? stats?.pendingBookings ?? 0} Active</span>
+            <span className="text-amber-600 font-bold">{stats?.activePickups ?? stats?.pendingBookings ?? '—'} Active</span>
             <span className="text-slate-400">|</span>
-            <span className="text-emerald-600 font-bold">{stats?.completedPickups ?? 0} Completed</span>
+            <span className="text-emerald-600 font-bold">{stats?.completedPickups ?? '—'} Completed</span>
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+        <div className="min-w-0 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-bold text-slate-500 uppercase">Total Waste Collected</span>
             <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
@@ -193,30 +256,36 @@ export default function AdminDashboardPage() {
             </div>
           </div>
           <span className="text-3xl font-black text-slate-900">
-            {stats?.totalWeightKg ?? 0} <span className="text-lg text-slate-500">kg</span>
+            {stats?.totalWeightKg ?? '—'} <span className="text-lg text-slate-500">kg</span>
           </span>
           <p className="text-xs text-slate-500 mt-2">South Bengaluru Total Weight</p>
         </div>
 
-        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+        <div className="min-w-0 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-slate-500 uppercase">Revenue / Payouts</span>
+            <span className="text-xs font-bold text-slate-500 uppercase">Revenue & Payouts</span>
             <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
               <CreditCard className="w-4 h-4" />
             </div>
           </div>
-          <span className="text-3xl font-black text-slate-900">₹{stats?.totalCustomerPayouts ?? stats?.totalRevenue ?? 0}</span>
-          <p className="text-xs text-slate-500 mt-2">Recyclable Customer Settlements</p>
+          <span className="text-3xl font-black text-slate-900">₹{stats?.totalRevenue || 0}</span>
+          <div className="flex items-center gap-2 mt-2 text-xs">
+            <span className="text-emerald-700 font-bold">₹{stats?.paidCustomerPayouts ?? stats?.totalCustomerPayouts ?? 0} Paid</span>
+            <span className="text-slate-300">|</span>
+            <span className="text-amber-700 font-bold">₹{stats?.approvedCustomerPayouts || 0} Approved</span>
+          </div>
         </div>
 
-        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+        <div className="min-w-0 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-bold text-slate-500 uppercase">20-30 Min SLA Meter</span>
             <div className="w-8 h-8 rounded-xl bg-teal-100 text-teal-700 flex items-center justify-center">
               <Clock className="w-4 h-4" />
             </div>
           </div>
-          <span className="text-3xl font-black text-emerald-600">{stats?.slaOnTimeRate ?? 96.4}%</span>
+          <span className="text-3xl font-black text-emerald-600">
+            {stats?.slaOnTimeRate ?? '—'}{stats?.slaOnTimeRate == null ? '' : '%'}
+          </span>
           <div className="flex items-center gap-1 mt-2 text-xs font-bold text-emerald-700">
             <ShieldCheck className="w-4 h-4" />
             <span>Target 30 Mins Compliant</span>
@@ -225,13 +294,13 @@ export default function AdminDashboardPage() {
       </div>
 
       {/* LIVE AGENTS OPERATIONS MAP */}
-      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
-        <div className="flex items-center justify-between">
+      <div className="min-w-0 space-y-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-base font-bold text-slate-900">Live Agent Operations Map</h2>
             <p className="text-xs text-slate-500">Real-time status of all active field agents in South Bengaluru</p>
           </div>
-          <div className="flex items-center gap-3 text-xs font-bold">
+          <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold sm:gap-3 sm:text-xs">
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Available
             </span>
@@ -265,15 +334,15 @@ export default function AdminDashboardPage() {
       </div>
 
       {/* ORDERS MANAGEMENT TABLE */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden space-y-4 p-6">
+      <div className="min-w-0 space-y-4 overflow-hidden rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
             <h2 className="text-base font-bold text-slate-900">All Pickup Orders</h2>
             <p className="text-xs text-slate-500">Filter, re-assign, update status, and manage pickups</p>
           </div>
 
-          <div className="flex items-center gap-3 w-full sm:w-auto">
-            <div className="relative flex-1 sm:w-64">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
+            <div className="relative w-full sm:w-64 sm:flex-1">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
               <input
                 type="text"
@@ -287,7 +356,7 @@ export default function AdminDashboardPage() {
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
-              className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700"
+              className="w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 sm:w-auto"
             >
               <option value="ALL">All Statuses</option>
               <option value="BOOKING_RECEIVED">Booking Received</option>
@@ -300,8 +369,8 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+        <div className="w-full max-w-full overflow-x-auto overscroll-x-contain">
+          <table className="min-w-[880px] text-left text-xs">
             <thead className="bg-slate-50 text-slate-500 uppercase font-bold text-[10px]">
               <tr>
                 <th className="p-3">Order ID</th>

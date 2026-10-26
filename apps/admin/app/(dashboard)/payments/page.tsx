@@ -8,6 +8,7 @@ export default function AdminPaymentsPage() {
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refundTarget, setRefundTarget] = useState<any>(null);
+  const [refundAmount, setRefundAmount] = useState<string>('');
   const [refundReason, setRefundReason] = useState('Admin initiated refund');
   const [refundLoading, setRefundLoading] = useState(false);
   const [refundMessage, setRefundMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -33,12 +34,24 @@ export default function AdminPaymentsPage() {
 
   const handleOpenRefundModal = (payment: any) => {
     setRefundTarget(payment);
+    setRefundAmount(String(payment.remainingRefundableAmount ?? payment.amount ?? ''));
     setRefundReason('Admin initiated refund');
     setRefundMessage(null);
   };
 
   const handleConfirmRefund = async () => {
     if (!refundTarget) return;
+    const numAmount = Number(refundAmount);
+    const maxRefundable = Number(refundTarget.remainingRefundableAmount ?? refundTarget.amount ?? 0);
+    if (!Number.isFinite(numAmount) || numAmount <= 0) {
+      setRefundMessage({ type: 'error', text: 'Please enter a valid refund amount greater than 0.' });
+      return;
+    }
+    if (numAmount > maxRefundable) {
+      setRefundMessage({ type: 'error', text: `Refund amount cannot exceed remaining balance of ₹${maxRefundable}.` });
+      return;
+    }
+
     setRefundLoading(true);
     setRefundMessage(null);
 
@@ -48,6 +61,7 @@ export default function AdminPaymentsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           paymentRecordId: refundTarget.id,
+          amount: numAmount,
           reason: refundReason.trim() || 'Admin initiated refund',
         }),
       });
@@ -67,6 +81,36 @@ export default function AdminPaymentsPage() {
       setRefundMessage({ type: 'error', text: err.message || 'Network error initiating refund.' });
     } finally {
       setRefundLoading(false);
+    }
+  };
+
+  const handleCheckRefundStatus = async (payment: any) => {
+    try {
+      const res = await adminFetch('/api/admin/payments/refund', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentRecordId: payment.id }),
+      });
+      const data = await res.json();
+      if (data.data?.canResetToCaptured) {
+        const confirmReset = window.confirm(
+          `${data.message}\n\nDo you want to reset this payment back to CAPTURED so you can re-initiate the refund?`
+        );
+        if (confirmReset) {
+          const resetRes = await adminFetch('/api/admin/payments/refund', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paymentRecordId: payment.id, action: 'reset_failed' }),
+          });
+          const resetData = await resetRes.json();
+          window.alert(resetData.message || 'Payment reset.');
+        }
+      } else {
+        window.alert(data.message || 'Refund status checked.');
+      }
+      await loadPayments();
+    } catch {
+      window.alert('Refund status could not be checked. No new refund request was sent.');
     }
   };
 
@@ -120,35 +164,69 @@ export default function AdminPaymentsPage() {
                 payments.map((p) => (
                   <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="p-3">
-                      <span className="font-mono font-bold text-slate-900 block">{p.razorpayPaymentId || p.paymentId || p.id}</span>
-                      <span className="text-[11px] text-slate-500">Order #{p.order?.orderNumber || p.orderId}</span>
+                      <span className="font-mono font-bold text-slate-900 block">{p.gatewayPaymentId || p.razorpayPaymentId || p.paymentId || p.id}</span>
+                      <span className="text-[11px] text-slate-500">Order #{p.orderNumber || p.order?.orderNumber || p.orderId}</span>
+                      {p.razorpayRefundId && (
+                        <span className="block font-mono text-[10px] text-purple-700 font-bold mt-0.5">
+                          Refund: {p.razorpayRefundId}
+                        </span>
+                      )}
                     </td>
-                    <td className="p-3 font-bold text-slate-700">{p.paymentMethod || 'RAZORPAY_ONLINE'}</td>
+                    <td className="p-3 font-bold text-slate-700">{p.gateway || p.paymentMethod || 'RAZORPAY'}</td>
                     <td className="p-3 font-bold text-slate-900">₹{p.amount}</td>
                     <td className="p-3">
                       <span
                         className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase ${
-                          p.status === 'SUCCESS' || p.status === 'CAPTURED'
+                          p.status === 'SUCCESS' || p.status === 'CAPTURED' || p.status === 'SETTLEMENT_COMPLETED'
                             ? 'bg-emerald-100 text-emerald-800'
                             : p.status === 'REFUNDED'
+                            ? 'bg-purple-100 text-purple-800'
+                            : p.status === 'PARTIALLY_REFUNDED'
+                            ? 'bg-indigo-100 text-indigo-800'
+                            : p.status === 'REFUND_FAILED'
                             ? 'bg-rose-100 text-rose-800'
                             : 'bg-amber-100 text-amber-800'
                         }`}
                       >
                         {p.status}
                       </span>
+                      {p.totalRefundedAmount > 0 && (
+                        <span className="block text-[10px] text-indigo-700 font-bold mt-1">
+                          Refunded: ₹{p.totalRefundedAmount} (Bal: ₹{p.remainingRefundableAmount ?? 0})
+                        </span>
+                      )}
+                      {p.refundFailureReason && (
+                        <span className="block text-[10px] text-rose-600 font-semibold mt-1" title={p.refundFailureReason}>
+                          Fail: {p.refundFailureReason}
+                        </span>
+                      )}
                     </td>
                     <td className="p-3 text-slate-500">
                       {p.createdAt ? new Date(p.createdAt).toLocaleString() : 'N/A'}
                     </td>
                     <td className="p-3">
-                      {p.status === 'CAPTURED' || p.status === 'SUCCESS' ? (
+                      {p.status === 'CAPTURED' || p.status === 'SUCCESS' || (p.status === 'PARTIALLY_REFUNDED' && (p.remainingRefundableAmount ?? 0) > 0) ? (
                         <button
                           onClick={() => handleOpenRefundModal(p)}
                           className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold px-3 py-1.5 rounded-lg text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
                         >
                           <RotateCcw className="w-3 h-3" />
-                          Refund
+                          {p.status === 'PARTIALLY_REFUNDED' ? 'Refund More' : 'Refund'}
+                        </button>
+                      ) : ['REFUND_PROCESSING', 'REFUND_PENDING', 'REFUND_PENDING_RECONCILIATION'].includes(p.status) ? (
+                        <button
+                          onClick={() => handleCheckRefundStatus(p)}
+                          className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold px-3 py-1.5 rounded-lg text-[11px] cursor-pointer transition-colors"
+                        >
+                          Check refund status
+                        </button>
+                      ) : p.status === 'REFUND_FAILED' ? (
+                        <button
+                          onClick={() => handleCheckRefundStatus(p)}
+                          className="bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 font-bold px-3 py-1.5 rounded-lg text-[11px] cursor-pointer transition-colors"
+                          title="Verify with Razorpay and safely recover"
+                        >
+                          Reconcile / Recover
                         </button>
                       ) : p.status === 'REFUNDED' ? (
                         <span className="text-slate-400 font-semibold text-[11px]">Refunded</span>
@@ -178,9 +256,39 @@ export default function AdminPaymentsPage() {
               </button>
             </div>
 
-            <p className="text-xs text-slate-600">
-              Are you sure you want to issue a refund of <strong className="text-slate-900 font-bold">₹{refundTarget.amount}</strong> for Order #{refundTarget.order?.orderNumber || refundTarget.orderId}?
-            </p>
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Order:</span>
+                <span className="font-bold text-slate-800">#{refundTarget.order?.orderNumber || refundTarget.orderId}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Original Total:</span>
+                <span className="font-bold text-slate-800">₹{refundTarget.amount}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Refunded So Far:</span>
+                <span className="font-bold text-indigo-700">₹{refundTarget.totalRefundedAmount || 0}</span>
+              </div>
+              <div className="flex justify-between border-t border-slate-200 pt-1 font-bold">
+                <span className="text-slate-700">Remaining Balance:</span>
+                <span className="text-emerald-700">₹{refundTarget.remainingRefundableAmount ?? refundTarget.amount ?? 0}</span>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-700">Refund Amount (₹):</label>
+              <input
+                type="number"
+                step="any"
+                min="1"
+                max={refundTarget.remainingRefundableAmount ?? refundTarget.amount ?? 0}
+                value={refundAmount}
+                onChange={(e) => setRefundAmount(e.target.value)}
+                placeholder="Refund amount"
+                disabled={refundLoading}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-medium text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              />
+            </div>
 
             <div className="space-y-1.5">
               <label className="block text-xs font-bold text-slate-700">Refund Reason:</label>

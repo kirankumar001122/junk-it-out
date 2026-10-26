@@ -23,6 +23,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   } catch (error: any) {
     const status = error instanceof PaymentVerificationError ? error.statusCode : 500;
-    return NextResponse.json({ success: false, message: error.message || 'Payment callback failed.' }, { status });
+    return NextResponse.json({ success: false, message: status < 500 ? error.message : 'Payment callback failed.' }, { status });
   }
 }

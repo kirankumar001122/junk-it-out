@@ -5,6 +5,7 @@ import { signToken } from '@/lib/auth/jwt';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { getClientIp, hasTrustedOrigin, addCorsHeaders } from '@/lib/auth/requestSecurity';
+import { isLocalOtpTestPhone, isValidLocalOtpTestCode } from '@/lib/auth/localOtpTest';
 
 export async function OPTIONS(req: NextRequest) {
   const res = new NextResponse(null, { status: 204 });
@@ -27,17 +28,28 @@ export async function POST(req: NextRequest) {
       return addCorsHeaders(errorResponse('INVALID_OTP', 'OTP code is required.', 400), req);
     }
 
-    // 1. Verify OTP with Fast2SMS provider
-    const otpVerification = await verifyOtp(normalized, body.code, getClientIp(req));
-    if (!otpVerification.valid) {
-      return addCorsHeaders(
-        errorResponse(
-          'OTP_VERIFICATION_FAILED',
-          'The OTP could not be verified. Please request a new code and try again.',
-          otpVerification.status === 'rate_limited' ? 429 : 400
-        ),
-        req
-      );
+    // Local test OTP bypass is limited to development and one configured phone.
+    if (isLocalOtpTestPhone(normalized)) {
+      if (!isValidLocalOtpTestCode(body.code)) {
+        return addCorsHeaders(
+          errorResponse('INVALID_OTP', 'Please enter a valid 6-digit OTP.', 400),
+          req
+        );
+      }
+      console.info('[OTP_TEST_MODE] Local admin test code accepted.');
+    } else {
+      // Normal login always verifies against the OTP provider.
+      const otpVerification = await verifyOtp(normalized, body.code, getClientIp(req));
+      if (!otpVerification.valid) {
+        return addCorsHeaders(
+          errorResponse(
+            'OTP_VERIFICATION_FAILED',
+            'The OTP could not be verified. Please request a new code and try again.',
+            otpVerification.status === 'rate_limited' ? 429 : 400
+          ),
+          req
+        );
+      }
     }
 
     // 2. Lookup & Provision Authorized Admin Account (7676272709 / 8884176048)
@@ -102,15 +114,6 @@ export async function POST(req: NextRequest) {
           (user as any).admin = adminRecord;
         }
       }
-
-      // Ensure unauthorized users do not retain ADMIN or SUPER_ADMIN access
-      await db.user.updateMany({
-        where: {
-          role: { in: ['ADMIN', 'SUPER_ADMIN'] },
-          phone: { notIn: ['+917676272709', '7676272709', '07676272709', '+918884176048', '8884176048', '08884176048'] },
-        },
-        data: { role: 'CUSTOMER' },
-      });
     }
 
     const adminRecord = user?.admin || (user?.id ? await db.admin.findUnique({ where: { userId: user.id } }) : null);
@@ -160,7 +163,7 @@ export async function POST(req: NextRequest) {
 
     return addCorsHeaders(response, req);
   } catch (err: any) {
-    console.error('Admin login error:', err);
+    console.error('Admin login failed:', { errorType: err instanceof Error ? err.name : 'UnknownError' });
     return addCorsHeaders(
       errorResponse('INTERNAL_SERVER_ERROR', err?.message || 'Admin authentication failed.', 500),
       req

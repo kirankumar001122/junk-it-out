@@ -197,3 +197,255 @@ body {
     transform: none !important;
   }
 }
+
+/* ================================================== */
+/* JUNK IT OUT CURVED & GLOSSY BUTTON DESIGN SYSTEM   */
+/* ================================================== */
+
+/* Base Curved & Glossy Tokens */
+.btn-glossy,
+.btn-glossy-primary,
+.btn-glossy-dark,
+.btn-glossy-secondary,
+.btn-glossy-danger,
+.btn-glossy-amber,
+.btn-glossy-blue {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 9999px; /* Pill curved default */
+  overflow: hidden;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+              background 0.18s ease,
+              border-color 0.18s ease,
+              opacity 0.18s ease;
+  will-change: transform, box-shadow;
+}
+
+/* Curved Corner Variants */
+.btn-pill,
+.rounded-pill {
+  border-radius: 9999px !important;
+}
+
+.btn-curved-lg,
+.rounded-curved-lg {
+  border-radius: 1.25rem !important;
+}
+
+.btn-curved-md,
+.rounded-curved-md {
+  border-radius: 1rem !important;
+}
+
+/* Subtle Specular Top Sheen Overlay */
+.btn-glossy::after,
+.btn-glossy-primary::after,
+.btn-glossy-dark::after,
+.btn-glossy-secondary::after,
+.btn-glossy-danger::after,
+.btn-glossy-amber::after,
+.btn-glossy-blue::after,
+.glossy-sheen::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.26) 0%, rgba(255, 255, 255, 0.04) 75%, rgba(255, 255, 255, 0) 100%);
+  border-top-left-radius: inherit;
+  border-top-right-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Standalone glossy sheen modifier */
+.glossy-sheen {
+  position: relative;
+  overflow: hidden;
+  box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.35),
+              inset 0 -1px 2px 0 rgba(0, 0, 0, 0.2),
+              0 4px 12px -2px rgba(0, 0, 0, 0.15);
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.glossy-sheen:hover {
+  transform: translateY(-1.5px);
+  box-shadow: inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.5),
+              0 6px 18px -2px rgba(0, 0, 0, 0.22);
+}
+.glossy-sheen:active {
+  transform: translateY(1px) scale(0.985);
+}
+
+/* Active / Pressed Tactile Sensation */
+.btn-glossy:active,
+.btn-glossy-primary:active,
+.btn-glossy-dark:active,
+.btn-glossy-secondary:active,
+.btn-glossy-danger:active,
+.btn-glossy-amber:active,
+.btn-glossy-blue:active {
+  transform: translateY(1px) scale(0.985);
+}
+
+/* Accessible Focus Visible Indicator */
+.btn-glossy:focus-visible,
+.btn-glossy-primary:focus-visible,
+.btn-glossy-dark:focus-visible,
+.btn-glossy-secondary:focus-visible,
+.btn-glossy-danger:focus-visible,
+.btn-glossy-amber:focus-visible,
+.btn-glossy-blue:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 2px;
+}
+
+/* Disabled State */
+.btn-glossy:disabled,
+.btn-glossy-primary:disabled,
+.btn-glossy-dark:disabled,
+.btn-glossy-secondary:disabled,
+.btn-glossy-danger:disabled,
+.btn-glossy-amber:disabled,
+.btn-glossy-blue:disabled {
+  opacity: 0.55 !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+  box-shadow: none !important;
+  pointer-events: none;
+}
+
+/* 1. PRIMARY GLOSSY (EMERALD BRAND) */
+.btn-glossy-primary {
+  background: linear-gradient(180deg, #10b981 0%, #059669 55%, #047857 100%);
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.55),
+              inset 0 -1.5px 2px 0 rgba(0, 0, 0, 0.2),
+              0 4px 14px -2px rgba(16, 185, 129, 0.42);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+}
+.btn-glossy-primary:hover {
+  background: linear-gradient(180deg, #34d399 0%, #10b981 55%, #059669 100%);
+  border-color: rgba(255, 255, 255, 0.4);
+  box-shadow: inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.7),
+              inset 0 -1.5px 2px 0 rgba(0, 0, 0, 0.25),
+              0 6px 20px -2px rgba(16, 185, 129, 0.52);
+  transform: translateY(-1.5px);
+}
+.btn-glossy-primary:active {
+  box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.35),
+              0 2px 6px -1px rgba(16, 185, 129, 0.35);
+}
+
+/* 2. DARK GLOSSY (SLATE-900 / OBSIDIAN) */
+.btn-glossy-dark {
+  background: linear-gradient(180deg, #334155 0%, #1e293b 50%, #0f172a 100%);
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.32),
+              inset 0 -1.5px 2px 0 rgba(0, 0, 0, 0.45),
+              0 4px 14px -2px rgba(15, 23, 42, 0.45);
+}
+.btn-glossy-dark:hover {
+  background: linear-gradient(180deg, #475569 0%, #334155 50%, #1e293b 100%);
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.45),
+              0 6px 18px -2px rgba(15, 23, 42, 0.55);
+  transform: translateY(-1.5px);
+}
+.btn-glossy-dark:active {
+  box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.5),
+              0 2px 6px -1px rgba(15, 23, 42, 0.35);
+}
+
+/* 3. SECONDARY GLOSSY (PEARL / FROSTED WHITE) */
+.btn-glossy-secondary {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 60%, #f1f5f9 100%);
+  color: #0f172a !important;
+  border: 1px solid #cbd5e1;
+  box-shadow: inset 0 1px 1px 0 #ffffff,
+              inset 0 -1px 1px 0 rgba(0, 0, 0, 0.05),
+              0 3px 10px -2px rgba(15, 23, 42, 0.1);
+}
+.btn-glossy-secondary:hover {
+  background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 60%, #e2e8f0 100%);
+  border-color: #94a3b8;
+  box-shadow: inset 0 1px 1.5px 0 #ffffff,
+              0 5px 14px -2px rgba(15, 23, 42, 0.15);
+  transform: translateY(-1.5px);
+}
+.btn-glossy-secondary:active {
+  box-shadow: inset 0 2px 3px 0 rgba(0, 0, 0, 0.1),
+              0 2px 4px -1px rgba(15, 23, 42, 0.08);
+}
+
+/* 4. DANGER GLOSSY (ROSE / RUBY) */
+.btn-glossy-danger {
+  background: linear-gradient(180deg, #f43f5e 0%, #e11d48 55%, #be123c 100%);
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.45),
+              inset 0 -1.5px 2px 0 rgba(0, 0, 0, 0.25),
+              0 4px 14px -2px rgba(225, 29, 72, 0.4);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+}
+.btn-glossy-danger:hover {
+  background: linear-gradient(180deg, #fb7185 0%, #f43f5e 55%, #e11d48 100%);
+  box-shadow: inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.6),
+              0 6px 18px -2px rgba(225, 29, 72, 0.5);
+  transform: translateY(-1.5px);
+}
+.btn-glossy-danger:active {
+  box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.35),
+              0 2px 6px -1px rgba(225, 29, 72, 0.3);
+}
+
+/* 5. AMBER GLOSSY (WARNING / ACCENT) */
+.btn-glossy-amber {
+  background: linear-gradient(180deg, #fbbf24 0%, #f59e0b 55%, #d97706 100%);
+  color: #0f172a !important;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.6),
+              inset 0 -1.5px 2px 0 rgba(0, 0, 0, 0.18),
+              0 4px 14px -2px rgba(217, 119, 6, 0.4);
+}
+.btn-glossy-amber:hover {
+  background: linear-gradient(180deg, #fcd34d 0%, #fbbf24 55%, #f59e0b 100%);
+  box-shadow: inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.75),
+              0 6px 18px -2px rgba(217, 119, 6, 0.5);
+  transform: translateY(-1.5px);
+}
+.btn-glossy-amber:active {
+  box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.25),
+              0 2px 6px -1px rgba(217, 119, 6, 0.3);
+}
+
+/* 6. BLUE GLOSSY (INFO / NAVIGATION) */
+.btn-glossy-blue {
+  background: linear-gradient(180deg, #38bdf8 0%, #0284c7 55%, #0369a1 100%);
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.5),
+              inset 0 -1.5px 2px 0 rgba(0, 0, 0, 0.22),
+              0 4px 14px -2px rgba(2, 132, 199, 0.4);
+}
+.btn-glossy-blue:hover {
+  background: linear-gradient(180deg, #7dd3fc 0%, #38bdf8 55%, #0284c7 100%);
+  box-shadow: inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.65),
+              0 6px 18px -2px rgba(2, 132, 199, 0.5);
+  transform: translateY(-1.5px);
+}
+.btn-glossy-blue:active {
+  box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.35),
+              0 2px 6px -1px rgba(2, 132, 199, 0.3);
+}

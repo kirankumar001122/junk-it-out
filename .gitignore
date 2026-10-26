@@ -10,5 +10,9 @@ npm-debug.log*
 .env*
 scratch/
 *.tsbuildinfo
-
-
+*.dump
+*-review.txt
+stream-diff.txt
+create-test-pickup.js
+link-test-order.ts
+test-location.js

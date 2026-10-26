@@ -4,6 +4,48 @@ import {
   saveCustomerAddress,
 } from './customerService';
 import { checkGeofenceServiceability } from './serviceAreaService';
+import {
+  validateAndCalculateCoupon,
+  InvalidCouponError,
+} from './couponService';
+
+export { InvalidCouponError };
+
+export class OrderIdempotencyConflictError extends Error {
+  constructor(
+    message = 'Idempotency key was already used for a different booking request.'
+  ) {
+    super(message);
+    this.name = 'OrderIdempotencyConflictError';
+  }
+}
+
+export function createOrderPayloadHash(input: any): string {
+  const normItems = (input.items || [])
+    .map((item: any) => ({
+      categoryId: String(item.categoryId || ''),
+      estimatedWeight: Number(item.estimatedWeight) || 0,
+    }))
+    .sort((a: any, b: any) => a.categoryId.localeCompare(b.categoryId));
+
+  const canonical = {
+    phone: String(input.phone || '').replace(/\D/g, ''),
+    area: String(input.address?.area || '').trim().toLowerCase(),
+    houseNo: String(input.address?.houseNo || '').trim().toLowerCase(),
+    street: String(input.address?.street || '').trim().toLowerCase(),
+    pincode: String(input.address?.pincode || '').trim(),
+    lat: Number(input.address?.lat) || 0,
+    lng: Number(input.address?.lng) || 0,
+    items: normItems,
+    pickupType: input.pickupType || 'ASAP',
+    scheduledSlot: input.scheduledSlot || null,
+    notes: String(input.notes || '').trim(),
+    financialDirection: input.financialDirection || 'CUSTOMER_PAYS',
+    couponCode: String(input.couponCode || '').trim().toUpperCase(),
+  };
+
+  return JSON.stringify(canonical);
+}
 
 // In-memory Idempotency Store to prevent duplicate order placements
 // on network retries.
@@ -13,6 +55,7 @@ const idempotencyStore = new Map<
     orderId: string;
     responseData: any;
     timestamp: number;
+    payloadHash?: string;
   }
 >();
 
@@ -76,6 +119,8 @@ export async function createOrder(
   // 1. IDEMPOTENCY CHECK
   // ---------------------------------------------------------
 
+  const payloadHash = createOrderPayloadHash(input);
+
   if (idempotencyKey) {
     const cached = idempotencyStore.get(idempotencyKey);
 
@@ -84,6 +129,12 @@ export async function createOrder(
       Date.now() - cached.timestamp <
         IDEMPOTENCY_TTL_MS
     ) {
+      if (cached.payloadHash && cached.payloadHash !== payloadHash) {
+        throw new OrderIdempotencyConflictError(
+          'Idempotency key was already used for a different booking payload. Please start a new booking or retry with the original details.'
+        );
+      }
+
       console.log(
         `[IDEMPOTENCY] Returning existing order #${cached.orderId}`
       );
@@ -209,47 +260,26 @@ export async function createOrder(
     });
 
   // ---------------------------------------------------------
-  // 6. COUPON CALCULATION
+  // 6. COUPON CALCULATION & SERVER-SIDE VALIDATION
   // ---------------------------------------------------------
 
   let discountAmount = 0.0;
+  const preDiscountSubtotal = totalWasteItemsValue + basePickupCharge;
 
-  if (input.couponCode) {
-    const coupon =
-      await db.coupon.findUnique({
-        where: {
-          code: input.couponCode
-            .trim()
-            .toUpperCase(),
-        },
-      });
+  if (input.couponCode && String(input.couponCode).trim()) {
+    const couponValidation = await validateAndCalculateCoupon(
+      input.couponCode,
+      preDiscountSubtotal,
+      user.customer?.id
+    );
 
-    if (coupon && coupon.active) {
-      if (coupon.discountType === 'FLAT') {
-        discountAmount =
-          coupon.discountValue;
-      } else if (
-        coupon.discountType === 'PERCENTAGE'
-      ) {
-        discountAmount =
-          (basePickupCharge +
-            totalWasteItemsValue) *
-          (coupon.discountValue / 100);
-
-        if (coupon.maxDiscount) {
-          discountAmount = Math.min(
-            discountAmount,
-            coupon.maxDiscount
-          );
-        }
-      }
-    } else if (
-      input.couponCode
-        .trim()
-        .toUpperCase() === 'WELCOME50'
-    ) {
-      discountAmount = 50.0;
+    if (!couponValidation.valid) {
+      throw new InvalidCouponError(
+        couponValidation.error || 'Invalid or ineligible coupon code.'
+      );
     }
+
+    discountAmount = couponValidation.discountAmount;
   }
 
   // ---------------------------------------------------------
@@ -267,13 +297,12 @@ export async function createOrder(
     'CUSTOMER_PAYS' = 'CUSTOMER_PAYS';
 
   const rawPayable =
-    totalWasteItemsValue +
-    basePickupCharge -
+    preDiscountSubtotal -
     discountAmount;
 
   const finalAmount = Math.max(
     1,
-    Math.round(rawPayable)
+    Math.round(rawPayable * 100) / 100
   );
 
   const orderNumber =
@@ -404,6 +433,8 @@ export async function createOrder(
 
         timestamp:
           Date.now(),
+
+        payloadHash,
       }
     );
   }

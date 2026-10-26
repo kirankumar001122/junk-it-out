@@ -1,5 +1,9 @@
 import { NextRequest } from 'next/server';
-import { createOrder } from '@/lib/services/orderService';
+import {
+  createOrder,
+  OrderIdempotencyConflictError,
+  InvalidCouponError,
+} from '@/lib/services/orderService';
 import { validateCreateOrderInput } from '@/lib/validations/schemas';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { db } from '@/lib/db';
@@ -53,6 +57,29 @@ export async function POST(req: NextRequest) {
       'Order creation error:',
       err
     );
+
+    if (
+      err instanceof OrderIdempotencyConflictError ||
+      err?.name === 'OrderIdempotencyConflictError'
+    ) {
+      return errorResponse(
+        'IDEMPOTENCY_CONFLICT',
+        err.message ||
+          'Idempotency key was already used for a different booking payload.',
+        409
+      );
+    }
+
+    if (
+      err instanceof InvalidCouponError ||
+      err?.name === 'InvalidCouponError'
+    ) {
+      return errorResponse(
+        'INVALID_COUPON',
+        err.message || 'Invalid or ineligible coupon code.',
+        400
+      );
+    }
 
     return errorResponse(
       'ORDER_CREATION_FAILED',

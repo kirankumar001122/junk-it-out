@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Bell, LogOut, User } from 'lucide-react';
+import { Bell, LogOut, Menu, User } from 'lucide-react';
 
 export default function AdminHeader() {
   const router = useRouter();
@@ -18,20 +18,32 @@ export default function AdminHeader() {
   };
 
   return (
-    <header className="bg-slate-900 text-white px-6 py-3.5 rounded-2xl shadow-md flex items-center justify-between gap-4 mb-6 border border-slate-800">
-      {/* Left: Branding/Hub Title */}
-      <div className="flex items-center gap-3">
-        <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 font-black text-xs">
+    <header className="bg-slate-900 text-white px-4 sm:px-6 py-3.5 rounded-2xl shadow-md flex items-center justify-between gap-3 sm:gap-4 mb-6 border border-slate-800">
+      {/* Left: Branding/Hub Title & Mobile Menu Toggle */}
+      <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+        <button
+          type="button"
+          onClick={() => {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('jio_admin_sidebar_open'));
+            }
+          }}
+          className="md:hidden p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-slate-700 cursor-pointer shrink-0"
+          aria-label="Open navigation menu"
+        >
+          <Menu className="w-4 h-4" />
+        </button>
+        <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 font-black text-xs shrink-0">
           HQ
         </div>
-        <div>
-          <h2 className="text-sm font-extrabold tracking-tight text-white flex items-center gap-2">
+        <div className="min-w-0">
+          <h2 className="text-xs sm:text-sm font-extrabold tracking-tight text-white flex items-center gap-2 truncate">
             Bengaluru Control Hub
-            <span className="text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800 px-2 py-0.5 rounded-full uppercase">
+            <span className="text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800 px-2 py-0.5 rounded-full uppercase shrink-0">
               Live
             </span>
           </h2>
-          <p className="text-[11px] text-slate-400">Junk It Out Operations & Command Center</p>
+          <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">Junk It Out Operations & Command Center</p>
         </div>
       </div>
 
@@ -39,7 +51,7 @@ export default function AdminHeader() {
       <div className="flex items-center gap-3">
         <Link
           href="/admin/notifications"
-          className="relative p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-slate-700"
+          className="relative p-2.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-slate-700 shadow-xs"
           title="System Alerts & Notifications"
         >
           <Bell className="w-4 h-4" />
@@ -47,8 +59,8 @@ export default function AdminHeader() {
         </Link>
 
         {/* Admin Profile */}
-        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700">
-          <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+        <div className="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-slate-800/80 border border-slate-700 shadow-xs">
+          <div className="w-7 h-7 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
             <User className="w-4 h-4" />
           </div>
           <div className="text-left">
@@ -60,7 +72,7 @@ export default function AdminHeader() {
         {/* Logout */}
         <button
           onClick={handleLogout}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800/80 text-xs font-bold transition-colors"
+          className="btn-glossy-danger rounded-full px-4 py-2 text-xs font-bold shadow-sm"
           title="Logout Admin Session"
         >
           <LogOut className="w-3.5 h-3.5" />

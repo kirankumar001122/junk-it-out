@@ -34,7 +34,10 @@ export async function GET(req: NextRequest) {
       unassignedPickups,
       activeAgents,
       customerCount,
-      paymentRecords,
+      paymentRevenueAgg,
+      approvedSettlementsAgg,
+      paidSettlementsAgg,
+      pendingSettlementsAgg,
     ] = await Promise.all([
       db.order.count(),
       db.order.count({ where: { createdAt: { gte: startOfDay, lte: endOfDay } } }),
@@ -45,13 +48,37 @@ export async function GET(req: NextRequest) {
       db.order.count({ where: { agentId: null, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } } }),
       db.agent.count({ where: { status: { in: ['AVAILABLE', 'ASSIGNED', 'EN_ROUTE', 'ARRIVED'] } } }),
       db.customer.count(),
-      db.payment.findMany({
-        where: { status: { in: ['CAPTURED', 'SETTLEMENT_COMPLETED'] } },
-        select: { amount: true },
+      db.payment.aggregate({
+        _sum: { amount: true },
+        where: {
+          status: { in: ['CAPTURED', 'SETTLEMENT_COMPLETED'] },
+        },
+      }),
+      db.settlement.aggregate({
+        _sum: { amount: true },
+        where: {
+          status: { in: ['APPROVED', 'READY_FOR_PAYOUT'] },
+        },
+      }),
+      db.settlement.aggregate({
+        _sum: { amount: true },
+        where: {
+          status: { in: ['PAID', 'SETTLEMENT_COMPLETED'] },
+        },
+      }),
+      db.settlement.aggregate({
+        _sum: { amount: true },
+        where: {
+          status: 'PENDING',
+        },
       }),
     ]);
 
-    const totalRevenue = paymentRecords.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const totalRevenue = Number((paymentRevenueAgg._sum.amount || 0).toFixed(2));
+    const approvedCustomerPayouts = Number((approvedSettlementsAgg._sum.amount || 0).toFixed(2));
+    const paidCustomerPayouts = Number((paidSettlementsAgg._sum.amount || 0).toFixed(2));
+    const pendingCustomerPayouts = Number((pendingSettlementsAgg._sum.amount || 0).toFixed(2));
+    const totalCustomerPayouts = paidCustomerPayouts;
 
     const completedOrders = await db.order.findMany({
       where: { status: { in: ['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'] } },
@@ -81,7 +108,11 @@ export async function GET(req: NextRequest) {
       activeAgents,
       customers: customerCount,
       totalRevenue,
-      totalCustomerPayouts: totalRevenue,
+      totalCustomerPayouts,
+      paidCustomerPayouts,
+      approvedCustomerPayouts,
+      pendingCustomerPayouts,
+      totalCustomerSettlements: Number((approvedCustomerPayouts + paidCustomerPayouts).toFixed(2)),
       totalOrders: totalBookings,
       activeOrders: activePickups,
       totalAgents: await db.agent.count(),

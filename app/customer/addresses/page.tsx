@@ -37,6 +37,15 @@ export default function CustomerAddressesPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!showAddModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !saving) setShowAddModal(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showAddModal, saving]);
+
   const handleAddAddress = async () => {
     if (savingRef.current) return;
     if (!newHouse.trim() || !newStreet.trim() || !newArea.trim()) {
@@ -157,7 +166,12 @@ export default function CustomerAddressesPage() {
       </div>
 
       {showAddModal && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Add Saved Address"
+          className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        >
           <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
             <h3 className="text-lg font-bold text-slate-900">Add Saved Address</h3>
 

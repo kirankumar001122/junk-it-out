@@ -1,24 +1,34 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser, isAdminRole } from '@/lib/auth/middleware';
-import { errorResponse } from '@/lib/utils/apiResponse';
+import { NextRequest } from 'next/server';
+import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 
 export async function GET(req: NextRequest) {
-  try {
-    const authUser = await getAuthUser(req);
-    if (!authUser) {
-      return errorResponse('UNAUTHORIZED', 'Authentication required.', 401);
-    }
-    if (!isAdminRole(authUser)) {
-      return errorResponse('FORBIDDEN', 'Admin access required.', 403);
-    }
+  const authUser = await getAuthUser(req);
+  const authorizationStatus = getAdminAuthorizationStatus(authUser);
+  if (authorizationStatus === 401) {
+    return NextResponse.json(
+      { success: false, message: 'Authentication is required.' },
+      { status: 401 },
+    );
+  }
+  if (authorizationStatus === 403) {
+    return NextResponse.json(
+      { success: false, message: 'Admin access required.' },
+      { status: 403 },
+    );
+  }
 
+  try {
     const auditLogs = await db.auditLog.findMany({
       orderBy: { timestamp: 'desc' },
       take: 100,
     });
     return NextResponse.json({ success: true, data: auditLogs });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+  } catch {
+    return NextResponse.json(
+      { success: false, message: 'Failed to fetch audit logs.' },
+      { status: 500 },
+    );
   }
 }

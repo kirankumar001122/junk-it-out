@@ -36,8 +36,8 @@ import CustomerReviews from '@/components/CustomerReviews';
 import { getCachedClientJson } from '@/lib/clientRequestCache';
 
 const categoryImages: Record<string, string> = {
-  'E-Waste': '/categories/e-waste.png',
-  'Household Dry Waste': '/categories/household-waste.png',
+  'E-Waste': '/categories/e-waste.webp',
+  'Household Dry Waste': '/categories/household-waste.webp',
   'Paper & Cardboard': '/categories/paper-carboard.jpg',
   'Plastic Waste': '/categories/plastic-waste.jpg?v=2',
 };
@@ -115,7 +115,7 @@ export default function HomePage() {
       <section
         className="relative overflow-hidden border-b border-slate-800 bg-cover bg-center bg-no-repeat"
         style={{
-          backgroundImage: "url('/images/junk_it_out.png')",
+          backgroundImage: "url('/images/junk_it_out.webp')",
         }}
       >
         {/* Dark overlay for readability */}
@@ -149,7 +149,7 @@ export default function HomePage() {
 
               <Link
                 href="/book?cart=1"
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-6 text-sm font-bold text-slate-950 shadow-lg shadow-emerald-500/20 transition-all hover:bg-emerald-400 active:scale-95"
+                className="btn-glossy-primary rounded-full h-12 px-7 text-sm font-extrabold shadow-lg shadow-emerald-500/25"
               >
                 <ShoppingBasket className="h-4.5 w-4.5" />
                 <span>Book a Pickup</span>
@@ -158,7 +158,7 @@ export default function HomePage() {
 
               <a
                 href="#categories"
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800/60 px-6 text-sm font-semibold text-slate-200 transition-all hover:border-slate-600 hover:bg-slate-800"
+                className="btn-glossy-dark rounded-full h-12 px-7 text-sm font-bold text-slate-200 border border-slate-700/80"
               >
                 Explore Categories
               </a>
@@ -342,8 +342,10 @@ export default function HomePage() {
                           <>
                             <div className="mb-3 h-24 overflow-hidden rounded-xl bg-emerald-50">
                               <img
-                                src="/categories/household-waste.png"
+                                src="/categories/household-waste.webp"
                                 alt="Wet Waste and Dry Waste"
+                                loading="lazy"
+                                decoding="async"
                                 className="h-24 w-full object-cover"
                               />
                             </div>
@@ -385,6 +387,8 @@ export default function HomePage() {
                                 <img
                                   src={categoryImages[category.name]}
                                   alt={category.name}
+                                  loading="lazy"
+                                  decoding="async"
                                   className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
                                 />
                               </div>
@@ -419,7 +423,7 @@ export default function HomePage() {
 
                           <button
                             onClick={() => addCategory(category)}
-                            className="inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-slate-900 text-sm font-bold text-white transition-colors hover:bg-emerald-600 active:scale-95"
+                            className="btn-glossy-dark rounded-full h-10 w-full text-xs font-bold uppercase tracking-wider shadow-sm"
                           >
                             <Plus className="h-4 w-4" />
                             ADD
@@ -427,7 +431,7 @@ export default function HomePage() {
 
                         ) : (
 
-                          <div className="flex h-10 items-center justify-between rounded-lg border border-emerald-300 bg-emerald-50/80 px-1">
+                          <div className="flex h-10 items-center justify-between rounded-full border border-emerald-300/80 bg-emerald-50/90 px-1.5 shadow-sm">
 
                           <button
                             onClick={() => {
@@ -446,13 +450,13 @@ export default function HomePage() {
                               }
 
                             }}
-                            className="grid h-8 w-8 cursor-pointer place-items-center rounded-md bg-white text-slate-700 shadow-sm transition-colors hover:bg-slate-100"
+                            className="btn-glossy-secondary rounded-full h-7 w-7 text-slate-700 p-0 grid place-items-center shadow-xs"
                             aria-label="Decrease quantity"
                           >
-                            <Minus className="h-4 w-4" />
+                            <Minus className="h-3.5 w-3.5" />
                           </button>
 
-                          <span className="px-2 text-sm font-extrabold text-emerald-950">
+                          <span className="px-2 text-xs font-black text-emerald-950">
                             {quantity} kg
                           </span>
 
@@ -463,10 +467,10 @@ export default function HomePage() {
                                 quantity + 1
                               )
                             }
-                            className="grid h-8 w-8 cursor-pointer place-items-center rounded-md bg-emerald-600 text-white shadow-sm transition-colors hover:bg-emerald-700"
+                            className="btn-glossy-primary rounded-full h-7 w-7 text-white p-0 grid place-items-center shadow-xs"
                             aria-label="Increase quantity"
                           >
-                            <Plus className="h-4 w-4" />
+                            <Plus className="h-3.5 w-3.5" />
                           </button>
 
                           </div>
@@ -556,7 +560,7 @@ export default function HomePage() {
 
           <Link
             href="/customer/orders"
-            className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 text-xs font-bold text-slate-950 transition-colors hover:bg-emerald-400"
+            className="btn-glossy-primary rounded-full h-12 px-6 text-xs font-extrabold shadow-md tracking-wide"
           >
             <span>My Pickups</span>
             <ArrowRight className="h-4 w-4" />

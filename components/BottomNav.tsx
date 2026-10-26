@@ -23,7 +23,9 @@ export default function BottomNav() {
       <div className="flex items-center justify-around">
         {links.map((link) => {
           const Icon = link.icon;
-          const isActive = pathname === link.href;
+          const isActive =
+            pathname === link.href ||
+            (link.href === '/customer/orders' && pathname === '/my-pickups');
 
           if (link.highlight) {
             return (

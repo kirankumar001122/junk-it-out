@@ -120,7 +120,7 @@ export default function Navbar() {
       <div className="mx-auto flex max-w-7xl items-center gap-2 sm:gap-3 px-3 sm:px-6 py-2.5">
         <Link href="/" className="flex shrink-0 items-center gap-2 transition-opacity hover:opacity-90" aria-label="Junk It Out home">
           <span className="relative grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl bg-white border border-slate-200 shadow-sm overflow-hidden shrink-0">
-            <img src="/logo.png" alt="Junk It Out Logo" className="h-full w-full object-contain p-1" />
+            <img src="/logo.png" alt="Junk It Out Logo" decoding="async" className="h-full w-full object-contain p-1" />
           </span>
           <span className="hidden text-base sm:text-lg font-bold tracking-tight text-slate-900 md:block">
             JUNK IT <span className="text-emerald-600 font-extrabold">OUT</span>
@@ -131,7 +131,7 @@ export default function Navbar() {
         <button
           type="button"
           onClick={() => setLocationOpen(true)}
-          className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2 rounded-xl bg-slate-50/90 px-2 sm:px-3 py-1.5 text-left border border-slate-200/90 max-w-[135px] sm:max-w-[200px] md:max-w-[240px]"
+          className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2 rounded-full bg-slate-50/90 px-3 py-1.5 text-left border border-slate-200/90 max-w-[135px] sm:max-w-[200px] md:max-w-[240px] shadow-sm hover:border-emerald-300 hover:bg-white transition-all active:scale-95 cursor-pointer"
           title={`Pickup Location: ${location}`}
           aria-label={`Change pickup location. Current location: ${location}`}
         >
@@ -149,18 +149,19 @@ export default function Navbar() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search waste categories..."
-            className="h-10 w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50/70 pl-10 pr-3 text-xs sm:text-sm font-medium text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20"
+            aria-label="Search waste categories"
+            className="h-10 w-full min-w-0 rounded-full border border-slate-200 bg-slate-50/70 pl-10 pr-3 text-xs sm:text-sm font-medium text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/20"
           />
         </form>
 
-        <Link href="/customer/profile" className="hidden items-center gap-2 rounded-xl border border-transparent px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors sm:flex">
+        <Link href="/customer/profile" className="hidden items-center gap-2 rounded-full border border-slate-200/70 bg-white/80 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-white hover:text-slate-900 hover:border-emerald-300 shadow-sm transition-all sm:flex active:scale-95">
           <CircleUserRound className="h-4.5 w-4.5 text-slate-600" />
           <span className="hidden lg:inline">{checkingAuth ? 'Account' : getDisplayName(user)}</span>
         </Link>
 
         <button
           onClick={() => setCartOpen(true)}
-          className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-900 text-white hover:bg-slate-800 transition-all shadow-sm active:scale-95"
+          className="btn-glossy-dark rounded-full h-10 w-10 shrink-0 grid place-items-center text-white"
           aria-label="Open pickup cart"
         >
           <ShoppingBasket className="h-4.5 w-4.5" />

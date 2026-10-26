@@ -54,13 +54,14 @@ export default function CustomerCouponsPage() {
 
               <button
                 onClick={() => handleCopy(coupon.code)}
-                className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-extrabold text-xs px-4 py-2 rounded-xl border border-emerald-300 flex items-center gap-1.5 transition-colors"
+                aria-label={`Copy coupon code ${coupon.code}`}
+                className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-extrabold text-xs px-4 py-2 rounded-xl border border-emerald-300 flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 {copiedCode === coupon.code ? (
-                  <>
+                  <span role="status" aria-live="polite" className="inline-flex items-center gap-1.5">
                     <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
                     COPIED
-                  </>
+                  </span>
                 ) : (
                   <>
                     <Copy className="w-3.5 h-3.5" />
