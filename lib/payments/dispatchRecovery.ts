@@ -3,6 +3,7 @@ import { dispatchPaidOrderToAgents } from '@/lib/payments/verification';
 
 export interface DispatchRecoveryOptions {
   serviceArea?: string;
+  serviceAreas?: string[];
   limit?: number;
   dispatchFn?: (orderId: string) => Promise<unknown>;
 }
@@ -40,7 +41,11 @@ export async function reconcileUndispatchedPaidOrders(
       paymentStatus: 'CAPTURED',
       agentId: null,
       status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED'] },
-      ...(options?.serviceArea ? { address: { area: options.serviceArea } } : {}),
+      ...(options?.serviceAreas && options.serviceAreas.length > 0
+        ? { address: { area: { in: options.serviceAreas } } }
+        : options?.serviceArea
+        ? { address: { area: options.serviceArea } }
+        : {}),
       payments: {
         some: {
           direction: 'CUSTOMER_PAYS',

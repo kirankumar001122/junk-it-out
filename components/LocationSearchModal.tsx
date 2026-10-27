@@ -58,7 +58,6 @@ export default function LocationSearchModal({
   useEffect(() => {
     if (!open) return;
 
-    console.log('[LocationModal] Modal opened');
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
@@ -80,12 +79,10 @@ export default function LocationSearchModal({
   useEffect(() => {
     if (!open) return;
 
-    console.log('[LocationModal] Fetching service areas from /api/service-areas');
     fetch('/api/service-areas')
       .then((res) => res.json())
       .then((data) => {
         if (data.success && Array.isArray(data.data) && data.data.length > 0) {
-          console.log('[LocationModal] Loaded service areas count:', data.data.length);
           setServiceZones(data.data);
         }
       })
@@ -94,6 +91,15 @@ export default function LocationSearchModal({
         // Fallback to static BENGALURU_ZONES already in state
       });
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
 
   // Initialize Google Maps Places & Geocoder Services asynchronously
   useEffect(() => {
@@ -497,7 +503,7 @@ export default function LocationSearchModal({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex flex-col items-center justify-start pt-12 sm:pt-16 px-3 pb-4 sm:pb-6 overflow-hidden pointer-events-auto"
+      className="customer-backdrop-enter fixed inset-0 z-[100] flex flex-col items-center justify-start pt-12 sm:pt-16 px-3 pb-4 sm:pb-6 overflow-hidden pointer-events-auto"
       role="dialog"
       aria-modal="true"
       aria-label="Select pickup location"
@@ -511,7 +517,7 @@ export default function LocationSearchModal({
       />
 
       {/* LOCATION SEARCH CONTAINER */}
-      <div className="animate-scale-in relative flex max-h-[calc(100dvh-4rem)] w-full max-w-lg flex-col rounded-2xl bg-white shadow-2xl overflow-hidden border border-slate-200 z-10 pointer-events-auto">
+      <div className="customer-dialog-enter relative flex max-h-[calc(100dvh-4rem)] w-full max-w-lg flex-col rounded-2xl bg-white shadow-2xl overflow-hidden border border-slate-200 z-10 pointer-events-auto">
         {/* HEADER */}
         <header className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 sm:px-5 py-3.5 bg-white">
           <div className="flex items-center gap-2">
@@ -543,6 +549,7 @@ export default function LocationSearchModal({
               value={query}
               onChange={(e) => handleQueryChange(e.target.value)}
               placeholder="Search area, zone name, apartment..."
+              aria-label="Search area, zone name, or apartment"
               className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-9 text-xs sm:text-sm font-medium text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 placeholder:text-slate-400"
             />
             {query && (

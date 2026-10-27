@@ -98,7 +98,9 @@ Suggested alert signals are sustained API 5xx rate, route latency percentiles, r
 - Admin API `401` means the request lacks a valid session; `403` means the session lacks the required role. Do not weaken server checks to resolve either response.
 - Dashboard metrics are API/database-derived. Compare authenticated API status and response shape before assuming data is missing. Existing fixture data should not be recreated.
 - A readiness `503` means the main app could not complete its database probe. Check database reachability and credentials through the approved secret manager without printing their values. Liveness `200` alone does not establish database readiness.
-- Some older routes and provider integrations still emit unstructured logs or full error objects. Treat raw logs as sensitive, restrict access, and do not forward them externally until they have been reviewed and redacted.
+- Run the API regression suite with `npm.cmd run test:regression`. It uses a loopback-only synthetic Prisma URL and stubs database/provider calls; it does not provision fixtures or contact external services.
+- For a TypeScript validation, run `node .\node_modules\typescript\bin\tsc --noEmit --incremental false -p .\tsconfig.json`. A production build can additionally be checked with `npm.cmd run build`; neither command should be pointed at production services.
+- Some older routes and provider integrations still emit unstructured logs or full error objects. Treat raw logs as sensitive, restrict access, and redact them before sharing externally.
 
 ## Incident and external-service handling
 

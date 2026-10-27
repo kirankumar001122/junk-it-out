@@ -4,6 +4,7 @@ This matrix lists the route boundaries present in the checked-out repository. Ex
 
 | Route | Methods | Caller / access boundary | Main behavior |
 |---|---|---|---|
+| `/api/health` | GET | Public infrastructure probe; no session required | No-cache API/database readiness status; returns `503` when the database is unavailable |
 | `/api/auth/send-otp` | POST, OPTIONS | Customer/admin/agent login UI; trusted-origin check | Validate phone, send OTP or use guarded local test mode |
 | `/api/auth/verify-otp` | POST | Login UI; trusted-origin check and OTP verification | Create/find customer session |
 | `/api/auth/admin-login` | POST | Admin UI; OTP plus admin provisioning/role logic | Authenticate admin; review the role-mutation finding in audit |

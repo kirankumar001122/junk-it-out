@@ -3,6 +3,13 @@ import { db } from '@/lib/db';
 import { getAuthUser, requireAdminUser } from '@/lib/auth/middleware';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 
+let cachedStats: { payload: any; expiresAt: number } | null = null;
+const STATS_CACHE_TTL_MS = 5_000;
+
+export function invalidateAdminStatsCache() {
+  cachedStats = null;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
@@ -24,6 +31,15 @@ export async function GET(req: NextRequest) {
     const startOfDay = new Date(`${kolkataDateStr}T00:00:00+05:30`);
     const endOfDay = new Date(`${kolkataDateStr}T23:59:59.999+05:30`);
 
+    // Short-lived in-memory cache (5 seconds) to absorb concurrent admin polling bursts
+    const bypassCache = req.headers.get('cache-control') === 'no-cache' || process.env.NODE_ENV === 'test';
+    if (!bypassCache && cachedStats && Date.now() < cachedStats.expiresAt) {
+      const res = successResponse(cachedStats.payload);
+      res.headers.set('Cache-Control', 'private, max-age=5');
+      res.headers.set('X-Cache', 'HIT');
+      return res;
+    }
+
     const [
       totalBookings,
       todaysBookings,
@@ -38,6 +54,11 @@ export async function GET(req: NextRequest) {
       approvedSettlementsAgg,
       paidSettlementsAgg,
       pendingSettlementsAgg,
+      totalAgents,
+      availableAgents,
+      totalWeightKg,
+      cancelledOrders,
+      completedOrders,
     ] = await Promise.all([
       db.order.count(),
       db.order.count({ where: { createdAt: { gte: startOfDay, lte: endOfDay } } }),
@@ -72,18 +93,24 @@ export async function GET(req: NextRequest) {
           status: 'PENDING',
         },
       }),
+      db.agent.count(),
+      db.agent.count({ where: { status: 'AVAILABLE' } }),
+      db.orderItem.aggregate({
+        _sum: { actualWeight: true },
+        where: { actualWeight: { not: null } },
+      }),
+      db.order.count({ where: { status: 'CANCELLED' } }),
+      db.order.findMany({
+        where: { status: { in: ['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'] } },
+        select: { createdAt: true, updatedAt: true },
+      }),
     ]);
 
-    const totalRevenue = Number((paymentRevenueAgg._sum.amount || 0).toFixed(2));
-    const approvedCustomerPayouts = Number((approvedSettlementsAgg._sum.amount || 0).toFixed(2));
-    const paidCustomerPayouts = Number((paidSettlementsAgg._sum.amount || 0).toFixed(2));
-    const pendingCustomerPayouts = Number((pendingSettlementsAgg._sum.amount || 0).toFixed(2));
+    const totalRevenue = Number((paymentRevenueAgg._sum?.amount || 0).toFixed(2));
+    const approvedCustomerPayouts = Number((approvedSettlementsAgg._sum?.amount || 0).toFixed(2));
+    const paidCustomerPayouts = Number((paidSettlementsAgg._sum?.amount || 0).toFixed(2));
+    const pendingCustomerPayouts = Number((pendingSettlementsAgg._sum?.amount || 0).toFixed(2));
     const totalCustomerPayouts = paidCustomerPayouts;
-
-    const completedOrders = await db.order.findMany({
-      where: { status: { in: ['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'] } },
-      select: { createdAt: true, updatedAt: true },
-    });
 
     const onTimeCount = completedOrders.filter((order) => {
       const diffMinutes = (order.updatedAt.getTime() - order.createdAt.getTime()) / (1000 * 60);
@@ -91,11 +118,6 @@ export async function GET(req: NextRequest) {
     }).length;
 
     const slaOnTimeRate = completedOrders.length > 0 ? Number(((onTimeCount / completedOrders.length) * 100).toFixed(1)) : 0;
-
-    const totalWeightKg = await db.orderItem.aggregate({
-      _sum: { actualWeight: true },
-      where: { actualWeight: { not: null } },
-    });
 
     const payload = {
       totalBookings,
@@ -115,15 +137,25 @@ export async function GET(req: NextRequest) {
       totalCustomerSettlements: Number((approvedCustomerPayouts + paidCustomerPayouts).toFixed(2)),
       totalOrders: totalBookings,
       activeOrders: activePickups,
-      totalAgents: await db.agent.count(),
-      availableAgents: await db.agent.count({ where: { status: 'AVAILABLE' } }),
-      totalWeightKg: Number((totalWeightKg._sum.actualWeight || 0).toFixed(1)),
-      cancelledOrders: await db.order.count({ where: { status: 'CANCELLED' } }),
+      totalAgents,
+      availableAgents,
+      totalWeightKg: Number((totalWeightKg._sum?.actualWeight || 0).toFixed(1)),
+      cancelledOrders,
       slaTargetMins: 30,
       slaOnTimeRate,
     };
 
-    return successResponse(payload);
+    if (!bypassCache) {
+      cachedStats = {
+        payload,
+        expiresAt: Date.now() + STATS_CACHE_TTL_MS,
+      };
+    }
+
+    const res = successResponse(payload);
+    res.headers.set('Cache-Control', 'private, max-age=5');
+    res.headers.set('X-Cache', 'MISS');
+    return res;
   } catch (error: any) {
     return errorResponse('INTERNAL_SERVER_ERROR', error.message || 'Failed to fetch admin stats.', 500);
   }

@@ -37,6 +37,15 @@ export default function CustomerAddressesPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!showAddModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !saving) setShowAddModal(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showAddModal, saving]);
+
   const handleAddAddress = async () => {
     if (savingRef.current) return;
     if (!newHouse.trim() || !newStreet.trim() || !newArea.trim()) {
@@ -96,15 +105,16 @@ export default function CustomerAddressesPage() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="customer-page space-y-6">
+      <div className="customer-page-header">
         <div>
-          <h1 className="text-2xl font-black text-slate-900">Saved Addresses</h1>
-          <p className="text-xs text-slate-500">Manage your Home, Work, and pickup locations in South Bengaluru</p>
+          <p className="customer-eyebrow">Pickup preferences</p>
+          <h1 className="customer-title mt-2">Saved addresses</h1>
+          <p className="customer-subtitle mt-2">Keep your regular pickup locations ready for a faster booking.</p>
         </div>
         <button
           onClick={() => setShowAddModal(true)}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 shadow-sm"
+          className="customer-action flex items-center gap-1.5 bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-600/20 hover:bg-emerald-700"
         >
           <Plus className="w-4 h-4" />
           Add Address
@@ -121,11 +131,11 @@ export default function CustomerAddressesPage() {
         {loading ? (
           <div className="rounded-3xl bg-slate-100 h-28 animate-pulse" />
         ) : addresses.length === 0 ? (
-          <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-500">
+          <div className="customer-surface p-8 text-center text-xs text-slate-500">
             No saved addresses yet. Add one for faster booking.
           </div>
         ) : addresses.map((addr) => (
-          <div key={addr.id} className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3">
+          <div key={addr.id} className="customer-surface space-y-3 p-5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xs">
@@ -141,7 +151,8 @@ export default function CustomerAddressesPage() {
               <button
                 onClick={() => handleDeleteAddress(addr.id)}
                 disabled={deletingId === addr.id}
-                className="text-slate-400 hover:text-rose-600 p-1 disabled:opacity-50"
+                aria-label={`Delete ${addr.label} address`}
+                className="grid h-10 w-10 place-items-center rounded-xl text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
               >
                 <Trash2 className={`w-4 h-4 ${deletingId === addr.id ? 'animate-pulse' : ''}`} />
               </button>
@@ -157,7 +168,12 @@ export default function CustomerAddressesPage() {
       </div>
 
       {showAddModal && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Add Saved Address"
+          className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        >
           <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
             <h3 className="text-lg font-bold text-slate-900">Add Saved Address</h3>
 

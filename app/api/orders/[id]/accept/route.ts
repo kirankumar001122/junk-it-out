@@ -8,6 +8,56 @@ import {
   persistAgentBookingNotificationOnce,
 } from '@/lib/services/agentBookingNotification';
 
+const SAFE_HYDRATED_ORDER_INCLUDE = {
+  agent: {
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+        },
+      },
+    },
+  },
+  customer: {
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+        },
+      },
+    },
+  },
+  address: true,
+  items: {
+    include: {
+      category: true,
+    },
+  },
+};
+
+function formatOrderResponse(
+  orderData: any,
+  fallback: { id: string; orderNumber: string; agentId?: string | null; status: string }
+) {
+  if (!orderData) {
+    return {
+      id: fallback.id,
+      orderId: fallback.id,
+      orderNumber: fallback.orderNumber,
+      agentId: fallback.agentId,
+      status: fallback.status,
+    };
+  }
+  return {
+    ...orderData,
+    orderId: orderData.id ?? fallback.id,
+  };
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -64,12 +114,18 @@ export async function POST(
       !['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'].includes(order.status)
     ) {
       // Idempotent retry: Order is already accepted or beyond by this exact agent
-      return successResponse({
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        agentId: order.agentId,
-        status: order.status,
+      const hydratedOrder = await db.order.findUnique({
+        where: { id: order.id },
+        include: SAFE_HYDRATED_ORDER_INCLUDE,
       });
+      return successResponse(
+        formatOrderResponse(hydratedOrder, {
+          id: order.id,
+          orderNumber: order.orderNumber,
+          agentId: order.agentId,
+          status: order.status,
+        })
+      );
     }
 
     if (order.agentId !== null && order.agentId !== agentId) {
@@ -125,7 +181,10 @@ export async function POST(
       });
 
       if (updateResult.count === 0) {
-        const recheckOrder = await tx.order.findUnique({ where: { id: order.id } });
+        const recheckOrder = await tx.order.findUnique({
+          where: { id: order.id },
+          include: SAFE_HYDRATED_ORDER_INCLUDE,
+        });
         return { changed: false as const, alreadyAssignedToAgent: recheckOrder?.agentId === agentId, order: recheckOrder };
       }
 
@@ -156,12 +215,7 @@ export async function POST(
 
       const updatedOrder = await tx.order.findUnique({
         where: { id: order.id },
-        include: {
-          agent: { include: { user: true } },
-          customer: { include: { user: true } },
-          address: true,
-          items: { include: { category: true } },
-        },
+        include: SAFE_HYDRATED_ORDER_INCLUDE,
       });
 
       return { changed: true as const, alreadyAssignedToAgent: true, order: updatedOrder };
@@ -169,12 +223,14 @@ export async function POST(
 
     if (!assignment.changed) {
       if (assignment.alreadyAssignedToAgent) {
-        return successResponse({
-          orderId: order.id,
-          orderNumber: order.orderNumber,
-          agentId,
-          status: assignment.order?.status,
-        });
+        return successResponse(
+          formatOrderResponse(assignment.order, {
+            id: order.id,
+            orderNumber: order.orderNumber,
+            agentId,
+            status: assignment.order?.status ?? order.status,
+          })
+        );
       }
       return errorResponse(
         'CONFLICT',
@@ -221,12 +277,14 @@ export async function POST(
       }
     }
 
-    return successResponse(updatedOrder || {
-      orderId: order.id,
-      orderNumber: order.orderNumber,
-      agentId: agentId,
-      status: newStatus,
-    });
+    return successResponse(
+      formatOrderResponse(updatedOrder, {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        agentId: agentId,
+        status: newStatus,
+      })
+    );
   } catch (err: any) {
     console.error('Accept order error:', err);
     return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to accept pickup order.', 500);

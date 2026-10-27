@@ -151,33 +151,62 @@ export default function AgentDashboardPage() {
   }, []);
 
   useEffect(() => {
+    const TRACKING_ELIGIBLE_STATUSES = [
+      'AGENT_ACCEPTED',
+      'AGENT_ON_WAY',
+      'AGENT_ARRIVED',
+      'WEIGHING',
+      'WASTE_VERIFICATION',
+    ];
+
     if (!activeOrder?.id || !isOnline || !agent?.id) return;
+    if (!TRACKING_ELIGIBLE_STATUSES.includes(activeOrder.status)) return;
 
     let cancelled = false;
     let locationTimer: ReturnType<typeof setTimeout> | undefined;
+    let inFlightController: AbortController | null = null;
 
     const sendLocation = async () => {
+      // Defer GPS heartbeat if an agent button action is currently in flight
+      // to prevent database lock contention and network pipe saturation
+      if (
+        actionRequestRef.current ||
+        statusRequestRef.current ||
+        weighingRequestRef.current ||
+        acceptingPickupRef.current
+      ) {
+        if (!cancelled) {
+          locationTimer = setTimeout(sendLocation, 3000);
+        }
+        return;
+      }
+
       const simulatedLat = (activeOrder.address?.lat || 12.9077) + (Math.random() - 0.5) * 0.005;
       const simulatedLng = (activeOrder.address?.lng || 77.5854) + (Math.random() - 0.5) * 0.005;
 
       try {
+        inFlightController = new AbortController();
         const response = await fetch('/api/agent/location', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          agentId: agent.id,
-          orderId: activeOrder.id,
-          lat: simulatedLat,
-          lng: simulatedLng,
-          speed: 22.4,
-        }),
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentId: agent.id,
+            orderId: activeOrder.id,
+            lat: simulatedLat,
+            lng: simulatedLng,
+            speed: 22.4,
+          }),
+          signal: inFlightController.signal,
         });
         if (!response.ok) {
           console.warn('[AGENT_LOCATION_UPDATE_FAILED]', response.status);
         }
       } catch (error) {
-        console.warn('[AGENT_LOCATION_UPDATE_FAILED]', error);
+        if (!(error instanceof DOMException && error.name === 'AbortError')) {
+          console.warn('[AGENT_LOCATION_UPDATE_FAILED]', error);
+        }
       } finally {
+        inFlightController = null;
         if (!cancelled) {
           locationTimer = setTimeout(sendLocation, 8000);
         }
@@ -189,8 +218,9 @@ export default function AgentDashboardPage() {
     return () => {
       cancelled = true;
       if (locationTimer) clearTimeout(locationTimer);
+      if (inFlightController) inFlightController.abort();
     };
-  }, [activeOrder?.id, isOnline, agent?.id]);
+  }, [activeOrder?.id, activeOrder?.status, isOnline, agent?.id]);
 
   // Authenticated Agent SSE Stream Connection for NEW_PICKUP_AVAILABLE Notifications
   useEffect(() => {
@@ -250,13 +280,32 @@ export default function AgentDashboardPage() {
     };
   }, [agent?.id, isOnline]);
 
+  // Keyboard accessibility: dismiss active modal with Escape key
+  useEffect(() => {
+    if (!showWeighModal && !viewPickupModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showWeighModal && !submittingWeigh) setShowWeighModal(false);
+        if (viewPickupModal) setViewPickupModal(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showWeighModal, viewPickupModal, submittingWeigh]);
+
   const fetchOrderDetails = async (orderId: string) => {
-    const res = await fetch(`/api/orders/${orderId}`);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.success) {
-      throw new Error(data.error?.message || data.message || 'Unable to fetch pickup details.');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, { signal: controller.signal });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.error?.message || data.message || 'Unable to fetch pickup details.');
+      }
+      return data.data;
+    } finally {
+      clearTimeout(timeout);
     }
-    return data.data;
   };
 
   const handleViewPickupDetails = async (orderId: string) => {
@@ -274,11 +323,16 @@ export default function AgentDashboardPage() {
     if (acceptingPickupRef.current) return;
     acceptingPickupRef.current = true;
     setAcceptingPickup(true);
+    let acceptTimeout: number | undefined;
     try {
+      const controller = new AbortController();
+      acceptTimeout = window.setTimeout(() => controller.abort(), 15_000);
       const res = await fetch(`/api/orders/${orderId}/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
       });
+      window.clearTimeout(acceptTimeout);
       const data = await res.json();
 
       if (res.status === 409) {
@@ -292,22 +346,54 @@ export default function AgentDashboardPage() {
       if (res.ok && data.success) {
         setStatusNotice(`Pickup Accepted! Order #${data.data?.orderNumber || ''} assigned to you.`);
         setTimeout(() => setStatusNotice(null), 5000);
+        const cachedModalOrder = viewPickupModal;
         setViewPickupModal(null);
         setNewPickupNotice(null);
-        const updatedOrder = Array.isArray(data.data?.items)
-          ? data.data
+        const rawOrder = data.data;
+        const updatedOrder = Array.isArray(rawOrder?.items)
+          ? rawOrder
+          : cachedModalOrder && (cachedModalOrder.id === orderId || cachedModalOrder.orderNumber === orderId)
+          ? {
+              ...cachedModalOrder,
+              ...(rawOrder || {}),
+              id: rawOrder?.id || rawOrder?.orderId || cachedModalOrder.id,
+              status: rawOrder?.status || 'AGENT_ACCEPTED',
+              agentId: rawOrder?.agentId || agent?.id,
+            }
           : await fetchOrderDetails(orderId);
-        setActiveOrder(updatedOrder);
-        setOrders((currentOrders) => [
-          updatedOrder,
-          ...currentOrders.filter((order) => order.id !== updatedOrder.id),
-        ]);
+
+        if (updatedOrder) {
+          setActiveOrder(updatedOrder);
+          if (Array.isArray(updatedOrder.items) && updatedOrder.items.length > 0) {
+            setActualWeightsInput(
+              updatedOrder.items.map((i: any) => ({
+                itemId: i.id,
+                categoryId: i.categoryId,
+                categoryName: i.category?.name || 'Waste item',
+                estimatedWeight: Number(i.estimatedWeight ?? 0),
+                weightStr:
+                  typeof i.actualWeight === 'number' && i.actualWeight > 0
+                    ? String(i.actualWeight)
+                    : '',
+              }))
+            );
+          }
+          setOrders((currentOrders) => [
+            updatedOrder,
+            ...currentOrders.filter((order) => order.id !== updatedOrder.id),
+          ]);
+        }
       } else {
         alert(data.error?.message || data.message || 'Failed to accept pickup.');
       }
     } catch (err) {
-      alert('Network error while accepting pickup.');
+      alert(
+        err instanceof DOMException && err.name === 'AbortError'
+          ? 'Accepting pickup timed out. Please check your network and active pickups.'
+          : 'Network error while accepting pickup.'
+      );
     } finally {
+      if (acceptTimeout) window.clearTimeout(acceptTimeout);
       setAcceptingPickup(false);
       acceptingPickupRef.current = false;
     }
@@ -396,25 +482,39 @@ export default function AgentDashboardPage() {
     const targetStatus = isOnline ? 'OFFLINE' : 'AVAILABLE';
     setStatusUpdating(true);
     setStatusNotice(null);
+    let statusTimeout: number | undefined;
     try {
+      const controller = new AbortController();
+      statusTimeout = window.setTimeout(() => controller.abort(), 10_000);
       const res = await fetch('/api/agent/status', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: targetStatus }),
+        signal: controller.signal,
       });
+      window.clearTimeout(statusTimeout);
       const data = await res.json();
       if (res.ok && data.success) {
         const newStatus = data.data.status;
-        setIsOnline(newStatus === 'AVAILABLE');
+        const nowOnline = newStatus === 'AVAILABLE';
+        setIsOnline(nowOnline);
         setAgent((prev: any) => (prev ? { ...prev, status: newStatus } : prev));
         setStatusNotice(`Status updated to ${newStatus}`);
         setTimeout(() => setStatusNotice(null), 3000);
+        if (nowOnline) {
+          fetchAgentData();
+        }
       } else {
         setStatusNotice(data.error?.message || data.message || 'Failed to update status.');
       }
-    } catch {
-      setStatusNotice('Network error updating status.');
+    } catch (e) {
+      setStatusNotice(
+        e instanceof DOMException && e.name === 'AbortError'
+          ? 'Status update timed out. Please check connection and try again.'
+          : 'Network error updating status.'
+      );
     } finally {
+      if (statusTimeout) window.clearTimeout(statusTimeout);
       setStatusUpdating(false);
       statusRequestRef.current = false;
     }
@@ -452,16 +552,41 @@ export default function AgentDashboardPage() {
             : 'Arrived at customer doorstep!'
         );
         setTimeout(() => setStatusNotice(null), 4000);
-        if (data.data?.id) {
+        if (data.data?.id || data.data?.orderId) {
+          const rawOrder = data.data;
+          const targetId = rawOrder.id || rawOrder.orderId || activeOrder?.id;
           const nextOrder = action === 'accept'
-            ? Array.isArray(data.data.items)
-              ? data.data
-              : await fetchOrderDetails(data.data.id)
-            : data.data;
-          setActiveOrder(nextOrder);
-          setOrders((currentOrders) =>
-            currentOrders.map((order) => order.id === nextOrder.id ? nextOrder : order)
-          );
+            ? Array.isArray(rawOrder?.items)
+              ? rawOrder
+              : activeOrder && (activeOrder.id === targetId || activeOrder.orderNumber === targetId)
+              ? {
+                  ...activeOrder,
+                  ...(rawOrder || {}),
+                  id: targetId,
+                  status: rawOrder.status || 'AGENT_ACCEPTED',
+                }
+              : await fetchOrderDetails(targetId)
+            : rawOrder;
+          if (nextOrder) {
+            setActiveOrder(nextOrder);
+            if (action === 'accept' && Array.isArray(nextOrder.items) && nextOrder.items.length > 0) {
+              setActualWeightsInput(
+                nextOrder.items.map((i: any) => ({
+                  itemId: i.id,
+                  categoryId: i.categoryId,
+                  categoryName: i.category?.name || 'Waste item',
+                  estimatedWeight: Number(i.estimatedWeight ?? 0),
+                  weightStr:
+                    typeof i.actualWeight === 'number' && i.actualWeight > 0
+                      ? String(i.actualWeight)
+                      : '',
+                }))
+              );
+            }
+            setOrders((currentOrders) =>
+              currentOrders.map((order) => order.id === nextOrder.id ? nextOrder : order)
+            );
+          }
         }
       } else {
         const errorText = data.error?.message || data.message || `Failed to perform ${action} action.`;
@@ -485,10 +610,9 @@ export default function AgentDashboardPage() {
 
   const handleSubmitWeighingAndComplete = async () => {
     if (!activeOrder || weighingRequestRef.current) return;
-    weighingRequestRef.current = true;
     setWeighModalError(null);
 
-    // 1. Client-side weight validation
+    // 1. Client-side weight validation before setting request lock
     if (!actualWeightsInput || actualWeightsInput.length === 0) {
       setWeighModalError('No order items available to weigh.');
       return;
@@ -512,10 +636,14 @@ export default function AgentDashboardPage() {
       });
     }
 
+    weighingRequestRef.current = true;
     setSubmittingWeigh(true);
+    let weighTimeout: number | undefined;
     try {
-      // 2. Submit door-to-door scale weights
-      const weighRes = await fetch(`/api/orders/${activeOrder.id}/weigh`, {
+      const controller = new AbortController();
+      weighTimeout = window.setTimeout(() => controller.abort(), 15_000);
+      // Submit door-to-door scale weights and complete pickup in a single atomic request
+      const completeRes = await fetch(`/api/orders/${activeOrder.id}/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -523,19 +651,9 @@ export default function AgentDashboardPage() {
           scalePhotoUrl,
           notes: weighNotes || 'Digital scale weight recorded at doorstep.',
         }),
+        signal: controller.signal,
       });
-      const weighData = await weighRes.json().catch(() => ({}));
-      if (!weighRes.ok || !weighData.success) {
-        setWeighModalError(weighData.error?.message || weighData.message || 'Failed to record scale weights.');
-        setSubmittingWeigh(false);
-        return;
-      }
-
-      // 3. Submit Order Completion
-      const completeRes = await fetch(`/api/orders/${activeOrder.id}/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      window.clearTimeout(weighTimeout);
       const completeData = await completeRes.json().catch(() => ({}));
       if (completeRes.ok && completeData.success) {
         setShowWeighModal(false);
@@ -554,8 +672,13 @@ export default function AgentDashboardPage() {
       }
     } catch (e) {
       console.error('Weighing/Completion error:', e);
-      setWeighModalError('Network error while completing pickup. Please check your connection and try again.');
+      setWeighModalError(
+        e instanceof DOMException && e.name === 'AbortError'
+          ? 'Completion timed out. Please check your network and active orders.'
+          : 'Network error while completing pickup. Please check your connection and try again.'
+      );
     } finally {
+      if (weighTimeout) window.clearTimeout(weighTimeout);
       setSubmittingWeigh(false);
       weighingRequestRef.current = false;
     }
@@ -586,7 +709,7 @@ export default function AgentDashboardPage() {
           </div>
 
           {loginError && (
-            <div className="p-3 bg-rose-950/60 border border-rose-800/80 text-rose-300 rounded-2xl text-xs font-bold flex items-center gap-2">
+            <div role="alert" className="p-3 bg-rose-950/60 border border-rose-800/80 text-rose-300 rounded-2xl text-xs font-bold flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
               <span>{loginError}</span>
             </div>
@@ -595,10 +718,11 @@ export default function AgentDashboardPage() {
           {!otpSent ? (
             <form onSubmit={handleSendOtp} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-400 uppercase">Agent Mobile Number</label>
+                <label htmlFor="agent-login-phone" className="block text-xs font-bold text-slate-400 uppercase">Agent Mobile Number</label>
                 <div className="relative">
                   <Smartphone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                   <input
+                    id="agent-login-phone"
                     type="tel"
                     required
                     value={loginPhone}
@@ -612,17 +736,17 @@ export default function AgentDashboardPage() {
               <button
                 type="submit"
                 disabled={loginLoading}
-                className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs py-4 rounded-2xl uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
+                className="w-full btn-glossy-primary rounded-full text-slate-950 font-black text-xs py-4 uppercase tracking-wider shadow-lg flex items-center justify-center gap-2"
               >
-                {loginLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'SEND AGENT LOGIN OTP'}
-                <ArrowRight className="w-4 h-4" />
+                {loginLoading ? <RefreshCw className="w-4 h-4 animate-spin shrink-0" /> : 'SEND AGENT LOGIN OTP'}
+                <ArrowRight className="w-4 h-4 shrink-0" />
               </button>
             </form>
           ) : (
             <form onSubmit={handleVerifyOtp} className="space-y-4">
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="block text-xs font-bold text-slate-400 uppercase">Enter Verification OTP</label>
+                  <label htmlFor="agent-login-otp" className="block text-xs font-bold text-slate-400 uppercase">Enter Verification OTP</label>
                   <button
                     type="button"
                     onClick={() => setOtpSent(false)}
@@ -634,6 +758,7 @@ export default function AgentDashboardPage() {
                 <div className="relative">
                   <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                   <input
+                    id="agent-login-otp"
                     type="text"
                     required
                     autoFocus
@@ -648,10 +773,10 @@ export default function AgentDashboardPage() {
               <button
                 type="submit"
                 disabled={loginLoading}
-                className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs py-4 rounded-2xl uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
+                className="w-full btn-glossy-primary rounded-full text-slate-950 font-black text-xs py-4 uppercase tracking-wider shadow-lg flex items-center justify-center gap-2"
               >
-                {loginLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'VERIFY & ACCESS PORTAL'}
-                <ArrowRight className="w-4 h-4" />
+                {loginLoading ? <RefreshCw className="w-4 h-4 animate-spin shrink-0" /> : 'VERIFY & ACCESS PORTAL'}
+                <ArrowRight className="w-4 h-4 shrink-0" />
               </button>
             </form>
           )}
@@ -698,16 +823,16 @@ export default function AgentDashboardPage() {
             type="button"
             onClick={toggleAgentStatus}
             disabled={statusUpdating}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-extrabold border transition-all cursor-pointer disabled:opacity-50 ${
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-black border transition-all cursor-pointer disabled:opacity-50 ${
               isOnline
-                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+                ? 'btn-glossy-primary text-white shadow-emerald-500/20'
+                : 'btn-glossy-danger text-white shadow-rose-500/20'
             }`}
           >
             {statusUpdating ? (
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
             ) : (
-              <Power className="w-3.5 h-3.5" />
+              <Power className="w-3.5 h-3.5 shrink-0" />
             )}
             {isOnline ? 'ONLINE' : 'OFFLINE'}
           </button>
@@ -715,10 +840,10 @@ export default function AgentDashboardPage() {
           <button
             onClick={handleLogout}
             disabled={loggingOut}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl transition-colors disabled:opacity-50"
+            className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-full transition-colors disabled:opacity-50 border border-slate-700"
             title="Log Out"
           >
-            {loggingOut ? <RefreshCw className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
+            {loggingOut ? <RefreshCw className="w-4 h-4 animate-spin shrink-0" /> : <LogOut className="w-4 h-4 shrink-0" />}
           </button>
         </div>
       </div>
@@ -764,12 +889,12 @@ export default function AgentDashboardPage() {
             <button
               onClick={() => handleViewPickupDetails(newPickupNotice.orderId)}
               disabled={loadingPickupDetails}
-              className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-xs py-3.5 rounded-2xl uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.01]"
+              className="w-full btn-glossy-primary rounded-full text-slate-950 font-black text-xs py-4 uppercase tracking-wider shadow-lg flex items-center justify-center gap-2"
             >
               {loadingPickupDetails ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
+                <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
               ) : (
-                <Eye className="w-4 h-4" />
+                <Eye className="w-4 h-4 shrink-0" />
               )}
               VIEW PICKUP DETAILS
             </button>
@@ -821,9 +946,9 @@ export default function AgentDashboardPage() {
 
               <a
                 href={`tel:${activeOrder.customer?.user?.phone}`}
-                className="p-3 bg-emerald-600 text-white rounded-2xl shadow-lg shrink-0"
+                className="p-3.5 btn-glossy-primary rounded-full shadow-lg shrink-0 flex items-center justify-center"
               >
-                <Phone className="w-5 h-5" />
+                <Phone className="w-5 h-5 shrink-0" />
               </a>
             </div>
 
@@ -844,9 +969,9 @@ export default function AgentDashboardPage() {
               href={`https://maps.google.com/?q=${activeOrder.address?.lat},${activeOrder.address?.lng}`}
               target="_blank"
               rel="noreferrer"
-              className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs py-3 rounded-2xl flex items-center justify-center gap-2 border border-slate-600"
+              className="w-full btn-glossy-dark rounded-full text-white font-bold text-xs py-3.5 flex items-center justify-center gap-2 border border-slate-600 shadow-sm"
             >
-              <Navigation className="w-4 h-4 text-emerald-400" />
+              <Navigation className="w-4 h-4 text-emerald-400 shrink-0" />
               OPEN GOOGLE MAPS NAVIGATION
             </a>
           </div>
@@ -863,9 +988,9 @@ export default function AgentDashboardPage() {
                 <button
                   onClick={toggleAgentStatus}
                   disabled={statusUpdating}
-                  className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs py-3 rounded-xl uppercase tracking-wider shadow-md flex items-center justify-center gap-2"
+                  className="w-full btn-glossy-primary rounded-full text-slate-950 font-black text-xs py-3.5 uppercase tracking-wider shadow-md flex items-center justify-center gap-2"
                 >
-                  {statusUpdating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Power className="w-4 h-4" />}
+                  {statusUpdating ? <RefreshCw className="w-4 h-4 animate-spin shrink-0" /> : <Power className="w-4 h-4 shrink-0" />}
                   SWITCH STATUS TO ONLINE
                 </button>
               </div>
@@ -875,12 +1000,12 @@ export default function AgentDashboardPage() {
               <button
                 onClick={() => handleCallEndpoint('accept')}
                 disabled={actionLoading}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
+                className="w-full btn-glossy-primary rounded-full text-white font-black text-sm py-4 shadow-lg flex items-center justify-center gap-2 tracking-wide"
               >
                 {actionLoading ? (
-                  <RefreshCw className="w-5 h-5 animate-spin" />
+                  <RefreshCw className="w-5 h-5 animate-spin shrink-0" />
                 ) : (
-                  <CheckCircle className="w-5 h-5" />
+                  <CheckCircle className="w-5 h-5 shrink-0" />
                 )}
                 {actionLoading ? 'ACCEPTING ASSIGNMENT...' : 'ACCEPT PICKUP ASSIGNMENT'}
               </button>
@@ -890,12 +1015,12 @@ export default function AgentDashboardPage() {
               <button
                 onClick={() => handleCallEndpoint('start')}
                 disabled={actionLoading}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
+                className="w-full btn-glossy-primary rounded-full text-white font-black text-sm py-4 shadow-lg flex items-center justify-center gap-2 tracking-wide"
               >
                 {actionLoading ? (
-                  <RefreshCw className="w-5 h-5 animate-spin" />
+                  <RefreshCw className="w-5 h-5 animate-spin shrink-0" />
                 ) : (
-                  <Play className="w-5 h-5" />
+                  <Play className="w-5 h-5 shrink-0" />
                 )}
                 {actionLoading ? 'STARTING JOURNEY...' : 'START JOURNEY TO CUSTOMER'}
               </button>
@@ -905,12 +1030,12 @@ export default function AgentDashboardPage() {
               <button
                 onClick={() => handleCallEndpoint('arrive')}
                 disabled={actionLoading}
-                className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.01]"
+                className="w-full btn-glossy-blue rounded-full text-white font-black text-sm py-4 shadow-lg flex items-center justify-center gap-2 tracking-wide"
               >
                 {actionLoading ? (
-                  <RefreshCw className="w-5 h-5 animate-spin" />
+                  <RefreshCw className="w-5 h-5 animate-spin shrink-0" />
                 ) : (
-                  <MapPin className="w-5 h-5" />
+                  <MapPin className="w-5 h-5 shrink-0" />
                 )}
                 {actionLoading ? 'MARKING ARRIVED...' : 'MARK ARRIVED AT DOORSTEP'}
               </button>
@@ -923,9 +1048,9 @@ export default function AgentDashboardPage() {
                   setWeighModalError(null);
                   setShowWeighModal(true);
                 }}
-                className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 cursor-pointer transition-transform hover:scale-[1.01]"
+                className="w-full btn-glossy-amber rounded-full text-slate-950 font-black text-sm py-4 shadow-lg flex items-center justify-center gap-2 cursor-pointer tracking-wide"
               >
-                <Scale className="w-5 h-5" />
+                <Scale className="w-5 h-5 shrink-0" />
                 START WEIGHING & RECORD KG
               </button>
             )}
@@ -941,7 +1066,12 @@ export default function AgentDashboardPage() {
 
       {/* WEIGHING MODAL */}
       {showWeighModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Record Digital Scale Weights"
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+        >
           <div className="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-extrabold text-white flex items-center gap-2">
@@ -1036,16 +1166,16 @@ export default function AgentDashboardPage() {
               type="button"
               onClick={handleSubmitWeighingAndComplete}
               disabled={submittingWeigh}
-              className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-sm py-4 rounded-2xl shadow-xl flex items-center justify-center gap-2 transition-all cursor-pointer hover:scale-[1.01]"
+              className="w-full btn-glossy-primary rounded-full text-slate-950 font-black text-sm py-4 shadow-xl flex items-center justify-center gap-2 cursor-pointer"
             >
               {submittingWeigh ? (
                 <>
-                  <RefreshCw className="w-5 h-5 animate-spin" />
+                  <RefreshCw className="w-5 h-5 animate-spin shrink-0" />
                   <span>SAVING WEIGHTS & COMPLETING...</span>
                 </>
               ) : (
                 <>
-                  <CheckCircle className="w-5 h-5" />
+                  <CheckCircle className="w-5 h-5 shrink-0" />
                   <span>CONFIRM WEIGHTS & COMPLETE PICKUP</span>
                 </>
               )}
@@ -1056,7 +1186,12 @@ export default function AgentDashboardPage() {
 
       {/* READ-ONLY VIEW PICKUP MODAL */}
       {viewPickupModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Pickup Details"
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+        >
           <div className="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
@@ -1123,19 +1258,19 @@ export default function AgentDashboardPage() {
             <button
               onClick={() => handleAcceptPickup(viewPickupModal.id)}
               disabled={acceptingPickup}
-              className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-xs py-4 rounded-2xl uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.01]"
+              className="w-full btn-glossy-primary rounded-full text-slate-950 font-black text-xs py-4 uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 cursor-pointer"
             >
               {acceptingPickup ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
+                <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
               ) : (
-                <CheckCircle className="w-4 h-4" />
+                <CheckCircle className="w-4 h-4 shrink-0" />
               )}
               ACCEPT PICKUP
             </button>
 
             <button
               onClick={() => setViewPickupModal(null)}
-              className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs py-3.5 rounded-2xl uppercase tracking-wider transition-colors"
+              className="w-full btn-glossy-dark rounded-full text-white font-bold text-xs py-3.5 uppercase tracking-wider transition-colors border border-slate-700"
             >
               CLOSE DETAILS
             </button>

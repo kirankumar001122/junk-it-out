@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Phone, Mail, MapPin, Clock, Send, CheckCircle2 } from 'lucide-react';
+import ScrollReveal from '@/components/ScrollReveal';
 
 export default function ContactPage() {
   const [submitted, setSubmitted] = useState(false);
@@ -56,9 +57,9 @@ export default function ContactPage() {
   };
 
   return (
-    <div className="w-full bg-slate-50/60 pb-16 space-y-12 min-h-[85vh]">
+    <div className="customer-page-cream w-full pb-16 space-y-12 min-h-[85vh]">
       {/* Contact Header */}
-      <section className="bg-slate-900 text-white py-14 px-6 sm:px-12 text-center border-b border-slate-800">
+      <section className="customer-hero relative overflow-hidden bg-slate-900 py-14 px-6 text-center text-white sm:px-12">
         <div className="max-w-3xl mx-auto space-y-3">
           <span className="bg-emerald-500/10 text-emerald-400 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider border border-emerald-500/20">
             Contact Us
@@ -74,7 +75,7 @@ export default function ContactPage() {
       </section>
 
       {/* Main Content Grid */}
-      <section className="max-w-6xl mx-auto px-4 sm:px-6">
+      <ScrollReveal className="mx-auto max-w-6xl px-4 sm:px-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
           {/* Contact Details */}
           <div className="lg:col-span-5 space-y-6">
@@ -89,7 +90,7 @@ export default function ContactPage() {
             </div>
 
             <div className="space-y-3">
-              <div className="flex items-start gap-3 p-4 rounded-xl bg-white border border-slate-200/90 shadow-sm">
+              <div className="customer-feature-card flex items-start gap-3 rounded-xl bg-white p-4 shadow-sm">
                 <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
                   <MapPin className="w-4.5 h-4.5" />
                 </div>
@@ -101,7 +102,7 @@ export default function ContactPage() {
                 </div>
               </div>
 
-              <div className="flex items-start gap-3 p-4 rounded-xl bg-white border border-slate-200/90 shadow-sm">
+              <div className="customer-feature-card flex items-start gap-3 rounded-xl bg-white p-4 shadow-sm">
                 <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
                   <Phone className="w-4.5 h-4.5" />
                 </div>
@@ -113,7 +114,7 @@ export default function ContactPage() {
                 </div>
               </div>
 
-              <div className="flex items-start gap-3 p-4 rounded-xl bg-white border border-slate-200/90 shadow-sm">
+              <div className="customer-feature-card flex items-start gap-3 rounded-xl bg-white p-4 shadow-sm">
                 <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
                   <Mail className="w-4.5 h-4.5" />
                 </div>
@@ -125,7 +126,7 @@ export default function ContactPage() {
                 </div>
               </div>
 
-              <div className="flex items-start gap-3 p-4 rounded-xl bg-white border border-slate-200/90 shadow-sm">
+              <div className="customer-feature-card flex items-start gap-3 rounded-xl bg-white p-4 shadow-sm">
                 <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
                   <Clock className="w-4.5 h-4.5" />
                 </div>
@@ -140,7 +141,7 @@ export default function ContactPage() {
           </div>
 
           {/* Contact Form */}
-          <div className="lg:col-span-7 bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-5">
+          <div className="customer-surface lg:col-span-7 bg-white p-6 sm:p-8 space-y-5">
             <div>
               <h2 className="text-xl font-bold text-slate-900">Send Us a Message</h2>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -250,7 +251,7 @@ export default function ContactPage() {
             )}
           </div>
         </div>
-      </section>
+      </ScrollReveal>
     </div>
   );
 }

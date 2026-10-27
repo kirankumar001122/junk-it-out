@@ -1,5 +1,9 @@
 import { NextRequest } from 'next/server';
-import { createOrder } from '@/lib/services/orderService';
+import {
+  createOrder,
+  OrderIdempotencyConflictError,
+  InvalidCouponError,
+} from '@/lib/services/orderService';
 import { validateCreateOrderInput } from '@/lib/validations/schemas';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { db } from '@/lib/db';
@@ -54,6 +58,29 @@ export async function POST(req: NextRequest) {
       err
     );
 
+    if (
+      err instanceof OrderIdempotencyConflictError ||
+      err?.name === 'OrderIdempotencyConflictError'
+    ) {
+      return errorResponse(
+        'IDEMPOTENCY_CONFLICT',
+        err.message ||
+          'Idempotency key was already used for a different booking payload.',
+        409
+      );
+    }
+
+    if (
+      err instanceof InvalidCouponError ||
+      err?.name === 'InvalidCouponError'
+    ) {
+      return errorResponse(
+        'INVALID_COUPON',
+        err.message || 'Invalid or ineligible coupon code.',
+        400
+      );
+    }
+
     return errorResponse(
       'ORDER_CREATION_FAILED',
       err.message ||
@@ -102,23 +129,38 @@ export async function GET(req: NextRequest) {
     if (
       authUser.role === 'CUSTOMER'
     ) {
+      const customerIdentityConditions = [
+        ...(authUser.customerId ? [{ customerId: authUser.customerId }] : []),
+        ...(authUser.userId ? [{ customer: { userId: authUser.userId } }] : []),
+      ];
+
       whereClause = {
-        customerId:
-          authUser.customerId ||
-          'unmatched',
+        ...(customerIdentityConditions.length > 0
+          ? { OR: customerIdentityConditions }
+          : { customerId: 'unmatched' }),
 
-        OR: [
+        AND: [
           {
-            financialDirection: {
-              not: 'CUSTOMER_PAYS',
-            },
-          },
-          {
-            financialDirection:
-              'CUSTOMER_PAYS',
-
-            paymentStatus:
-              'CAPTURED',
+            OR: [
+              {
+                financialDirection: {
+                  not: 'CUSTOMER_PAYS',
+                },
+              },
+              {
+                financialDirection: 'CUSTOMER_PAYS',
+                OR: [
+                  {
+                    paymentStatus: {
+                      in: ['CAPTURED', 'REFUND_PENDING', 'REFUNDED'],
+                    },
+                  },
+                  {
+                    status: 'CANCELLED',
+                  },
+                ],
+              },
+            ],
           },
         ],
       };

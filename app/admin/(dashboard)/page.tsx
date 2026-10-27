@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import {
   Package,
@@ -38,15 +38,29 @@ export default function AdminDashboardPage() {
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
 
+  // In-flight concurrency and debouncing guards
+  const assignInFlightRef = useRef(false);
+  const isFetchingRef = useRef(false);
+  const pendingRefreshRef = useRef(false);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Manual order state
   const [manualPhone, setManualPhone] = useState('+919888777666');
   const [manualName, setManualName] = useState('Ravi Shankar');
   const [manualArea, setManualArea] = useState('JP Nagar');
   const [manualHouse, setManualHouse] = useState('Plot 42, 10th Cross');
 
-  const loadAdminData = async () => {
+  const loadAdminData = async (isBackground = false) => {
+    if (isFetchingRef.current) {
+      pendingRefreshRef.current = true;
+      return;
+    }
+    isFetchingRef.current = true;
+
     try {
-      setAgentsLoading(true);
+      if (!isBackground) {
+        setAgentsLoading(true);
+      }
       setAgentsError(null);
 
       const [statsRes, ordersRes, agentsRes] = await Promise.all([
@@ -56,30 +70,50 @@ export default function AdminDashboardPage() {
       ]);
 
       if (statsRes.success) setStats(statsRes.data);
-      if (ordersRes.success) setOrders(ordersRes.data);
+      if (ordersRes.success) setOrders(ordersRes.data || []);
       if (agentsRes.success) {
         setAgents(agentsRes.data || []);
-      } else {
+      } else if (!isBackground) {
         setAgentsError(agentsRes.error?.message || agentsRes.message || 'Failed to load field agents.');
       }
     } catch (e: any) {
       console.error(e);
-      setAgentsError('Error loading operations data.');
+      if (!isBackground) {
+        setAgentsError('Error loading operations data.');
+      }
     } finally {
       setLoading(false);
       setAgentsLoading(false);
+      isFetchingRef.current = false;
+
+      if (pendingRefreshRef.current) {
+        pendingRefreshRef.current = false;
+        loadAdminData(true);
+      }
     }
   };
 
+  const triggerDebouncedRefresh = () => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      loadAdminData(true);
+    }, 400);
+  };
+
   useEffect(() => {
-    loadAdminData();
+    loadAdminData(false);
 
     const eventSource = new EventSource('/api/realtime/stream');
-    eventSource.addEventListener('ORDER_CREATED', () => loadAdminData());
-    eventSource.addEventListener('ORDER_UPDATED', () => loadAdminData());
-    eventSource.addEventListener('AGENT_LOCATION_UPDATED', () => loadAdminData());
+    eventSource.addEventListener('ORDER_CREATED', triggerDebouncedRefresh);
+    eventSource.addEventListener('ORDER_UPDATED', triggerDebouncedRefresh);
+    eventSource.addEventListener('AGENT_LOCATION_UPDATED', triggerDebouncedRefresh);
 
     return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
       eventSource.close();
     };
   }, []);
@@ -97,6 +131,7 @@ export default function AdminDashboardPage() {
   };
 
   const handleAssignAgent = async () => {
+    if (assignInFlightRef.current || assignLoading) return;
     if (!selectedOrderForAssign) return;
     if (!selectedAgentId) {
       setAssignError('Please select a valid registered field agent from the dropdown.');
@@ -108,6 +143,7 @@ export default function AdminDashboardPage() {
       return;
     }
 
+    assignInFlightRef.current = true;
     setAssignLoading(true);
     setAssignError(null);
 
@@ -121,7 +157,7 @@ export default function AdminDashboardPage() {
       if (res.ok && data.success) {
         setSelectedOrderForAssign(null);
         setSelectedAgentId('');
-        await loadAdminData();
+        await loadAdminData(true);
       } else {
         setAssignError(data.error?.message || data.message || 'Failed to assign agent to this order.');
       }
@@ -129,6 +165,7 @@ export default function AdminDashboardPage() {
       console.error(e);
       setAssignError('Network error while assigning agent.');
     } finally {
+      assignInFlightRef.current = false;
       setAssignLoading(false);
     }
   };
@@ -159,16 +196,16 @@ export default function AdminDashboardPage() {
           <div className="flex items-center gap-3">
             <button
               onClick={() => setShowManualModal(true)}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md flex items-center gap-2"
+              className="btn-glossy-primary rounded-full text-white font-extrabold text-xs px-5 py-3 shadow-md flex items-center gap-2"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-4 h-4 shrink-0" />
               CREATE MANUAL ORDER
             </button>
             <a
               href="/api/admin/reports"
-              className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2"
+              className="btn-glossy-dark rounded-full text-white font-bold text-xs px-5 py-3 flex items-center gap-2 shadow-sm"
             >
-              <FileBarChart className="w-4 h-4 text-emerald-400" />
+              <FileBarChart className="w-4 h-4 text-emerald-400 shrink-0" />
               EXPORT CSV REPORT
             </a>
           </div>
@@ -347,13 +384,13 @@ export default function AdminDashboardPage() {
                       <div className="flex items-center gap-2">
                         <Link
                           href={`/admin/orders/${o.id}`}
-                          className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-3 py-1.5 rounded-lg text-[11px] font-bold"
+                          className="btn-glossy-secondary rounded-full text-slate-800 px-3.5 py-1.5 text-[11px] font-bold shadow-2xs border border-slate-200"
                         >
                           View
                         </Link>
                         <button
                           onClick={() => openAssignModal(o)}
-                          className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg text-[11px] font-bold"
+                          className="btn-glossy-primary rounded-full text-white px-3.5 py-1.5 text-[11px] font-bold shadow-2xs"
                         >
                           Assign
                         </button>
@@ -437,7 +474,7 @@ export default function AdminDashboardPage() {
                   setAssignError(null);
                 }}
                 disabled={assignLoading}
-                className="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 rounded-xl disabled:opacity-50"
+                className="w-1/2 btn-glossy-secondary rounded-full text-slate-700 font-bold text-xs py-3 shadow-2xs disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -445,7 +482,7 @@ export default function AdminDashboardPage() {
                 type="button"
                 onClick={handleAssignAgent}
                 disabled={assignLoading || agents.length === 0 || !selectedAgentId}
-                className="w-1/2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 rounded-xl shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-1/2 btn-glossy-primary rounded-full text-white font-bold text-xs py-3 shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {assignLoading ? 'Assigning...' : 'Confirm Assignment'}
               </button>

@@ -30,24 +30,25 @@ export default function PriceListPage() {
   }, [categories, query]);
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-10 space-y-8 min-h-[85vh]">
+    <div className="customer-page-cream min-h-[85vh]">
+    <div className="customer-page max-w-6xl space-y-8">
       {/* HEADER HERO */}
       <div className="text-center max-w-3xl mx-auto space-y-2">
-        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200/80">
+        <span className="customer-eyebrow inline-flex items-center gap-1.5">
           <Banknote className="w-3.5 h-3.5" />
           Transparent Scrap Rates & Pricing
         </span>
-        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
+        <h1 className="customer-title mt-2 sm:text-4xl">
           Official Scrap Price List
         </h1>
-        <p className="text-slate-600 text-xs sm:text-sm leading-relaxed max-w-xl mx-auto">
+        <p className="customer-subtitle mx-auto mt-2">
           We pay top rate per kg for recyclable scrap. Rates are determined directly at doorstep weighing with digital scale verification.
         </p>
       </div>
 
       {/* VALUE PROPOSITION BADGES */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white p-4 rounded-xl border border-slate-200/90 shadow-sm flex items-start gap-3">
+        <div className="customer-feature-card p-5 flex items-start gap-3">
           <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
             <Banknote className="w-4 h-4" />
           </div>
@@ -57,7 +58,7 @@ export default function PriceListPage() {
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-xl border border-slate-200/90 shadow-sm flex items-start gap-3">
+        <div className="customer-feature-card p-5 flex items-start gap-3">
           <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
             <CheckCircle2 className="w-4 h-4" />
           </div>
@@ -67,7 +68,7 @@ export default function PriceListPage() {
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-xl border border-slate-200/90 shadow-sm flex items-start gap-3">
+        <div className="customer-feature-card p-5 flex items-start gap-3">
           <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
             <ShieldCheck className="w-4 h-4" />
           </div>
@@ -86,7 +87,7 @@ export default function PriceListPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search by waste item (Paper, Plastic, Metal, E-Waste)..."
-          className="w-full h-10 pl-10 pr-4 rounded-xl border border-slate-200 bg-white text-xs sm:text-sm font-medium text-slate-900 placeholder:text-slate-400 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 shadow-sm transition-all"
+          className="w-full h-12 pl-10 pr-4 rounded-2xl border border-slate-200 bg-white text-xs sm:text-sm font-medium text-slate-900 placeholder:text-slate-400 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 shadow-sm transition-all"
         />
       </div>
 
@@ -112,7 +113,7 @@ export default function PriceListPage() {
             return (
               <div
                 key={cat.id}
-                className="bg-white rounded-xl p-4 border border-slate-200/90 shadow-sm hover:border-slate-300 transition-all flex flex-col justify-between space-y-3 group"
+                className="customer-feature-card rounded-[1.5rem] p-5 flex flex-col justify-between space-y-3 group"
               >
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -191,6 +192,7 @@ export default function PriceListPage() {
           </Link>
         </div>
       </div>
+    </div>
     </div>
   );
 }

@@ -14,6 +14,8 @@ const state = {
   paymentStatus: 'PENDING',
   failPaymentLock: false,
   paymentLockQueries: [] as string[],
+  captureOnTransactionOrderRead: false,
+  paymentAttemptOrderReads: 0,
   broadcastEvents: [] as Array<{ event: string; payload: any }>,
   failPickupSend: false,
   forcedSelections: [] as string[],
@@ -140,12 +142,20 @@ vi.mock('@/lib/db', () => {
 
   const database = {
     order: {
-      findUnique: vi.fn(async () => state.dispatchOrder || ({
-        ...order,
-        paymentStatus: state.paymentStatus,
-        address: { area: 'JP Nagar', lat: 12.9, lng: 77.6, street: 'Cross Road', pincode: '560078' },
-        items: [{ estimatedWeight: 5 }],
-      })),
+      findUnique: vi.fn(async () => {
+        if (state.captureOnTransactionOrderRead) {
+          state.paymentAttemptOrderReads += 1;
+          if (state.paymentAttemptOrderReads > 1) {
+            state.paymentStatus = 'CAPTURED';
+          }
+        }
+        return state.dispatchOrder || ({
+          ...order,
+          paymentStatus: state.paymentStatus,
+          address: { area: 'JP Nagar', lat: 12.9, lng: 77.6, street: 'Cross Road', pincode: '560078' },
+          items: [{ estimatedWeight: 5 }],
+        });
+      }),
       update: vi.fn(async ({ data }: any) => {
         if (state.failOrderUpdate) {
           state.failOrderUpdate = false;
@@ -217,6 +227,7 @@ vi.mock('@/lib/db', () => {
             }
             return [];
           }),
+          $executeRaw: vi.fn(async () => 1),
           payment,
           order: database.order,
           notification: database.notification,
@@ -264,6 +275,8 @@ beforeEach(() => {
   state.paymentStatus = 'PENDING';
   state.failPaymentLock = false;
   state.paymentLockQueries.length = 0;
+  state.captureOnTransactionOrderRead = false;
+  state.paymentAttemptOrderReads = 0;
   state.broadcastEvents.length = 0;
   state.failPickupSend = false;
   state.forcedSelections.length = 0;
@@ -376,11 +389,36 @@ test('concurrent payment creation produces one active attempt and one gateway or
   ]);
 
   assert.equal(state.gatewayCalls, 1);
-  assert.deepEqual(responses.map((response) => response.status).sort(), [200, 409]);
+  const statuses = responses.map((response) => response.status).sort();
+  assert.ok(
+    JSON.stringify(statuses) === JSON.stringify([200, 409]) ||
+      JSON.stringify(statuses) === JSON.stringify([200, 200]),
+  );
+  if (statuses.every((status) => status === 200)) {
+    const bodies = await Promise.all(responses.map((response) => response.json()));
+    assert.equal(bodies[0].data.paymentId, bodies[1].data.paymentId);
+    assert.equal(bodies[0].data.gatewayOrderId, bodies[1].data.gatewayOrderId);
+  }
   assert.equal(state.payment.status, 'INITIATED');
   assert.equal(state.payment.gatewayOrderId, 'order_rzp_1');
   assert.equal(state.paymentLockQueries.length, 2);
   assert.ok(state.paymentLockQueries.every((query) => query.includes('FOR UPDATE')));
+});
+
+test('payment creation rechecks captured status after locking the order row', async () => {
+  state.captureOnTransactionOrderRead = true;
+
+  const response = await createPayment(request('/api/payments/create', { orderId: order.id }));
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.alreadyPaid, true);
+  assert.equal(body.data.paymentStatus, 'CAPTURED');
+  assert.equal(state.paymentAttemptOrderReads, 2);
+  assert.equal(state.paymentStatus, 'CAPTURED');
+  assert.equal(state.payment, null);
+  assert.equal(state.gatewayCalls, 0);
+  assert.match(state.paymentLockQueries[0] || '', /FOR UPDATE/);
 });
 
 test('a failed order-row lock leaves payment and order state unchanged', async () => {

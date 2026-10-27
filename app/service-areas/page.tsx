@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { MapPin, Clock, ArrowRight, ShieldCheck } from 'lucide-react';
 import InteractiveMap from '@/components/InteractiveMap';
 import { BENGALURU_ZONES } from '@/lib/geofence';
+import ScrollReveal from '@/components/ScrollReveal';
 
 export default function PublicServiceAreasPage() {
   const [areas, setAreas] = useState<any[]>([]);
@@ -18,7 +19,8 @@ export default function PublicServiceAreasPage() {
   }, []);
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-10 space-y-8 min-h-[85vh]">
+    <div className="customer-page-cream min-h-[85vh]">
+      <div className="customer-page max-w-6xl space-y-8">
       <div className="text-center max-w-2xl mx-auto space-y-2">
         <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-3 py-1 rounded-full uppercase tracking-wider">
           <ShieldCheck className="w-3.5 h-3.5" />
@@ -30,17 +32,19 @@ export default function PublicServiceAreasPage() {
         </p>
       </div>
 
-      <InteractiveMap
+      <ScrollReveal>
+        <InteractiveMap
         centerLat={12.9716}
         centerLng={77.5946}
         zoom={11}
         polygons={BENGALURU_ZONES.map((z) => ({ name: z.name, coordinates: z.boundaryPolygon }))}
         className="h-80 sm:h-96 w-full rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
-      />
+        />
+      </ScrollReveal>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <ScrollReveal className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {areas.map((area) => (
-          <div key={area.id} className="bg-white p-4 rounded-xl border border-slate-200/90 shadow-sm space-y-1.5 hover:border-slate-300 transition-all">
+          <div key={area.id} className="customer-feature-card space-y-1.5 bg-white p-4">
             <div className="flex items-center gap-2">
               <MapPin className="w-4 h-4 text-emerald-600 shrink-0" />
               <h3 className="font-bold text-slate-900 text-xs sm:text-sm">{area.name}</h3>
@@ -52,9 +56,9 @@ export default function PublicServiceAreasPage() {
             <p className="text-[11px] text-slate-500 font-normal">Base Doorstep Fee: ₹{area.basePickupCharge}</p>
           </div>
         ))}
-      </div>
+      </ScrollReveal>
 
-      <div className="text-center pt-2">
+      <div className="pt-2 text-center">
         <Link
           href="/book"
           className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-6 py-3 rounded-xl shadow-sm inline-flex items-center gap-2 transition-all active:scale-95"
@@ -62,6 +66,7 @@ export default function PublicServiceAreasPage() {
           <span>Book a Pickup at My Location</span>
           <ArrowRight className="w-4 h-4 text-emerald-400" />
         </Link>
+      </div>
       </div>
     </div>
   );
