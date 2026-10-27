@@ -26,7 +26,7 @@ async function run() {
   const { db } = await import('../lib/db');
   const { signToken } = await import('../lib/auth/jwt');
 
-  function createToken(role: string, extra: Record<string, unknown> = {}) {
+  function createToken(role: 'ADMIN' | 'AGENT' | 'CUSTOMER' | 'SUPER_ADMIN', extra: Record<string, unknown> = {}) {
     return signToken({
       userId: `${role.toLowerCase()}-user`,
       phone: '9999999999',

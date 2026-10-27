@@ -13,7 +13,7 @@ import { validateStatusTransition } from '../lib/validations/schemas';
 
 process.env.JWT_SECRET = 'concurrency-test-secret';
 
-function createMockToken(role: string, extra: Record<string, unknown> = {}) {
+function createMockToken(role: 'ADMIN' | 'AGENT' | 'CUSTOMER' | 'SUPER_ADMIN', extra: Record<string, unknown> = {}) {
   return signToken({
     userId: `${role.toLowerCase()}-user`,
     phone: '9999999999',
