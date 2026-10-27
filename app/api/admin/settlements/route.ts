@@ -9,12 +9,27 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const { searchParams } = new URL(req.url);
+    const limit = Math.min(Math.max(1, Number(searchParams.get('limit')) || 100), 200);
+
     const settlements = await db.settlement.findMany({
       include: {
         order: { include: { items: { include: { category: true } } } },
-        customer: { include: { user: true } },
+        customer: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                phone: true,
+                email: true,
+              },
+            },
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
+      take: limit,
     });
     return NextResponse.json({ success: true, data: settlements });
   } catch (error: any) {

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import CustomerOtpLogin from '@/components/CustomerOtpLogin';
 import { readCustomerPickupsResponse } from '@/lib/customerPickupsResponse';
+import { getApiErrorMessage } from '@/lib/utils/apiErrorMessage';
 
 const isCustomerCancellable = (status?: string): boolean => {
   return [
@@ -131,6 +132,7 @@ export default function MyPickupsPage() {
       const res = await fetch(`/api/orders/${cancellingOrder.id}/cancel`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({ cancellationReason: finalReason }),
       });
 
@@ -139,10 +141,25 @@ export default function MyPickupsPage() {
       if (res.ok && data.success) {
         setCancellingOrder(null);
         setCustomCancelReason('');
+        try {
+          if (typeof window !== 'undefined') {
+            const raw = sessionStorage.getItem('jio_pending_order');
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (parsed?.id === cancellingOrder.id) {
+                sessionStorage.removeItem('jio_pending_order');
+                setPendingNotice(null);
+              }
+            }
+          }
+        } catch {}
         await fetchOrders();
       } else {
         setCancelError(
-          data.message || 'Failed to cancel order. Please verify order status and try again.'
+          getApiErrorMessage(
+            data,
+            'Failed to cancel order. Please verify order status and try again.'
+          )
         );
       }
     } catch {
@@ -551,6 +568,30 @@ export default function MyPickupsPage() {
                       <PhoneCall className="w-3.5 h-3.5" />
                       Call Agent
                     </a>
+                  </div>
+                )}
+
+                {o.status === 'CANCELLED' && (
+                  <div className="p-3 bg-rose-50/80 rounded-2xl border border-rose-200/80 space-y-1 text-xs">
+                    <div className="flex items-center gap-1.5 font-bold text-rose-800">
+                      <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                      <span>Pickup Order Cancelled</span>
+                    </div>
+                    {o.cancellationReason && (
+                      <p className="text-[11px] text-rose-700">
+                        Reason: {o.cancellationReason}
+                      </p>
+                    )}
+                    {o.paymentStatus === 'REFUND_PENDING' && (
+                      <p className="text-[11px] font-semibold text-amber-800">
+                        Refund Status: 100% refund is queued for admin review to your original payment method.
+                      </p>
+                    )}
+                    {o.paymentStatus === 'REFUNDED' && (
+                      <p className="text-[11px] font-semibold text-emerald-800">
+                        Refund Status: 100% refunded to your original payment method.
+                      </p>
+                    )}
                   </div>
                 )}
 

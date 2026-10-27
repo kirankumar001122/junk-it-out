@@ -5,6 +5,7 @@ import { signToken } from '@/lib/auth/jwt';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { getClientIp, hasTrustedOrigin } from '@/lib/auth/requestSecurity';
+import { isLocalOtpTestPhone, isValidLocalOtpTestCode } from '@/lib/auth/localOtpTest';
 
 export async function POST(req: NextRequest) {
   try {
@@ -22,24 +23,31 @@ export async function POST(req: NextRequest) {
       return errorResponse('INVALID_OTP', 'OTP verification code is required.', 400);
     }
 
-    // 1. Verify OTP with Fast2SMS provider
-    const otpVerification = await verifyOtp(normalized, body.code, getClientIp(req));
-    if (!otpVerification.valid) {
-      const providerMsg =
-        typeof (otpVerification as any).errorDetails === 'string' && (otpVerification as any).errorDetails
-          ? (otpVerification as any).errorDetails
-          : 'The OTP entered is invalid or has expired. Please request a new code and try again.';
+    // 1. Verify OTP with Fast2SMS provider (or development test OTP if explicitly configured)
+    if (isLocalOtpTestPhone(normalized)) {
+      if (!isValidLocalOtpTestCode(body.code)) {
+        return errorResponse('INVALID_OTP', 'Please enter a valid 6-digit OTP.', 400);
+      }
+      console.info('[OTP_TEST_MODE] Local agent test code accepted.');
+    } else {
+      const otpVerification = await verifyOtp(normalized, body.code, getClientIp(req));
+      if (!otpVerification.valid) {
+        const providerMsg =
+          typeof (otpVerification as any).errorDetails === 'string' && (otpVerification as any).errorDetails
+            ? (otpVerification as any).errorDetails
+            : 'The OTP entered is invalid or has expired. Please request a new code and try again.';
 
-      return errorResponse(
-        'OTP_VERIFICATION_FAILED',
-        providerMsg,
-        otpVerification.status === 'rate_limited' ? 429 : 400
-      );
+        return errorResponse(
+          'OTP_VERIFICATION_FAILED',
+          providerMsg,
+          otpVerification.status === 'rate_limited' ? 429 : 400
+        );
+      }
     }
 
-    // 2. Lookup & Provision Agent User (Authorized Agent: 9353276638)
+    // 2. Lookup & Provision Agent User (Authorized Agents: 9353276638, 7842259582)
     const rawDigits = normalized.replace(/\D/g, '').slice(-10);
-    const isAuthorizedAgentNumber = rawDigits === '9353276638';
+    const isAuthorizedAgentNumber = rawDigits === '9353276638' || rawDigits === '7842259582';
     const phoneVariants = Array.from(
       new Set([normalized, rawDigits, `+91${rawDigits}`, `0${rawDigits}`])
     );
@@ -107,7 +115,7 @@ export async function POST(req: NextRequest) {
     if (!user || user.role !== 'AGENT' || !user.agent) {
       return errorResponse(
         'FORBIDDEN',
-        `No registered agent account found for ${normalized}. Agent Portal access is restricted to authorized field agent (9353276638).`,
+        `No registered agent account found for ${normalized}. Agent Portal access is restricted to authorized field agents.`,
         403
       );
     }

@@ -22,6 +22,7 @@ export function canCancelOrder(
   },
   order: {
     customerId: string;
+    customer?: { userId?: string | null } | null;
     agentId: string | null;
     status: string;
   },
@@ -36,7 +37,11 @@ export function canCancelOrder(
   }
 
   if (user.role === 'CUSTOMER') {
-    return user.customerId === order.customerId;
+    return (
+      (Boolean(user.customerId) && user.customerId === order.customerId) ||
+      (Boolean(user.userId && order.customer?.userId) &&
+        user.userId === order.customer?.userId)
+    );
   }
 
   if (user.role === 'AGENT') {

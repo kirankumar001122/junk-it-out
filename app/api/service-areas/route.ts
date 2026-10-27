@@ -4,8 +4,24 @@ import { SOUTH_BENGALURU_ZONES } from '@/lib/geofence';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { getAuthUser } from '@/lib/auth/middleware';
 
+let cachedZones: any = null;
+let cacheExpiry = 0;
+const CACHE_TTL_MS = 60_000;
+
+export function invalidateServiceAreasCache() {
+  cachedZones = null;
+  cacheExpiry = 0;
+}
+
 export async function GET(req: NextRequest) {
   try {
+    if (cachedZones && Date.now() < cacheExpiry) {
+      const cachedResponse = successResponse(cachedZones);
+      cachedResponse.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+      cachedResponse.headers.set('X-Cache', 'HIT');
+      return cachedResponse;
+    }
+
     const dbAreas = await db.serviceArea.findMany();
     const dbAreaMap = new Map(dbAreas.map((a) => [a.id, a]));
 
@@ -23,7 +39,13 @@ export async function GET(req: NextRequest) {
       return z;
     });
 
-    return successResponse(mergedZones);
+    cachedZones = mergedZones;
+    cacheExpiry = Date.now() + CACHE_TTL_MS;
+
+    const response = successResponse(mergedZones);
+    response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+    response.headers.set('X-Cache', 'MISS');
+    return response;
   } catch (err: any) {
     return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to fetch service areas.', 500);
   }
@@ -64,6 +86,7 @@ export async function PUT(req: NextRequest) {
       },
     });
 
+    invalidateServiceAreasCache();
     return successResponse(updated);
   } catch (err: any) {
     console.error('Update service area error:', err);
