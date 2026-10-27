@@ -25,11 +25,13 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    setupFiles: ['./tests/setup.ts'],
     include: [
       'tests/security-route-handlers.test.ts',
       'tests/payment-idempotency.test.ts',
       'tests/payment-retry-and-feedback.test.ts',
       'tests/booking-coupon-support.test.ts',
+      'tests/health-route.test.ts',
     ],
   },
 });
