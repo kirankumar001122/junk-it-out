@@ -44,9 +44,24 @@ export async function POST(
       return successResponse(order, 200, { message: 'Order was already completed.' });
     }
 
-    // Verify weighing record exists
-    if (order.weightRecords.length === 0) {
+    const body = await req.json().catch(() => ({}));
+    const { actualWeights, scalePhotoUrl, notes } = body;
+    const hasWeightPayload = Array.isArray(actualWeights) && actualWeights.length > 0;
+
+    // Verify weighing record exists or valid scale weights are supplied in the request body
+    if (order.weightRecords.length === 0 && !hasWeightPayload) {
       return errorResponse('WEIGHING_REQUIRED', 'Digital scale weights must be recorded before completing pickup.', 400);
+    }
+
+    if (hasWeightPayload) {
+      for (const itemInput of actualWeights) {
+        const dbItem = order.items.find(
+          (i) => (itemInput?.itemId && i.id === itemInput.itemId) || i.categoryId === itemInput?.categoryId || i.id === itemInput?.categoryId
+        );
+        if (!dbItem || typeof itemInput.actualWeight !== 'number' || !Number.isFinite(itemInput.actualWeight) || itemInput.actualWeight <= 0) {
+          return errorResponse('INVALID_WEIGH_DATA', 'Each actual weight must be a positive number for a valid order item.', 400);
+        }
+      }
     }
 
     const oldStatus = order.status;
@@ -57,34 +72,123 @@ export async function POST(
       return errorResponse('INVALID_STATUS_TRANSITION', `Cannot complete order from current status (${oldStatus}). Please complete weighing first.`, 400);
     }
 
+    const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+    let actualTotalRecyclable = order.actualTotal;
+    let financialDirection = order.financialDirection;
+    let finalAmount = order.finalAmount;
+    let totalWeightKg = 0;
+    const itemUpdates: Array<{ id: string; actualWeight: number; subtotal: number }> = [];
+
+    if (hasWeightPayload) {
+      let calcRecyclable = 0;
+      let calcWasteCharge = 0;
+      for (const itemInput of actualWeights) {
+        const dbItem = order.items.find(
+          (i) => (itemInput?.itemId && i.id === itemInput.itemId) || i.categoryId === itemInput.categoryId || i.id === itemInput.categoryId
+        );
+        if (dbItem) {
+          const weightKg = itemInput.actualWeight;
+          const subtotal = round2(weightKg * dbItem.ratePerKg);
+          if (dbItem.category.type === 'WASTE_CHARGE') {
+            calcWasteCharge += subtotal;
+          } else {
+            calcRecyclable += subtotal;
+          }
+          itemUpdates.push({ id: dbItem.id, actualWeight: weightKg, subtotal });
+        }
+      }
+      actualTotalRecyclable = calcRecyclable;
+      const netAmount = actualTotalRecyclable - (calcWasteCharge + order.pickupCharge - order.discountAmount);
+      financialDirection = netAmount >= 0 ? 'JUNKITOUT_PAYS' : 'CUSTOMER_PAYS';
+      finalAmount = round2(Math.abs(netAmount));
+      totalWeightKg = actualWeights.reduce((total: number, input: any) => total + input.actualWeight, 0);
+    }
+
     const invoiceNumber = `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
-    // Execute completion in transaction
+    // Execute completion (and optional weighing) in transaction
     const completedOrder = await db.$transaction(async (tx) => {
+      // 1. If weights are supplied directly in this request, update order items and persist WeightRecord
+      if (hasWeightPayload) {
+        for (const update of itemUpdates) {
+          await tx.orderItem.update({
+            where: { id: update.id },
+            data: {
+              actualWeight: update.actualWeight,
+              subtotal: update.subtotal,
+            },
+          });
+        }
+
+        await tx.weightRecord.create({
+          data: {
+            orderId: id,
+            recordedByUserId: authUser?.userId || order.agent?.userId || order.customer?.userId,
+            scalePhotoUrl: scalePhotoUrl || 'https://images.unsplash.com/photo-1589939705384-5185137a7f0f?q=80&w=600',
+            weightJson: JSON.stringify(actualWeights),
+            notes: notes || 'Scale weights recorded at doorstep.',
+          },
+        });
+
+        if (financialDirection === 'JUNKITOUT_PAYS' && finalAmount > 0) {
+          await tx.settlement.upsert({
+            where: { orderId: id },
+            create: {
+              orderId: id,
+              customerId: order.customerId,
+              totalWeightKg,
+              amount: finalAmount,
+              breakdownJson: JSON.stringify({ items: actualWeights, calculatedAt: new Date().toISOString() }),
+              status: 'PENDING',
+            },
+            update: {
+              totalWeightKg,
+              amount: finalAmount,
+              breakdownJson: JSON.stringify({ items: actualWeights, calculatedAt: new Date().toISOString() }),
+            },
+          });
+        }
+      }
+
+      const invoiceItems = hasWeightPayload
+        ? order.items.map((i) => {
+            const matched = itemUpdates.find((u) => u.id === i.id);
+            return matched ? { ...i, actualWeight: matched.actualWeight, subtotal: matched.subtotal } : i;
+          })
+        : order.items;
+
       const orderUpdateData: any = {
         status: newStatus,
-        paymentStatus: order.financialDirection === 'JUNKITOUT_PAYS' ? 'SETTLEMENT_PENDING' : order.paymentStatus,
+        paymentStatus: financialDirection === 'JUNKITOUT_PAYS' ? 'SETTLEMENT_PENDING' : order.paymentStatus,
         statusHistory: {
           create: {
             oldStatus,
             newStatus,
             changedByUserId: authUser?.userId || null,
-            notes: `Pickup completed at doorstep by agent.`,
+            notes: hasWeightPayload
+              ? `Doorstep scale weights recorded and pickup completed. Net amount: ₹${finalAmount.toFixed(2)}`
+              : `Pickup completed at doorstep by agent.`,
           },
         },
       };
+
+      if (hasWeightPayload) {
+        orderUpdateData.actualTotal = actualTotalRecyclable;
+        orderUpdateData.financialDirection = financialDirection;
+        orderUpdateData.finalAmount = finalAmount;
+      }
 
       if (!order.invoices || order.invoices.length === 0) {
         orderUpdateData.invoices = {
           create: {
             invoiceNumber,
-            totalAmount: order.finalAmount,
+            totalAmount: finalAmount,
             pdfDataJson: JSON.stringify({
               orderNumber: order.orderNumber,
               invoiceNumber,
-              items: order.items,
-              finalAmount: order.finalAmount,
-              financialDirection: order.financialDirection,
+              items: invoiceItems,
+              finalAmount: finalAmount,
+              financialDirection: financialDirection,
             }),
           },
         };
@@ -123,6 +227,12 @@ export async function POST(
       agentId: completedOrder.agentId,
       invoiceNumber,
     });
+    if (hasWeightPayload) {
+      broadcaster.broadcast('WEIGHING_STARTED', {
+        orderId: id,
+        actualTotal: completedOrder.actualTotal,
+      });
+    }
     logTiming('response ready');
 
     return successResponse(completedOrder);

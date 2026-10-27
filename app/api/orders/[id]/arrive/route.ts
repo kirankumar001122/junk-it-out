@@ -5,6 +5,56 @@ import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 
+const SAFE_HYDRATED_ORDER_INCLUDE = {
+  agent: {
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+        },
+      },
+    },
+  },
+  customer: {
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+        },
+      },
+    },
+  },
+  address: true,
+  items: {
+    include: {
+      category: true,
+    },
+  },
+};
+
+function formatOrderResponse(
+  orderData: any,
+  fallback: { id: string; orderNumber: string; agentId?: string | null; status: string }
+) {
+  if (!orderData) {
+    return {
+      id: fallback.id,
+      orderId: fallback.id,
+      orderNumber: fallback.orderNumber,
+      agentId: fallback.agentId,
+      status: fallback.status,
+    };
+  }
+  return {
+    ...orderData,
+    orderId: orderData.id ?? fallback.id,
+  };
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -22,7 +72,7 @@ export async function POST(
 
     const order = await db.order.findUnique({
       where: { id },
-      include: { agent: { include: { user: true } }, customer: { include: { user: true } } },
+      include: SAFE_HYDRATED_ORDER_INCLUDE,
     });
     logTiming('order lookup complete');
 
@@ -37,44 +87,62 @@ export async function POST(
     const oldStatus = order.status;
     const newStatus = 'AGENT_ARRIVED';
 
+    // Idempotent retry: order is already in AGENT_ARRIVED for this agent
+    if (oldStatus === newStatus) {
+      return successResponse(
+        formatOrderResponse(order, {
+          id: order.id,
+          orderNumber: order.orderNumber,
+          agentId: order.agentId,
+          status: newStatus,
+        })
+      );
+    }
+
     if (!validateStatusTransition(oldStatus, newStatus)) {
       return errorResponse('INVALID_STATUS_TRANSITION', `Cannot transition order status from ${oldStatus} to ${newStatus}.`, 400);
     }
 
-    const updatedOrder = await db.order.update({
-      where: { id },
-      data: {
-        status: newStatus,
-        statusHistory: {
-          create: {
-            oldStatus,
-            newStatus,
-            changedByUserId: authUser?.userId || null,
-            notes: `Agent arrived at customer doorstep.`,
+    const updatedOrder = await db.$transaction(async (tx) => {
+      const updated = await tx.order.update({
+        where: { id },
+        data: {
+          status: newStatus,
+          statusHistory: {
+            create: {
+              oldStatus,
+              newStatus,
+              changedByUserId: authUser?.userId || null,
+              notes: `Agent arrived at customer doorstep.`,
+            },
           },
         },
-      },
-      include: {
-        agent: { include: { user: true } },
-        customer: { include: { user: true } },
-        address: true,
-        items: { include: { category: true } },
-      },
-    });
-    logTiming('order update complete');
-
-    if (order.agentId) {
-      await db.agent.update({
-        where: { id: order.agentId },
-        data: { status: 'ARRIVED' },
+        include: SAFE_HYDRATED_ORDER_INCLUDE,
       });
-    }
+
+      if (order.agentId) {
+        await tx.agent.update({
+          where: { id: order.agentId },
+          data: { status: 'ARRIVED' },
+        });
+      }
+
+      return updated;
+    }, { isolationLevel: 'ReadCommitted', maxWait: 5000, timeout: 5000 });
+    logTiming('order update complete');
 
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
     broadcaster.broadcast('AGENT_ARRIVED', { orderId: id, agentId: order.agentId });
     logTiming('response ready');
 
-    return successResponse(updatedOrder);
+    return successResponse(
+      formatOrderResponse(updatedOrder, {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        agentId: order.agentId,
+        status: newStatus,
+      })
+    );
   } catch (err: any) {
     console.error('Arrive error:', err);
     return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to mark arrival.', 500);

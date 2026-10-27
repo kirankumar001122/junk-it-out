@@ -150,33 +150,62 @@ export default function AgentDashboardPage() {
   }, []);
 
   useEffect(() => {
+    const TRACKING_ELIGIBLE_STATUSES = [
+      'AGENT_ACCEPTED',
+      'AGENT_ON_WAY',
+      'AGENT_ARRIVED',
+      'WEIGHING',
+      'WASTE_VERIFICATION',
+    ];
+
     if (!activeOrder?.id || !isOnline || !agent?.id) return;
+    if (!TRACKING_ELIGIBLE_STATUSES.includes(activeOrder.status)) return;
 
     let cancelled = false;
     let locationTimer: ReturnType<typeof setTimeout> | undefined;
+    let inFlightController: AbortController | null = null;
 
     const sendLocation = async () => {
+      // Defer GPS heartbeat if an agent button action is currently in flight
+      // to prevent database lock contention and network pipe saturation
+      if (
+        actionRequestRef.current ||
+        statusRequestRef.current ||
+        weighingRequestRef.current ||
+        acceptingPickupRef.current
+      ) {
+        if (!cancelled) {
+          locationTimer = setTimeout(sendLocation, 3000);
+        }
+        return;
+      }
+
       const simulatedLat = (activeOrder.address?.lat || 12.9077) + (Math.random() - 0.5) * 0.005;
       const simulatedLng = (activeOrder.address?.lng || 77.5854) + (Math.random() - 0.5) * 0.005;
 
       try {
+        inFlightController = new AbortController();
         const response = await fetch('/api/agent/location', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          agentId: agent.id,
-          orderId: activeOrder.id,
-          lat: simulatedLat,
-          lng: simulatedLng,
-          speed: 22.4,
-        }),
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentId: agent.id,
+            orderId: activeOrder.id,
+            lat: simulatedLat,
+            lng: simulatedLng,
+            speed: 22.4,
+          }),
+          signal: inFlightController.signal,
         });
         if (!response.ok) {
           console.warn('[AGENT_LOCATION_UPDATE_FAILED]', response.status);
         }
       } catch (error) {
-        console.warn('[AGENT_LOCATION_UPDATE_FAILED]', error);
+        if (!(error instanceof DOMException && error.name === 'AbortError')) {
+          console.warn('[AGENT_LOCATION_UPDATE_FAILED]', error);
+        }
       } finally {
+        inFlightController = null;
         if (!cancelled) {
           locationTimer = setTimeout(sendLocation, 8000);
         }
@@ -188,8 +217,9 @@ export default function AgentDashboardPage() {
     return () => {
       cancelled = true;
       if (locationTimer) clearTimeout(locationTimer);
+      if (inFlightController) inFlightController.abort();
     };
-  }, [activeOrder?.id, isOnline, agent?.id]);
+  }, [activeOrder?.id, activeOrder?.status, isOnline, agent?.id]);
 
   // Authenticated Agent SSE Stream Connection for NEW_PICKUP_AVAILABLE Notifications
   useEffect(() => {
@@ -237,12 +267,18 @@ export default function AgentDashboardPage() {
   }, [showWeighModal, viewPickupModal, submittingWeigh]);
 
   const fetchOrderDetails = async (orderId: string) => {
-    const res = await fetch(`/api/orders/${orderId}`);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.success) {
-      throw new Error(data.error?.message || data.message || 'Unable to fetch pickup details.');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, { signal: controller.signal });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.error?.message || data.message || 'Unable to fetch pickup details.');
+      }
+      return data.data;
+    } finally {
+      clearTimeout(timeout);
     }
-    return data.data;
   };
 
   const handleViewPickupDetails = async (orderId: string) => {
@@ -260,11 +296,16 @@ export default function AgentDashboardPage() {
     if (acceptingPickupRef.current) return;
     acceptingPickupRef.current = true;
     setAcceptingPickup(true);
+    let acceptTimeout: number | undefined;
     try {
+      const controller = new AbortController();
+      acceptTimeout = window.setTimeout(() => controller.abort(), 15_000);
       const res = await fetch(`/api/orders/${orderId}/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
       });
+      window.clearTimeout(acceptTimeout);
       const data = await res.json();
 
       if (res.status === 409) {
@@ -278,22 +319,54 @@ export default function AgentDashboardPage() {
       if (res.ok && data.success) {
         setStatusNotice(`Pickup Accepted! Order #${data.data?.orderNumber || ''} assigned to you.`);
         setTimeout(() => setStatusNotice(null), 5000);
+        const cachedModalOrder = viewPickupModal;
         setViewPickupModal(null);
         setNewPickupNotice(null);
-        const updatedOrder = Array.isArray(data.data?.items)
-          ? data.data
+        const rawOrder = data.data;
+        const updatedOrder = Array.isArray(rawOrder?.items)
+          ? rawOrder
+          : cachedModalOrder && (cachedModalOrder.id === orderId || cachedModalOrder.orderNumber === orderId)
+          ? {
+              ...cachedModalOrder,
+              ...(rawOrder || {}),
+              id: rawOrder?.id || rawOrder?.orderId || cachedModalOrder.id,
+              status: rawOrder?.status || 'AGENT_ACCEPTED',
+              agentId: rawOrder?.agentId || agent?.id,
+            }
           : await fetchOrderDetails(orderId);
-        setActiveOrder(updatedOrder);
-        setOrders((currentOrders) => [
-          updatedOrder,
-          ...currentOrders.filter((order) => order.id !== updatedOrder.id),
-        ]);
+
+        if (updatedOrder) {
+          setActiveOrder(updatedOrder);
+          if (Array.isArray(updatedOrder.items) && updatedOrder.items.length > 0) {
+            setActualWeightsInput(
+              updatedOrder.items.map((i: any) => ({
+                itemId: i.id,
+                categoryId: i.categoryId,
+                categoryName: i.category?.name || 'Waste item',
+                estimatedWeight: Number(i.estimatedWeight ?? 0),
+                weightStr:
+                  typeof i.actualWeight === 'number' && i.actualWeight > 0
+                    ? String(i.actualWeight)
+                    : '',
+              }))
+            );
+          }
+          setOrders((currentOrders) => [
+            updatedOrder,
+            ...currentOrders.filter((order) => order.id !== updatedOrder.id),
+          ]);
+        }
       } else {
         alert(data.error?.message || data.message || 'Failed to accept pickup.');
       }
     } catch (err) {
-      alert('Network error while accepting pickup.');
+      alert(
+        err instanceof DOMException && err.name === 'AbortError'
+          ? 'Accepting pickup timed out. Please check your network and active pickups.'
+          : 'Network error while accepting pickup.'
+      );
     } finally {
+      if (acceptTimeout) window.clearTimeout(acceptTimeout);
       setAcceptingPickup(false);
       acceptingPickupRef.current = false;
     }
@@ -382,25 +455,39 @@ export default function AgentDashboardPage() {
     const targetStatus = isOnline ? 'OFFLINE' : 'AVAILABLE';
     setStatusUpdating(true);
     setStatusNotice(null);
+    let statusTimeout: number | undefined;
     try {
+      const controller = new AbortController();
+      statusTimeout = window.setTimeout(() => controller.abort(), 10_000);
       const res = await fetch('/api/agent/status', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: targetStatus }),
+        signal: controller.signal,
       });
+      window.clearTimeout(statusTimeout);
       const data = await res.json();
       if (res.ok && data.success) {
         const newStatus = data.data.status;
-        setIsOnline(newStatus === 'AVAILABLE');
+        const nowOnline = newStatus === 'AVAILABLE';
+        setIsOnline(nowOnline);
         setAgent((prev: any) => (prev ? { ...prev, status: newStatus } : prev));
         setStatusNotice(`Status updated to ${newStatus}`);
         setTimeout(() => setStatusNotice(null), 3000);
+        if (nowOnline) {
+          fetchAgentData();
+        }
       } else {
         setStatusNotice(data.error?.message || data.message || 'Failed to update status.');
       }
-    } catch {
-      setStatusNotice('Network error updating status.');
+    } catch (e) {
+      setStatusNotice(
+        e instanceof DOMException && e.name === 'AbortError'
+          ? 'Status update timed out. Please check connection and try again.'
+          : 'Network error updating status.'
+      );
     } finally {
+      if (statusTimeout) window.clearTimeout(statusTimeout);
       setStatusUpdating(false);
       statusRequestRef.current = false;
     }
@@ -438,16 +525,41 @@ export default function AgentDashboardPage() {
             : 'Arrived at customer doorstep!'
         );
         setTimeout(() => setStatusNotice(null), 4000);
-        if (data.data?.id) {
+        if (data.data?.id || data.data?.orderId) {
+          const rawOrder = data.data;
+          const targetId = rawOrder.id || rawOrder.orderId || activeOrder?.id;
           const nextOrder = action === 'accept'
-            ? Array.isArray(data.data.items)
-              ? data.data
-              : await fetchOrderDetails(data.data.id)
-            : data.data;
-          setActiveOrder(nextOrder);
-          setOrders((currentOrders) =>
-            currentOrders.map((order) => order.id === nextOrder.id ? nextOrder : order)
-          );
+            ? Array.isArray(rawOrder?.items)
+              ? rawOrder
+              : activeOrder && (activeOrder.id === targetId || activeOrder.orderNumber === targetId)
+              ? {
+                  ...activeOrder,
+                  ...(rawOrder || {}),
+                  id: targetId,
+                  status: rawOrder.status || 'AGENT_ACCEPTED',
+                }
+              : await fetchOrderDetails(targetId)
+            : rawOrder;
+          if (nextOrder) {
+            setActiveOrder(nextOrder);
+            if (action === 'accept' && Array.isArray(nextOrder.items) && nextOrder.items.length > 0) {
+              setActualWeightsInput(
+                nextOrder.items.map((i: any) => ({
+                  itemId: i.id,
+                  categoryId: i.categoryId,
+                  categoryName: i.category?.name || 'Waste item',
+                  estimatedWeight: Number(i.estimatedWeight ?? 0),
+                  weightStr:
+                    typeof i.actualWeight === 'number' && i.actualWeight > 0
+                      ? String(i.actualWeight)
+                      : '',
+                }))
+              );
+            }
+            setOrders((currentOrders) =>
+              currentOrders.map((order) => order.id === nextOrder.id ? nextOrder : order)
+            );
+          }
         }
       } else {
         const errorText = data.error?.message || data.message || `Failed to perform ${action} action.`;
@@ -471,10 +583,9 @@ export default function AgentDashboardPage() {
 
   const handleSubmitWeighingAndComplete = async () => {
     if (!activeOrder || weighingRequestRef.current) return;
-    weighingRequestRef.current = true;
     setWeighModalError(null);
 
-    // 1. Client-side weight validation
+    // 1. Client-side weight validation before setting request lock
     if (!actualWeightsInput || actualWeightsInput.length === 0) {
       setWeighModalError('No order items available to weigh.');
       return;
@@ -498,10 +609,14 @@ export default function AgentDashboardPage() {
       });
     }
 
+    weighingRequestRef.current = true;
     setSubmittingWeigh(true);
+    let weighTimeout: number | undefined;
     try {
-      // 2. Submit door-to-door scale weights
-      const weighRes = await fetch(`/api/orders/${activeOrder.id}/weigh`, {
+      const controller = new AbortController();
+      weighTimeout = window.setTimeout(() => controller.abort(), 15_000);
+      // Submit door-to-door scale weights and complete pickup in a single atomic request
+      const completeRes = await fetch(`/api/orders/${activeOrder.id}/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -509,19 +624,9 @@ export default function AgentDashboardPage() {
           scalePhotoUrl,
           notes: weighNotes || 'Digital scale weight recorded at doorstep.',
         }),
+        signal: controller.signal,
       });
-      const weighData = await weighRes.json().catch(() => ({}));
-      if (!weighRes.ok || !weighData.success) {
-        setWeighModalError(weighData.error?.message || weighData.message || 'Failed to record scale weights.');
-        setSubmittingWeigh(false);
-        return;
-      }
-
-      // 3. Submit Order Completion
-      const completeRes = await fetch(`/api/orders/${activeOrder.id}/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      window.clearTimeout(weighTimeout);
       const completeData = await completeRes.json().catch(() => ({}));
       if (completeRes.ok && completeData.success) {
         setShowWeighModal(false);
@@ -540,8 +645,13 @@ export default function AgentDashboardPage() {
       }
     } catch (e) {
       console.error('Weighing/Completion error:', e);
-      setWeighModalError('Network error while completing pickup. Please check your connection and try again.');
+      setWeighModalError(
+        e instanceof DOMException && e.name === 'AbortError'
+          ? 'Completion timed out. Please check your network and active orders.'
+          : 'Network error while completing pickup. Please check your connection and try again.'
+      );
     } finally {
+      if (weighTimeout) window.clearTimeout(weighTimeout);
       setSubmittingWeigh(false);
       weighingRequestRef.current = false;
     }
