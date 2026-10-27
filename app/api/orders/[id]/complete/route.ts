@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth/middleware';
 import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
+import { runBackgroundTask } from '@/lib/utils/backgroundTask';
 
 export async function POST(
   req: NextRequest,
@@ -59,24 +60,38 @@ export async function POST(
 
     const invoiceNumber = `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
-    // Execute completion in transaction
+    // Execute completion in transaction with compare-and-swap
     const completedOrder = await db.$transaction(async (tx) => {
-      const orderUpdateData: any = {
-        status: newStatus,
-        paymentStatus: order.financialDirection === 'JUNKITOUT_PAYS' ? 'SETTLEMENT_PENDING' : order.paymentStatus,
-        statusHistory: {
-          create: {
-            oldStatus,
-            newStatus,
-            changedByUserId: authUser?.userId || null,
-            notes: `Pickup completed at doorstep by agent.`,
-          },
+      const claimed = await tx.order.updateMany({
+        where: {
+          id,
+          status: oldStatus,
+          agentId: authUser.agentId,
         },
-      };
+        data: {
+          status: newStatus,
+          paymentStatus: order.financialDirection === 'JUNKITOUT_PAYS' ? 'SETTLEMENT_PENDING' : order.paymentStatus,
+        },
+      });
+
+      if (claimed.count !== 1) {
+        return null;
+      }
+
+      await tx.orderStatusHistory.create({
+        data: {
+          orderId: id,
+          oldStatus,
+          newStatus,
+          changedByUserId: authUser?.userId || null,
+          notes: `Pickup completed at doorstep by agent.`,
+        },
+      });
 
       if (!order.invoices || order.invoices.length === 0) {
-        orderUpdateData.invoices = {
-          create: {
+        await tx.invoice.create({
+          data: {
+            orderId: id,
             invoiceNumber,
             totalAmount: order.finalAmount,
             pdfDataJson: JSON.stringify({
@@ -87,12 +102,18 @@ export async function POST(
               financialDirection: order.financialDirection,
             }),
           },
-        };
+        });
       }
 
-      const updated = await tx.order.update({
+      if (order.agentId) {
+        await tx.agent.update({
+          where: { id: order.agentId },
+          data: { status: 'AVAILABLE' },
+        });
+      }
+
+      return tx.order.findUnique({
         where: { id },
-        data: orderUpdateData,
         include: {
           agent: { include: { user: true } },
           customer: { include: { user: true } },
@@ -102,28 +123,59 @@ export async function POST(
           invoices: true,
         },
       });
-      logTiming('completion transaction complete');
-
-      if (order.agentId) {
-        await tx.agent.update({
-          where: { id: order.agentId },
-          data: { status: 'AVAILABLE' },
-        });
-      }
-
-      return updated;
     }, {
+      isolationLevel: 'Serializable',
       maxWait: 10000,
       timeout: 15000,
     });
+
+    if (!completedOrder) {
+      const recheck = await db.order.findUnique({
+        where: { id },
+        include: {
+          agent: { include: { user: true } },
+          customer: { include: { user: true } },
+          address: true,
+          items: { include: { category: true } },
+          weightRecords: true,
+          invoices: true,
+        },
+      });
+      if (recheck?.status === 'PICKUP_COMPLETED' || recheck?.status === 'SETTLEMENT_COMPLETED') {
+        return successResponse(recheck, 200, { message: 'Order was already completed.' });
+      }
+      return errorResponse('CONFLICT', 'The order state changed or was cancelled before completion.', 409);
+    }
 
     broadcaster.broadcast('ORDER_UPDATED', completedOrder);
     broadcaster.broadcast('ORDER_COMPLETED', {
       orderId: id,
       agentId: completedOrder.agentId,
-      invoiceNumber,
+      invoiceNumber: completedOrder.invoices?.[0]?.invoiceNumber || invoiceNumber,
     });
     logTiming('response ready');
+
+    runBackgroundTask(async () => {
+      try {
+        const customerUserId = completedOrder.customer?.userId;
+        const customerPhone = completedOrder.customer?.user?.phone;
+        if (!customerUserId || !customerPhone) return;
+
+        const invNum = completedOrder.invoices?.[0]?.invoiceNumber || invoiceNumber;
+        await db.notification.create({
+          data: {
+            userId: customerUserId,
+            orderId: id,
+            type: 'WHATSAPP',
+            recipient: customerPhone,
+            content: `Pickup #${completedOrder.orderNumber} completed! Invoice ${invNum} generated. Total: ₹${completedOrder.finalAmount.toFixed(2)}. Thank you for recycling with Junk It Out.`,
+            status: 'SENT',
+          },
+        });
+      } catch (notifErr: any) {
+        console.warn('[COMPLETE NOTIFICATION NOTICE] Safe notification error:', notifErr?.message);
+      }
+    });
 
     return successResponse(completedOrder);
   } catch (err: any) {

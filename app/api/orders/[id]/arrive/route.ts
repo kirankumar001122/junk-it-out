@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { validateStatusTransition } from '@/lib/validations/schemas';
+import { transitionOrder } from '@/lib/services/orderLifecycle';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 
@@ -41,34 +42,55 @@ export async function POST(
       return errorResponse('INVALID_STATUS_TRANSITION', `Cannot transition order status from ${oldStatus} to ${newStatus}.`, 400);
     }
 
-    const updatedOrder = await db.order.update({
-      where: { id },
-      data: {
-        status: newStatus,
-        statusHistory: {
-          create: {
-            oldStatus,
-            newStatus,
-            changedByUserId: authUser?.userId || null,
-            notes: `Agent arrived at customer doorstep.`,
-          },
-        },
-      },
+    if (order.status === newStatus && order.agentId === authUser.agentId) {
+      return successResponse(order);
+    }
+
+    const transition = await transitionOrder<any>({
+      orderId: id,
+      expectedStatus: oldStatus,
+      expectedAgentId: authUser.agentId,
+      newStatus,
+      changedByUserId: authUser?.userId || null,
+      notes: `Agent arrived at customer doorstep.`,
       include: {
         agent: { include: { user: true } },
         customer: { include: { user: true } },
         address: true,
         items: { include: { category: true } },
       },
+      afterHistory: async (tx) => {
+        if (order.agentId) {
+          await tx.agent.update({
+            where: { id: order.agentId },
+            data: { status: 'ARRIVED' },
+          });
+        }
+      },
     });
-    logTiming('order update complete');
 
-    if (order.agentId) {
-      await db.agent.update({
-        where: { id: order.agentId },
-        data: { status: 'ARRIVED' },
+    if (!transition.changed || !transition.order) {
+      const recheck = await db.order.findUnique({
+        where: { id },
+        include: {
+          agent: { include: { user: true } },
+          customer: { include: { user: true } },
+          address: true,
+          items: { include: { category: true } },
+        },
       });
+      if (recheck?.status === newStatus && recheck?.agentId === authUser.agentId) {
+        return successResponse(recheck);
+      }
+      return errorResponse(
+        'CONFLICT',
+        'Order state has changed or was cancelled before arrival.',
+        409
+      );
     }
+
+    const updatedOrder = transition.order;
+    logTiming('order update complete');
 
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
     broadcaster.broadcast('AGENT_ARRIVED', { orderId: id, agentId: order.agentId });

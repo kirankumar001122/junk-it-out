@@ -52,9 +52,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Lookup & Provision Authorized Admin Account (7676272709 / 8884176048)
+    // 2. Lookup & Provision Authorized Admin Account (7676272709 / 8884176048 / 7479895482)
     const rawDigits = normalized.replace(/\D/g, '').slice(-10);
-    const isAuthorizedAdminNumber = rawDigits === '7676272709' || rawDigits === '8884176048';
+    const isAuthorizedAdminNumber =
+      rawDigits === '7676272709' ||
+      rawDigits === '8884176048' ||
+      rawDigits === '7479895482';
     const phoneVariants = Array.from(
       new Set([normalized, rawDigits, `+91${rawDigits}`, `0${rawDigits}`])
     );
