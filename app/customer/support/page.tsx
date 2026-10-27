@@ -45,7 +45,7 @@ export default function CustomerSupportPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!description.trim() || submitting) return;
+    if (submitting) return;
 
     setSubmitting(true);
     setError(null);
@@ -150,10 +150,9 @@ export default function CustomerSupportPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Description:</label>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Description (Optional):</label>
             <textarea
               rows={3}
-              required
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Provide specific details about your issue..."

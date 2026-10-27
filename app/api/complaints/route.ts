@@ -37,10 +37,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const { orderId, category, subject, description, message, name, phone, email, photoUrl } = body;
 
-    const ticketMessage = (description || message || '').trim();
-    if (!ticketMessage) {
-      return NextResponse.json({ success: false, message: 'Message description is required.' }, { status: 400 });
-    }
+    const ticketMessage = (description || message || '').trim() || null;
 
     let customerId: string | null = authUser?.customerId || null;
 

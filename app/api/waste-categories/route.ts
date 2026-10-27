@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
+import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
 
 let cachedCategories: any = null;
 let cacheExpiry = 0;
@@ -14,8 +15,12 @@ export function invalidateCategoriesCache() {
 
 export async function GET(req: NextRequest) {
   try {
+    const customerOnly = req.nextUrl.searchParams.get('customer') === 'true';
     if (cachedCategories && Date.now() < cacheExpiry) {
-      const cachedResponse = successResponse(cachedCategories);
+      const visibleCategories = customerOnly
+        ? cachedCategories.filter(isCustomerWasteCategory)
+        : cachedCategories;
+      const cachedResponse = successResponse(visibleCategories);
       cachedResponse.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
       cachedResponse.headers.set('X-Cache', 'HIT');
       return cachedResponse;
@@ -67,7 +72,9 @@ export async function GET(req: NextRequest) {
     cachedCategories = categories;
     cacheExpiry = Date.now() + CACHE_TTL_MS;
 
-    const response = successResponse(categories);
+    const response = successResponse(
+      customerOnly ? categories.filter(isCustomerWasteCategory) : categories
+    );
     response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
     response.headers.set('X-Cache', 'MISS');
     return response;

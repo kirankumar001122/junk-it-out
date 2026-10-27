@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { Search, ArrowRight, ShoppingBasket, CheckCircle2, ShieldCheck, Banknote, FileText, Recycle, Cpu, Box, Wine, Sofa } from 'lucide-react';
 import { addToPickupCart } from '@/lib/pickupCart';
+import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
 
 const icons = [FileText, Recycle, Box, Cpu, Wine, Sofa];
 
@@ -14,10 +15,10 @@ export default function PriceListPage() {
   const [addedItem, setAddedItem] = useState('');
 
   useEffect(() => {
-    fetch('/api/waste-categories')
+    fetch('/api/waste-categories?customer=true')
       .then((r) => r.json())
       .then((d) => {
-        if (d.success) setCategories(d.data || []);
+        if (d.success) setCategories((d.data || []).filter(isCustomerWasteCategory));
       })
       .catch(() => {})
       .finally(() => setLoading(false));

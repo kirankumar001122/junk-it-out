@@ -30,6 +30,7 @@ import {
 } from '@/lib/pickupCart';
 import { getCachedClientJson } from '@/lib/clientRequestCache';
 import { clearSelectedLocation } from '@/lib/selectedLocation';
+import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
 
 type Props = { open: boolean; onClose: () => void };
 
@@ -118,15 +119,19 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
 
     Promise.all([
       getCachedClientJson<any>(
-        'public-waste-categories',
-        '/api/waste-categories',
+        'public-customer-waste-categories',
+        '/api/waste-categories?customer=true',
         60_000,
         { cache: 'force-cache' }
       ),
       checkAuth(),
     ])
       .then(([categoryData]) => {
-        setCategories(categoryData.success ? categoryData.data : []);
+        setCategories(
+          categoryData.success
+            ? categoryData.data.filter(isCustomerWasteCategory)
+            : []
+        );
       })
       .catch(() => {
         setCategories([]);

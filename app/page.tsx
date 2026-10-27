@@ -35,6 +35,7 @@ import {
 import CustomerReviews from '@/components/CustomerReviews';
 import ScrollReveal from '@/components/ScrollReveal';
 import { getCachedClientJson } from '@/lib/clientRequestCache';
+import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
 
 const categoryImages: Record<string, string> = {
   'E-Waste': '/categories/e-waste.webp',
@@ -42,7 +43,6 @@ const categoryImages: Record<string, string> = {
   'Paper & Cardboard': '/categories/paper-carboard.jpg',
   'Plastic Waste': '/categories/plastic-waste.jpg?v=2',
 };
-const CUSTOMER_CATEGORY_NAMES = new Set(Object.keys(categoryImages));
 
 const categoryIcons = [
   FileText,
@@ -63,15 +63,15 @@ export default function HomePage() {
 
   useEffect(() => {
     getCachedClientJson<{ success: boolean; data?: any[] }>(
-      'public-waste-categories',
-      '/api/waste-categories',
+      'public-customer-waste-categories',
+      '/api/waste-categories?customer=true',
       60_000,
       { cache: 'force-cache' }
     )
       .then((d) =>
         setCategories(
           d.success
-            ? d.data.filter((category: any) => CUSTOMER_CATEGORY_NAMES.has(category.name?.trim()))
+            ? d.data.filter(isCustomerWasteCategory)
             : []
         )
       )

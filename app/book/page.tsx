@@ -29,6 +29,7 @@ import InteractiveMap, { loadGoogleMaps } from '@/components/InteractiveMap';
 import { readPickupCart } from '@/lib/pickupCart';
 import { getSelectedLocation, setSelectedLocation, LOCATION_CHANGE_EVENT } from '@/lib/selectedLocation';
 import { loadRazorpayScript } from '@/lib/razorpayClient';
+import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
 
 // Small category images used in the booking cards.
 const CATEGORY_IMAGES: Record<string, string> = {
@@ -37,7 +38,6 @@ const CATEGORY_IMAGES: Record<string, string> = {
   'Paper & Cardboard': '/categories/paper-carboard.jpg',
   'Plastic Waste': '/categories/plastic-waste.jpg?v=2',
 };
-const CUSTOMER_CATEGORY_NAMES = new Set(Object.keys(CATEGORY_IMAGES));
 
 // Standard 1-hour pickup time slots
 const TIME_SLOTS = [
@@ -218,13 +218,11 @@ export default function BookingPage() {
     checkAuth();
     loadLocationFromStore();
 
-    fetch('/api/waste-categories')
+    fetch('/api/waste-categories?customer=true')
       .then((res) => res.json())
       .then((data) => {
         if (data.success && Array.isArray(data.data)) {
-          const availableCategories = data.data.filter((category: any) =>
-            CUSTOMER_CATEGORY_NAMES.has(category.name?.trim())
-          );
+          const availableCategories = data.data.filter(isCustomerWasteCategory);
           setCategories(availableCategories);
 
           const params = new URLSearchParams(window.location.search);

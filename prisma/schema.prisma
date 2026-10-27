@@ -362,7 +362,7 @@ model Complaint {
   orderId         String?
   customerId      String
   category        String   @default("WEIGHT_DISPUTE")
-  description     String
+  description     String?
   photoUrl        String?
   status          String   @default("OPEN")
   resolutionNotes String?
