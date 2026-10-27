@@ -131,7 +131,7 @@ export default function Navbar() {
         <button
           type="button"
           onClick={() => setLocationOpen(true)}
-          className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2 rounded-full bg-slate-50/90 px-3 py-1.5 text-left border border-slate-200/90 max-w-[135px] sm:max-w-[200px] md:max-w-[240px] shadow-sm hover:border-emerald-300 hover:bg-white transition-all active:scale-95 cursor-pointer"
+          className="flex min-w-0 shrink-0 items-center gap-1.5 rounded-full bg-slate-50/90 px-2.5 py-1.5 text-left border border-slate-200/90 max-w-[112px] sm:max-w-[200px] sm:gap-2 sm:px-3 md:max-w-[240px] shadow-sm hover:border-emerald-300 hover:bg-white transition-all active:scale-95 cursor-pointer"
           title={`Pickup Location: ${location}`}
           aria-label={`Change pickup location. Current location: ${location}`}
         >
@@ -143,7 +143,7 @@ export default function Navbar() {
         </button>
 
         {/* Search input */}
-        <form onSubmit={submitSearch} className="relative min-w-0 flex-1 max-w-md mx-auto">
+        <form onSubmit={submitSearch} className="relative hidden min-w-0 flex-1 max-w-md mx-auto sm:block">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             value={query}
@@ -162,19 +162,19 @@ export default function Navbar() {
         <Link
           href="/customer/support"
           aria-label="Customer support"
-          className="hidden h-10 w-10 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-emerald-300 hover:text-emerald-700 sm:grid"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-emerald-300 hover:text-emerald-700 sm:h-10 sm:w-10"
         >
           <Bell className="h-4 w-4" />
         </Link>
 
         <button
           onClick={() => setCartOpen(true)}
-          className="btn-glossy-dark rounded-full h-10 w-10 shrink-0 grid place-items-center text-white shadow-lg shadow-slate-900/10"
+          className="btn-glossy-dark relative grid h-9 w-9 shrink-0 place-items-center rounded-full text-white shadow-lg shadow-slate-900/10 sm:h-10 sm:w-10"
           aria-label="Open pickup cart"
         >
           <ShoppingBasket className="h-4.5 w-4.5" />
           {cartCount > 0 && (
-            <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-emerald-500 px-1 text-[10px] font-bold text-slate-950 shadow-sm animate-scale-in">
+            <span aria-live="polite" className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-emerald-500 px-1 text-[10px] font-bold text-slate-950 shadow-sm animate-scale-in">
               {cartCount}
             </span>
           )}
