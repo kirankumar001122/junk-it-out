@@ -19,7 +19,7 @@ export default function BottomNav() {
   if (pathname.startsWith('/admin') || pathname.startsWith('/agent')) return null;
 
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/80 px-2 py-1 pb-[calc(0.25rem+env(safe-area-inset-bottom,0px))] shadow-md">
+    <nav aria-label="Customer navigation" className="customer-mobile-nav md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-xl border-t border-slate-200/80 px-2 py-1 pb-[calc(0.25rem+env(safe-area-inset-bottom,0px))] shadow-[0_-8px_24px_rgba(15,23,42,0.08)]">
       <div className="flex items-center justify-around">
         {links.map((link) => {
           const Icon = link.icon;
@@ -56,6 +56,6 @@ export default function BottomNav() {
           );
         })}
       </div>
-    </div>
+    </nav>
   );
 }

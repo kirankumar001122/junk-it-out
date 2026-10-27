@@ -10,7 +10,7 @@ export default function Footer() {
   if (pathname.startsWith('/admin') || pathname.startsWith('/agent')) return null;
 
   return (
-    <footer className="bg-slate-900 text-slate-300 pt-12 pb-8 border-t border-slate-800">
+    <footer className="border-t border-emerald-900/40 bg-[#071b16] pb-8 pt-14 text-slate-300">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-10">
 

@@ -99,19 +99,20 @@ export default function CategoriesPage() {
   }, [categories, query]);
 
   return (
-    <main className="mx-auto min-h-[80vh] max-w-6xl px-4 py-10 sm:px-6">
+    <main className="customer-page-cream min-h-[80vh]">
+      <div className="customer-page">
 
       {/* HEADER */}
       <div>
-        <p className="text-xs font-bold uppercase tracking-wider text-emerald-700">
+        <p className="customer-eyebrow">
           Accepted Materials
         </p>
 
-        <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+        <h1 className="customer-title mt-2 sm:text-4xl">
           Waste Category Catalogue
         </h1>
 
-        <p className="mt-1 text-xs text-slate-600 sm:text-sm">
+        <p className="customer-subtitle mt-2">
           Explore rates per kg, search items, and add them directly to your
           Pickup Cart.
         </p>
@@ -125,7 +126,7 @@ export default function CategoriesPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search paper, plastic, household, e-waste..."
-          className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 text-xs font-medium text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 placeholder:text-slate-400 sm:text-sm"
+          className="h-12 w-full rounded-2xl border border-slate-200 bg-white pl-10 pr-4 text-xs font-medium text-slate-900 shadow-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 placeholder:text-slate-400 sm:text-sm"
         />
       </label>
 
@@ -151,7 +152,7 @@ export default function CategoriesPage() {
           return (
             <article
               key={category.id}
-              className="flex flex-col rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md"
+              className="customer-feature-card flex flex-col p-4"
             >
               {/* IMAGE */}
               <div className="mb-4 h-32 w-full overflow-hidden rounded-xl bg-emerald-50">
@@ -319,6 +320,7 @@ export default function CategoriesPage() {
           </p>
         </div>
       )}
+      </div>
     </main>
   );
 }

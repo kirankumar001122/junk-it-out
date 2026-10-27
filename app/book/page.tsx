@@ -992,7 +992,8 @@ export default function BookingPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
+    <div className="customer-page-cream">
+    <div className="customer-page max-w-4xl">
       {/* 3-STEP PROGRESS HEADER */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">
@@ -1000,7 +1001,7 @@ export default function BookingPage() {
             <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full uppercase tracking-wider border border-emerald-200/80">
               Doorstep Pickup Booking
             </span>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight mt-1">Book Waste Pickup</h1>
+            <h1 className="customer-title mt-2">Book your pickup</h1>
           </div>
           <span className="text-xs font-bold text-slate-700 bg-slate-100 px-3 py-1 rounded-lg border border-slate-200">
             Step {step} of 3
@@ -1017,7 +1018,7 @@ export default function BookingPage() {
             <div key={st.id} className="space-y-1">
               <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
                 <div
-                  className="h-full bg-emerald-600 transition-all duration-300 ease-out"
+                  className="customer-progress-rail h-full transition-all duration-300 ease-out"
                   style={{ width: step > st.id ? '100%' : step === st.id ? '100%' : '0%' }}
                 />
               </div>
@@ -1043,7 +1044,7 @@ export default function BookingPage() {
 
       {/* STEP 1: CATEGORY SELECTION ("What are we picking up?") */}
       {step === 1 && (
-        <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-slate-200 space-y-6 animate-scale-in">
+        <div className="customer-surface rounded-[1.75rem] p-5 sm:p-7 space-y-6 animate-scale-in">
           <div>
             <h2 className="text-lg font-bold text-slate-900 tracking-tight">What materials are you disposing?</h2>
             <p className="text-xs text-slate-500 font-medium mt-0.5">
@@ -1151,7 +1152,7 @@ export default function BookingPage() {
 
       {/* STEP 2: PICKUP LOCATION & SCHEDULE */}
       {step === 2 && (
-        <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-slate-200 space-y-6 animate-scale-in">
+        <div className="customer-surface rounded-[1.75rem] p-5 sm:p-7 space-y-6 animate-scale-in">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
             <div>
               <h2 className="text-lg font-bold text-slate-900 tracking-tight">Pickup Location & Schedule</h2>
@@ -1403,7 +1404,7 @@ export default function BookingPage() {
 
       {/* STEP 3: BOOKING SUMMARY & PAYMENT VERIFICATION */}
       {step === 3 && (
-        <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-slate-200 space-y-6 animate-scale-in">
+        <div className="customer-surface rounded-[1.75rem] p-5 sm:p-7 space-y-6 animate-scale-in">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
             <div>
               <h2 className="text-lg font-bold text-slate-900 tracking-tight">Booking Summary</h2>
@@ -1747,6 +1748,7 @@ export default function BookingPage() {
           setLocationSearchModalOpen(false);
         }}
       />
+    </div>
     </div>
   );
 }

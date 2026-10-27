@@ -403,7 +403,8 @@ export default function OrderTrackingPage() {
 
   if (loading) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+      <div className="customer-page-cream">
+      <div className="customer-page max-w-5xl space-y-6">
         <div className="shimmer-box h-28 rounded-3xl w-full" />
 
         <div className="shimmer-box h-24 rounded-3xl w-full" />
@@ -413,6 +414,7 @@ export default function OrderTrackingPage() {
 
           <div className="md:col-span-7 shimmer-box h-64 rounded-3xl w-full" />
         </div>
+      </div>
       </div>
     );
   }
@@ -834,9 +836,10 @@ export default function OrderTrackingPage() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+    <div className="customer-page-cream">
+    <div className="customer-page max-w-5xl space-y-6">
       {/* ORDER HEADER */}
-      <div className="bg-slate-900 text-white rounded-3xl p-6 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="customer-hero relative overflow-hidden rounded-[2rem] p-6 text-white shadow-xl md:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="text-xs font-extrabold bg-emerald-500 text-slate-950 px-2.5 py-0.5 rounded-full uppercase">
@@ -928,7 +931,7 @@ export default function OrderTrackingPage() {
       )}
 
       {/* STATUS PROGRESS TIMELINE */}
-      <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-4">
+      <div className="customer-surface rounded-[1.75rem] p-6 space-y-4">
         <h3 className="text-sm font-bold text-slate-900">
           Pickup Lifecycle Progress
         </h3>
@@ -997,7 +1000,7 @@ export default function OrderTrackingPage() {
       {/* ASSIGNED AGENT & LIVE MAP */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
         {/* Agent Info Card */}
-        <div className="md:col-span-5 bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-4">
+        <div className="customer-surface md:col-span-5 rounded-[1.75rem] p-6 space-y-4">
           <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
             Assigned Pickup Agent
           </h3>
@@ -1164,7 +1167,7 @@ export default function OrderTrackingPage() {
       </div>
 
       {/* WEIGHT VERIFICATION & ITEM SUMMARY */}
-      <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-4">
+      <div className="customer-surface rounded-[1.75rem] p-6 space-y-4">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
             <h3 className="text-base font-bold text-slate-900">
@@ -1638,6 +1641,7 @@ export default function OrderTrackingPage() {
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 }

@@ -33,6 +33,7 @@ import {
 } from '@/lib/pickupCart';
 
 import CustomerReviews from '@/components/CustomerReviews';
+import ScrollReveal from '@/components/ScrollReveal';
 import { getCachedClientJson } from '@/lib/clientRequestCache';
 
 const categoryImages: Record<string, string> = {
@@ -113,7 +114,7 @@ export default function HomePage() {
 
       {/* Hero Section */}
       <section
-        className="relative overflow-hidden border-b border-slate-800 bg-cover bg-center bg-no-repeat"
+        className="customer-hero relative overflow-hidden border-b border-slate-800 bg-cover bg-center bg-no-repeat"
         style={{
           backgroundImage: "url('/images/junk_it_out.webp')",
         }}
@@ -124,28 +125,28 @@ export default function HomePage() {
         {/* Green glow */}
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(16,185,129,0.18),rgba(255,255,255,0))]" />
 
-        <div className="relative mx-auto grid max-w-7xl items-center gap-12 px-4 py-14 sm:px-6 md:grid-cols-[1.1fr_.9fr] md:py-24">
+        <div className="relative mx-auto grid max-w-7xl items-center gap-12 px-4 py-16 sm:px-6 md:grid-cols-[1.05fr_.95fr] md:py-28">
 
-          <div className="max-w-2xl">
+          <div className="customer-hero-content max-w-2xl">
 
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-400">
               <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
               <span>Doorstep Pickup Across Bengaluru</span>
             </div>
 
-            <h1 className="text-3xl font-extrabold leading-[1.1] tracking-tight text-white sm:text-5xl lg:text-6xl">
+            <h1 className="customer-hero-title max-w-3xl text-4xl font-black leading-[1.02] tracking-[-0.06em] text-white sm:text-6xl lg:text-7xl">
               Turn scrap &amp; waste <br className="hidden sm:inline" />
-              <span className="text-emerald-400">
+              <span className="text-emerald-300 drop-shadow-[0_0_24px_rgba(110,231,183,0.2)]">
                 into instant value.
               </span>
             </h1>
 
-            <p className="mt-4 max-w-xl text-sm leading-relaxed text-slate-300 sm:text-base">
+            <p className="customer-hero-copy mt-4 max-w-xl text-sm leading-relaxed text-slate-300 sm:text-base">
               Select items, schedule doorstep pickup in Bengaluru, and
               track your request live from collection to settlement.
             </p>
 
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="customer-hero-actions mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
 
               <Link
                 href="/book?cart=1"
@@ -165,9 +166,9 @@ export default function HomePage() {
 
             </div>
 
-            <div className="mt-10 grid grid-cols-3 gap-3 border-t border-slate-800/80 pt-6 text-xs">
+            <div className="customer-hero-trust mt-10 grid grid-cols-1 gap-3 border-t border-white/10 pt-6 text-xs sm:grid-cols-3">
 
-              <div className="rounded-xl border border-slate-800 bg-slate-800/40 p-3 text-slate-300">
+              <div className="customer-glass rounded-2xl p-3 text-slate-300">
                 <Clock3 className="mb-1.5 h-4 w-4 text-emerald-400" />
 
                 <strong className="block font-semibold text-white">
@@ -179,7 +180,7 @@ export default function HomePage() {
                 </span>
               </div>
 
-              <div className="rounded-xl border border-slate-800 bg-slate-800/40 p-3 text-slate-300">
+              <div className="customer-glass rounded-2xl p-3 text-slate-300">
                 <BadgeIndianRupee className="mb-1.5 h-4 w-4 text-emerald-400" />
 
                 <strong className="block font-semibold text-white">
@@ -191,7 +192,7 @@ export default function HomePage() {
                 </span>
               </div>
 
-              <div className="rounded-xl border border-slate-800 bg-slate-800/40 p-3 text-slate-300">
+              <div className="customer-glass rounded-2xl p-3 text-slate-300">
                 <Recycle className="mb-1.5 h-4 w-4 text-emerald-400" />
 
                 <strong className="block font-semibold text-white">
@@ -207,9 +208,9 @@ export default function HomePage() {
           </div>
 
           {/* Clean Interactive Process Preview */}
-          <div className="relative hidden items-center justify-center md:flex">
+          <div className="customer-hero-panel relative hidden items-center justify-center md:flex">
 
-            <div className="relative w-full max-w-md overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 p-6 shadow-2xl">
+            <div className="customer-glass relative w-full max-w-md overflow-hidden rounded-[2rem] p-6 shadow-2xl">
 
               <div className="flex items-center justify-between border-b border-slate-800 pb-4">
 
@@ -271,23 +272,20 @@ export default function HomePage() {
       </section>
 
       {/* Main Content */}
-      <main className="mx-auto max-w-7xl space-y-12 px-4 py-12 sm:px-6">
+      <main className="customer-home-main mx-auto max-w-7xl space-y-10 px-4 py-10 sm:px-6 sm:py-12">
 
         {/* Waste Categories */}
-        <section
-          id="categories"
-          className="scroll-mt-20"
-        >
+        <section id="categories" className="customer-home-section customer-category-section scroll-mt-20">
 
           {/* Section Header */}
-          <div className="mb-8 flex items-end justify-between gap-4">
+          <div className="mb-6 flex items-end justify-between gap-4 sm:mb-7">
 
             <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-emerald-700">
+              <p className="customer-eyebrow">
                 Accepted Materials
               </p>
 
-              <h2 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+              <h2 className="mt-2 text-3xl font-black tracking-[-0.04em] text-slate-950 sm:text-4xl">
                 Add waste items to your cart
               </h2>
             </div>
@@ -303,7 +301,7 @@ export default function HomePage() {
           </div>
 
           {/* Four Category Cards */}
-          <div className="grid grid-cols-1 items-start gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-4">
 
             {loading
               ? Array.from({ length: 4 }).map((_, index) => (
@@ -328,7 +326,7 @@ export default function HomePage() {
                   return (
                     <article
                       key={category.id}
-                      className="flex w-full flex-col rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm transition-all hover:-translate-y-1 hover:border-emerald-400 hover:shadow-md"
+                      className="customer-feature-card customer-category-card group flex w-full flex-col p-4"
                     >
 
                       <Link
@@ -340,13 +338,13 @@ export default function HomePage() {
 
                         {category.name === 'Household Dry Waste' ? (
                           <>
-                            <div className="mb-3 h-24 overflow-hidden rounded-xl bg-emerald-50">
+                            <div className="customer-category-image mb-3 h-28 overflow-hidden rounded-2xl bg-emerald-50">
                               <img
                                 src="/categories/household-waste.webp"
                                 alt="Wet Waste and Dry Waste"
                                 loading="lazy"
                                 decoding="async"
-                                className="h-24 w-full object-cover"
+                                className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                               />
                             </div>
 
@@ -383,7 +381,7 @@ export default function HomePage() {
                         ) : (
                           <>
                             {categoryImages[category.name] ? (
-                              <div className="mb-3 h-24 w-full overflow-hidden rounded-xl bg-emerald-50">
+                              <div className="customer-category-image mb-3 h-28 w-full overflow-hidden rounded-2xl bg-emerald-50">
                                 <img
                                   src={categoryImages[category.name]}
                                   alt={category.name}
@@ -486,7 +484,12 @@ export default function HomePage() {
         </section>
 
         {/* Feature Highlights Grid */}
-        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="customer-home-section customer-benefits-section">
+        <div className="mb-5 max-w-xl">
+          <p className="customer-eyebrow">Why Junk It Out</p>
+          <h2 className="mt-2 text-2xl font-black tracking-[-0.04em] text-slate-950 sm:text-3xl">A cleaner pickup experience, start to finish.</h2>
+        </div>
+        <ScrollReveal className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" threshold={0.1}>
 
           {[
             {
@@ -513,11 +516,11 @@ export default function HomePage() {
 
             <div
               key={title}
-              className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm"
+              className="customer-benefit-card group rounded-2xl p-5"
             >
 
               <span className="mb-3 grid h-10 w-10 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
-                <Icon className="h-5 w-5" />
+                <Icon className="h-5 w-5 transition-transform duration-300 group-hover:-rotate-6 group-hover:scale-110" />
               </span>
 
               <h3 className="text-sm font-bold text-slate-900">
@@ -532,6 +535,7 @@ export default function HomePage() {
 
           ))}
 
+        </ScrollReveal>
         </section>
 
         {/* Customer Reviews Section */}

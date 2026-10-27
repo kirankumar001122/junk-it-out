@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useState } from 'react';
-import { CircleUserRound, MapPin, Search, ShoppingBasket } from 'lucide-react';
+import { Bell, CircleUserRound, MapPin, Search, ShoppingBasket } from 'lucide-react';
 import { pickupCartEvent, readPickupCart } from '@/lib/pickupCart';
 import {
   clearSelectedLocation,
@@ -116,9 +116,9 @@ export default function Navbar() {
 
   return (
     <>
-    <header className="relative z-50 border-b border-slate-200/80 bg-white/90 backdrop-blur-md transition-all">
+    <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/90 backdrop-blur-xl transition-all">
       <div className="mx-auto flex max-w-7xl items-center gap-2 sm:gap-3 px-3 sm:px-6 py-2.5">
-        <Link href="/" className="flex shrink-0 items-center gap-2 transition-opacity hover:opacity-90" aria-label="Junk It Out home">
+        <Link href="/" prefetch className="flex shrink-0 items-center gap-2 transition-opacity hover:opacity-90" aria-label="Junk It Out home">
           <span className="relative grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl bg-white border border-slate-200 shadow-sm overflow-hidden shrink-0">
             <img src="/logo.png" alt="Junk It Out Logo" decoding="async" className="h-full w-full object-contain p-1" />
           </span>
@@ -154,14 +154,22 @@ export default function Navbar() {
           />
         </form>
 
-        <Link href="/customer/profile" className="hidden items-center gap-2 rounded-full border border-slate-200/70 bg-white/80 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-white hover:text-slate-900 hover:border-emerald-300 shadow-sm transition-all sm:flex active:scale-95">
+        <Link href="/customer/profile" prefetch className="hidden items-center gap-2 rounded-full border border-slate-200/70 bg-white/80 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-white hover:text-slate-900 hover:border-emerald-300 shadow-sm transition-all sm:flex active:scale-95">
           <CircleUserRound className="h-4.5 w-4.5 text-slate-600" />
           <span className="hidden lg:inline">{checkingAuth ? 'Account' : getDisplayName(user)}</span>
         </Link>
 
+        <Link
+          href="/customer/support"
+          aria-label="Customer support"
+          className="hidden h-10 w-10 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-emerald-300 hover:text-emerald-700 sm:grid"
+        >
+          <Bell className="h-4 w-4" />
+        </Link>
+
         <button
           onClick={() => setCartOpen(true)}
-          className="btn-glossy-dark rounded-full h-10 w-10 shrink-0 grid place-items-center text-white"
+          className="btn-glossy-dark rounded-full h-10 w-10 shrink-0 grid place-items-center text-white shadow-lg shadow-slate-900/10"
           aria-label="Open pickup cart"
         >
           <ShoppingBasket className="h-4.5 w-4.5" />
