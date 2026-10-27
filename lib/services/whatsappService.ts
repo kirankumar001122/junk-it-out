@@ -20,6 +20,15 @@ export interface WhatsAppServiceResult {
   error?: string;
 }
 
+export interface SendAgentPickupOfferInput {
+  agentPhone: string;
+  orderNumber: string;
+  pickupAddress: string;
+  latitude: number;
+  longitude: number;
+  mapsLink: string;
+}
+
 /**
  * Normalizes destination phone number for Fast2SMS WhatsApp API (10 to 12 digits without leading '+')
  */
@@ -180,5 +189,84 @@ export async function sendDispatchUpdate(
       success: false,
       error: err.message || 'Network exception calling Fast2SMS API.',
     };
+  }
+}
+
+/** Sends a pre-approved Fast2SMS WhatsApp template to an eligible agent. */
+export async function sendAgentPickupOffer(
+  input: SendAgentPickupOfferInput,
+): Promise<WhatsAppServiceResult> {
+  const apiKey = (
+    process.env.FAST2SMS_WHATSAPP_API_KEY || process.env.FAST2SMS_API_KEY || ''
+  ).trim();
+  const messageId = process.env.FAST2SMS_AGENT_PICKUP_MESSAGE_ID?.trim();
+  const phoneNumberId = (
+    process.env.FAST2SMS_WHATSAPP_PHONE_NUMBER_ID || '1238240156029770'
+  ).trim();
+
+  if (!apiKey || !messageId) {
+    logStructured('warn', 'notification.agent_pickup.configuration_missing', {
+      dependency: 'fast2sms',
+    });
+    return { success: false, error: 'Agent pickup WhatsApp configuration is missing.' };
+  }
+
+  const recipient = normalizePhoneNumber(input.agentPhone);
+  if (![10, 12].includes(recipient.length) || !/^\d+$/.test(recipient)) {
+    return { success: false, error: 'Agent mobile number is invalid.' };
+  }
+
+  const templateValue = (value: string) => value.replace(/[|\r\n]/g, ' ').trim();
+  const params = new URLSearchParams({
+    message_id: messageId,
+    phone_number_id: phoneNumberId,
+    numbers: recipient,
+    variables_values: [input.orderNumber, input.pickupAddress, String(input.latitude), String(input.longitude), input.mapsLink]
+      .map(templateValue)
+      .join('|'),
+  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${FAST2SMS_WHATSAPP_URL}?${params.toString()}`, {
+      method: 'GET',
+      headers: { Authorization: apiKey, Accept: 'application/json' },
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    const responseText = await response.text();
+    let responseData: any = {};
+    try {
+      responseData = JSON.parse(responseText);
+    } catch {
+      // A non-JSON response is treated as a failed provider request.
+    }
+
+    const success = response.ok && (
+      responseData.return === true ||
+      String(responseData.return).toLowerCase() === 'true' ||
+      responseData.status_code === 200
+    );
+    logStructured(success ? 'info' : 'warn', 'notification.agent_pickup.provider_response', {
+      dependency: 'fast2sms',
+      providerStatusCode: Number.isInteger(responseData.status_code)
+        ? responseData.status_code
+        : response.status,
+    });
+
+    const requestId = responseData.request_id || responseData.requestId ||
+      (Array.isArray(responseData.data) ? responseData.data[0]?.request_id : undefined);
+    return success
+      ? { success: true, requestId, message: 'Agent pickup alert accepted by provider.' }
+      : { success: false, requestId, error: 'Fast2SMS did not accept the agent pickup alert.' };
+  } catch (error) {
+    logStructured('error', 'notification.agent_pickup.provider_failed', {
+      dependency: 'fast2sms',
+      errorType: getSafeErrorType(error),
+    });
+    return { success: false, error: 'Fast2SMS agent pickup request failed.' };
+  } finally {
+    clearTimeout(timeout);
   }
 }

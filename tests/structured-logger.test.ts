@@ -2,7 +2,9 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   getOrCreateRequestId,
   getRequestId,
+  getSafeDatabaseCode,
   getSafeErrorType,
+  getSafePrismaCode,
   logStructured,
   withDatabaseErrorLogging,
   withApiRequestLogging,
@@ -49,9 +51,16 @@ describe('structured logger', () => {
 
   test('logs database failures without the error message and preserves the rejection', async () => {
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const databaseError = new Error('postgres://private-user:private-password@db.internal');
+    const databaseError = Object.assign(
+      new Error('postgres://private-user:private-password@db.internal'),
+      { code: 'P2022' },
+    );
+    Object.assign(databaseError, { meta: { code: '42883', message: 'private SQL text and parameters' } });
 
-    await expect(withDatabaseErrorLogging(async () => { throw databaseError; }))
+    await expect(withDatabaseErrorLogging(async () => { throw databaseError; }, {
+      databaseModel: 'Payment',
+      databaseAction: 'create',
+    }))
       .rejects.toBe(databaseError);
 
     const serialized = String(errorLog.mock.calls[0][0]);
@@ -60,8 +69,26 @@ describe('structured logger', () => {
       event: 'database.operation.failed',
       dependency: 'database',
       errorType: 'Error',
+      prismaCode: 'P2022',
+      databaseCode: '42883',
+      databaseModel: 'Payment',
+      databaseAction: 'create',
     });
     expect(serialized).not.toContain('private-password');
+    expect(serialized).not.toContain('db.internal');
+    expect(serialized).not.toContain('private SQL text');
+  });
+
+  test('exposes only well-formed Prisma codes in safe diagnostics', () => {
+    expect(getSafePrismaCode({ code: 'P2002' })).toBe('P2002');
+    expect(getSafePrismaCode({ code: 'P2002\nforged=true' })).toBeUndefined();
+    expect(getSafePrismaCode(new Error('not a Prisma error'))).toBeUndefined();
+  });
+
+  test('exposes only well-formed SQLSTATE values from Prisma metadata', () => {
+    expect(getSafeDatabaseCode({ meta: { code: '42883' } })).toBe('42883');
+    expect(getSafeDatabaseCode({ meta: { code: '42883\nforged=true' } })).toBeUndefined();
+    expect(getSafeDatabaseCode({ meta: { message: 'private query' } })).toBeUndefined();
   });
 
   test('logs status and duration without recording request body or query data', async () => {

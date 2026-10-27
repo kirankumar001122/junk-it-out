@@ -4,6 +4,8 @@ import { getAuthUser } from '@/lib/auth/middleware';
 import {
   getSafeErrorDependency,
   getSafeErrorType,
+  getSafeDatabaseCode,
+  getSafePrismaCode,
   logStructured,
   withApiRequestLogging,
   type ApiRequestContext,
@@ -109,7 +111,9 @@ async function handlePost(req: NextRequest, context: ApiRequestContext) {
     }
 
     const attempt = await db.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${order.id}, 0))`;
+      // Lock the owning order row until this transaction commits. This keeps
+      // attempts for one order serialized without relying on hash/advisory functions.
+      await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "id" = ${order.id} FOR UPDATE`;
 
       const activePayment = await tx.payment.findFirst({
         where: {
@@ -221,6 +225,8 @@ async function handlePost(req: NextRequest, context: ApiRequestContext) {
       ...context,
       dependency: getSafeErrorDependency(error),
       errorType: getSafeErrorType(error),
+      prismaCode: getSafePrismaCode(error),
+      databaseCode: getSafeDatabaseCode(error),
     });
 
     const isRazorpayAuthError =

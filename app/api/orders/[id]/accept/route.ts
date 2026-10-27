@@ -3,6 +3,10 @@ import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
+import {
+  broadcastAgentBookingNotification,
+  persistAgentBookingNotificationOnce,
+} from '@/lib/services/agentBookingNotification';
 
 export async function POST(
   req: NextRequest,
@@ -81,6 +85,10 @@ export async function POST(
       return errorResponse('ORDER_UNAVAILABLE', 'This pickup is no longer available for acceptance.', 400);
     }
 
+    if (order.financialDirection === 'CUSTOMER_PAYS' && order.paymentStatus !== 'CAPTURED') {
+      return errorResponse('PAYMENT_NOT_CAPTURED', 'This pickup is not available until payment is confirmed.', 409);
+    }
+
     // 5. Service Area Matching Check
     // If the order is already assigned to this agent by dispatcher/system, bypass area eligibility check
     if (order.agentId !== agentId) {
@@ -102,29 +110,70 @@ export async function POST(
 
     // 6. Atomic Conditional Update (Race-Condition Prevention)
     // Update status to AGENT_ACCEPTED if order is unassigned or assigned to this agent in AGENT_ASSIGNED state
-    const updateResult = await db.order.updateMany({
-      where: {
-        id: order.id,
-        OR: [
-          { agentId: null, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
-          { agentId: agentId, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
-        ],
-      },
-      data: {
-        agentId: agentId,
-        status: 'AGENT_ACCEPTED',
-      },
+    let notificationCreated = false;
+    const assignment = await db.$transaction(async (tx) => {
+      const updateResult = await tx.order.updateMany({
+        where: {
+          id: order.id,
+          OR: [
+            { agentId: null, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
+            { agentId, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
+          ],
+          ...(order.financialDirection === 'CUSTOMER_PAYS' ? { paymentStatus: 'CAPTURED' } : {}),
+        },
+        data: { agentId, status: 'AGENT_ACCEPTED' },
+      });
+
+      if (updateResult.count === 0) {
+        const recheckOrder = await tx.order.findUnique({ where: { id: order.id } });
+        return { changed: false as const, alreadyAssignedToAgent: recheckOrder?.agentId === agentId, order: recheckOrder };
+      }
+
+      await tx.orderStatusHistory.create({
+        data: {
+          orderId: order.id,
+          oldStatus: order.status,
+          newStatus: 'AGENT_ACCEPTED',
+          changedByUserId: authUser.userId || null,
+          notes: `Pickup accepted by field agent ${agent.user.name} (${agent.vehicleNumber}).`,
+        },
+      });
+
+      await tx.agent.update({
+        where: { id: agentId },
+        data: { status: 'ASSIGNED' },
+      });
+
+      if (order.financialDirection !== 'CUSTOMER_PAYS' || order.paymentStatus === 'CAPTURED') {
+        notificationCreated = await persistAgentBookingNotificationOnce(tx, {
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          agentId,
+          agentUserId: agent.userId,
+          status: 'AGENT_ACCEPTED',
+        });
+      }
+
+      const updatedOrder = await tx.order.findUnique({
+        where: { id: order.id },
+        include: {
+          agent: { include: { user: true } },
+          customer: { include: { user: true } },
+          address: true,
+          items: { include: { category: true } },
+        },
+      });
+
+      return { changed: true as const, alreadyAssignedToAgent: true, order: updatedOrder };
     });
 
-    if (updateResult.count === 0) {
-      // Another concurrent request updated the order first. Re-verify state.
-      const recheckOrder = await db.order.findUnique({ where: { id: order.id } });
-      if (recheckOrder?.agentId === agentId) {
+    if (!assignment.changed) {
+      if (assignment.alreadyAssignedToAgent) {
         return successResponse({
           orderId: order.id,
           orderNumber: order.orderNumber,
-          agentId: agentId,
-          status: recheckOrder.status,
+          agentId,
+          status: assignment.order?.status,
         });
       }
       return errorResponse(
@@ -134,41 +183,22 @@ export async function POST(
       );
     }
 
-    // 7. Post-Acceptance Updates & Realtime Event Broadcasting
-    const oldStatus = order.status;
+    // 7. Post-Acceptance Realtime Event Broadcasting
     const newStatus = 'AGENT_ACCEPTED';
-
-    // Record Order Status History
-    await db.orderStatusHistory.create({
-      data: {
-        orderId: order.id,
-        oldStatus,
-        newStatus,
-        changedByUserId: authUser.userId || null,
-        notes: `Pickup accepted by field agent ${agent.user.name} (${agent.vehicleNumber}).`,
-      },
-    });
-
-    // Update Agent status to ASSIGNED
-    await db.agent.update({
-      where: { id: agentId },
-      data: { status: 'ASSIGNED' },
-    });
-
-    // Fetch updated order for broadcasting
-    const updatedOrder = await db.order.findUnique({
-      where: { id: order.id },
-      include: {
-        agent: { include: { user: true } },
-        customer: { include: { user: true } },
-        address: true,
-        items: { include: { category: true } },
-      },
-    });
+    const updatedOrder = assignment.order;
 
     if (updatedOrder) {
       broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
       broadcaster.broadcast('ORDER_ACCEPTED', { orderId: order.id, agentId });
+      if (notificationCreated) {
+        broadcastAgentBookingNotification({
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          agentId,
+          agentUserId: agent.userId,
+          status: newStatus,
+        }, notificationCreated, (event, payload) => broadcaster.broadcast(event, payload));
+      }
 
       // Phase 4: Dispatch AGENT_ASSIGNED event for authenticated Customer SSE stream
       try {

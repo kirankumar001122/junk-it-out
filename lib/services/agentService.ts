@@ -78,6 +78,11 @@ export async function findEligibleAgentsForServiceArea(serviceAreaName?: string)
         currentLng: true,
         rating: true,
         serviceAreas: true,
+        locations: {
+          orderBy: { timestamp: 'desc' },
+          take: 1,
+          select: { lat: true, lng: true, timestamp: true },
+        },
         user: {
           select: {
             id: true,
@@ -92,21 +97,78 @@ export async function findEligibleAgentsForServiceArea(serviceAreaName?: string)
       return availableAgents;
     }
 
-    const normalizedAreaName = serviceAreaName.toLowerCase();
-
-    // Filter agents whose serviceAreas string covers the requested area
-    const eligibleAgents = availableAgents.filter((agent) => {
-      if (!agent.serviceAreas || agent.serviceAreas.trim() === '') {
-        return true; // Agent covers all zones if unspecified
-      }
-      const agentAreas = agent.serviceAreas.toLowerCase().split(',').map((a) => a.trim());
-      return agentAreas.some((area) => normalizedAreaName.includes(area) || area.includes(normalizedAreaName));
-    });
-
-    return eligibleAgents.length > 0 ? eligibleAgents : availableAgents;
+    return filterAvailableEligibleAgents(availableAgents, serviceAreaName);
   } catch (err) {
     console.error('Failed to query eligible agents for service area:', err);
     return [];
   }
+}
+
+export function isAgentEligibleForServiceArea(
+  serviceAreas: string | null | undefined,
+  serviceAreaName?: string,
+) {
+  if (!serviceAreaName || !serviceAreas || serviceAreas.trim() === '' || serviceAreas.trim().toLowerCase() === 'all') return true;
+
+  const normalizedAreaName = serviceAreaName.toLowerCase();
+  const agentAreas = serviceAreas.toLowerCase().split(',').map((area) => area.trim()).filter(Boolean);
+  return agentAreas.some((area) =>
+    normalizedAreaName.includes(area) || area.includes(normalizedAreaName),
+  );
+}
+
+export function filterAvailableEligibleAgents<
+  T extends { status: string; serviceAreas?: string | null },
+>(agents: T[], serviceAreaName?: string) {
+  return agents.filter((agent) =>
+    agent.status === 'AVAILABLE' &&
+    isAgentEligibleForServiceArea(agent.serviceAreas, serviceAreaName),
+  );
+}
+
+export const MAX_AGENT_LOCATION_AGE_MS = 15 * 60_000;
+
+export function haversineDistanceMeters(
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+) {
+  const radians = (degrees: number) => degrees * Math.PI / 180;
+  const latDelta = radians(to.lat - from.lat);
+  const lngDelta = radians(to.lng - from.lng);
+  const a = Math.min(1, Math.sin(latDelta / 2) ** 2 +
+    Math.cos(radians(from.lat)) * Math.cos(radians(to.lat)) * Math.sin(lngDelta / 2) ** 2);
+  return 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function validCoordinates(lat: unknown, lng: unknown): lat is number {
+  return typeof lat === 'number' && Number.isFinite(lat) && lat >= -90 && lat <= 90 &&
+    typeof lng === 'number' && Number.isFinite(lng) && lng >= -180 && lng <= 180;
+}
+
+export function selectNearestEligibleAgent<
+  T extends {
+    id: string;
+    status: string;
+    serviceAreas?: string | null;
+    locations?: Array<{ lat: number; lng: number; timestamp: Date | string }>;
+  },
+>(
+  agents: T[],
+  pickup: { lat: number; lng: number } | null | undefined,
+  serviceAreaName?: string,
+  now = Date.now(),
+) {
+  if (!pickup || !validCoordinates(pickup.lat, pickup.lng)) return null;
+
+  return agents
+    .filter((agent) => agent.status === 'AVAILABLE' && isAgentEligibleForServiceArea(agent.serviceAreas, serviceAreaName))
+    .flatMap((agent) => {
+      const location = agent.locations?.[0];
+      if (!location || !validCoordinates(location.lat, location.lng)) return [];
+      const timestamp = location.timestamp instanceof Date ? location.timestamp.getTime() : new Date(location.timestamp).getTime();
+      if (!Number.isFinite(timestamp) || timestamp > now || now - timestamp > MAX_AGENT_LOCATION_AGE_MS) return [];
+      return [{ agent, distance: haversineDistanceMeters(pickup, location) }];
+    })
+    .sort((a, b) => a.distance - b.distance || (a.agent.id < b.agent.id ? -1 : a.agent.id > b.agent.id ? 1 : 0))[0]?.agent ?? null;
 }
 

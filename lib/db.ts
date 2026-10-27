@@ -41,8 +41,11 @@ export const db =
   createPrismaClient();
 
 if (!globalForPrisma.observabilityAttached) {
-  db.$use((_params, next) =>
-    withDatabaseErrorLogging(() => next(_params)),
+  db.$use((params, next) =>
+    withDatabaseErrorLogging(() => next(params), {
+      databaseModel: params.model,
+      databaseAction: params.action,
+    }),
   );
   globalForPrisma.observabilityAttached = true;
 }

@@ -9,6 +9,10 @@ export interface StructuredLogFields {
   durationMs?: number;
   dependency?: LogDependency;
   errorType?: string;
+  prismaCode?: string;
+  databaseCode?: string;
+  databaseModel?: string;
+  databaseAction?: string;
   providerStatusCode?: number;
 }
 
@@ -66,6 +70,28 @@ export function getSafeErrorType(error: unknown): string {
   }
 }
 
+export function getSafePrismaCode(error: unknown): string | undefined {
+  try {
+    if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
+    const code = error.code;
+    return typeof code === 'string' && /^P\d{4}$/.test(code) ? code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function getSafeDatabaseCode(error: unknown): string | undefined {
+  try {
+    if (typeof error !== 'object' || error === null || !('meta' in error)) return undefined;
+    const meta = error.meta;
+    if (typeof meta !== 'object' || meta === null || !('code' in meta)) return undefined;
+    const code = meta.code;
+    return typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code) ? code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function sanitizeErrorType(errorType: string): string {
   return SAFE_ERROR_TYPES.has(errorType) ? errorType : 'UnknownError';
 }
@@ -77,16 +103,29 @@ export function getSafeErrorDependency(error: unknown): LogDependency | undefine
   return undefined;
 }
 
-export async function withDatabaseErrorLogging<T>(operation: () => Promise<T>): Promise<T> {
+export async function withDatabaseErrorLogging<T>(
+  operation: () => Promise<T>,
+  context: { databaseModel?: unknown; databaseAction?: unknown } = {},
+): Promise<T> {
   try {
     return await operation();
   } catch (error) {
     logStructured('error', 'database.operation.failed', {
       dependency: 'database',
       errorType: getSafeErrorType(error),
+      prismaCode: getSafePrismaCode(error),
+      databaseCode: getSafeDatabaseCode(error),
+      databaseModel: sanitizeDatabaseIdentifier(context.databaseModel),
+      databaseAction: sanitizeDatabaseIdentifier(context.databaseAction),
     });
     throw error;
   }
+}
+
+function sanitizeDatabaseIdentifier(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[A-Za-z$][A-Za-z0-9_$]{0,63}$/.test(value)
+    ? value
+    : undefined;
 }
 
 export function logStructured(
@@ -113,6 +152,18 @@ export function logStructured(
         : {}),
       ...(fields.dependency ? { dependency: fields.dependency } : {}),
       ...(fields.errorType ? { errorType: sanitizeErrorType(fields.errorType) } : {}),
+      ...(fields.prismaCode && /^P\d{4}$/.test(fields.prismaCode)
+        ? { prismaCode: fields.prismaCode }
+        : {}),
+      ...(fields.databaseCode && /^[0-9A-Z]{5}$/.test(fields.databaseCode)
+        ? { databaseCode: fields.databaseCode }
+        : {}),
+      ...(fields.databaseModel && /^[A-Za-z$][A-Za-z0-9_$]{0,63}$/.test(fields.databaseModel)
+        ? { databaseModel: fields.databaseModel }
+        : {}),
+      ...(fields.databaseAction && /^[A-Za-z$][A-Za-z0-9_$]{0,63}$/.test(fields.databaseAction)
+        ? { databaseAction: fields.databaseAction }
+        : {}),
       ...(Number.isInteger(fields.providerStatusCode)
         ? { providerStatusCode: fields.providerStatusCode }
         : {}),

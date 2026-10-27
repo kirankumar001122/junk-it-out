@@ -68,6 +68,7 @@ export default function AgentDashboardPage() {
   const statusRequestRef = useRef(false);
   const weighingRequestRef = useRef(false);
   const loginRequestRef = useRef(false);
+  const seenBookingNotificationIdsRef = useRef(new Set<string>());
 
   const fetchAgentData = async () => {
     if (dataRequestRef.current) return;
@@ -206,6 +207,32 @@ export default function AgentDashboardPage() {
           setNewPickupNotice(payload);
         } catch (err) {
           console.error('[AGENT SSE] Error parsing notification payload:', err);
+        }
+      });
+
+      eventSource.addEventListener('AGENT_BOOKING_ASSIGNED', (e: MessageEvent) => {
+        try {
+          const payload = JSON.parse(e.data);
+          const notificationId = payload?.notificationId;
+          if (typeof notificationId !== 'string' || seenBookingNotificationIdsRef.current.has(notificationId)) return;
+
+          const storageKey = `junkitout:agent-booking-notifications:${agent.id}`;
+          try {
+            const storedIds = JSON.parse(localStorage.getItem(storageKey) || '[]');
+            if (Array.isArray(storedIds) && storedIds.includes(notificationId)) {
+              seenBookingNotificationIdsRef.current.add(notificationId);
+              return;
+            }
+            const recentIds = Array.isArray(storedIds) ? storedIds.filter((id) => typeof id === 'string') : [];
+            localStorage.setItem(storageKey, JSON.stringify([...recentIds, notificationId].slice(-100)));
+          } catch {
+            // The in-memory guard still prevents duplicate display for this page session.
+          }
+
+          seenBookingNotificationIdsRef.current.add(notificationId);
+          setStatusNotice(payload.message || `New booking assigned: Order #${payload.orderNumber || ''}.`);
+        } catch (err) {
+          console.error('[AGENT SSE] Error parsing assignment notification:', err);
         }
       });
 

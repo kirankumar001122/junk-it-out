@@ -28,6 +28,7 @@ export function createSseResponse(options: {
   ) => void | Promise<void>;
   connectedPayload: unknown;
   heartbeatIntervalMs?: number;
+  onConnect?: (send: (name: string, payload: unknown) => void) => void | Promise<void>;
 }) {
   const encoder = new TextEncoder();
   let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
@@ -115,6 +116,14 @@ export function createSseResponse(options: {
       if (closed) {
         if (unsubscribeRequested) detach();
         return;
+      }
+
+      try {
+        Promise.resolve(options.onConnect?.(send)).catch((error) => {
+          console.error('[SSE] Initial event dispatch error:', error);
+        });
+      } catch (error) {
+        console.error('[SSE] Initial event dispatch error:', error);
       }
 
       if (options.heartbeatIntervalMs && options.heartbeatIntervalMs > 0) {
