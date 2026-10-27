@@ -45,7 +45,9 @@ Pure tests can be run individually with the repository's local `tsx` executable.
 - Standalone admin proxy `503` means backend URL configuration is missing or rejected. Check only whether the variable is set and that its target is local; do not print the value alongside other env vars.
 - Admin API `401` means the request lacks a valid session; `403` means the session lacks the required role. Do not weaken server checks to resolve either response.
 - Dashboard metrics are API/database-derived. Compare authenticated API status and response shape before assuming data is missing. Existing fixture data should not be recreated.
-- There is no dedicated health/readiness endpoint in the inspected route inventory. A protected stats endpoint is not a substitute for an unauthenticated readiness check.
+- `GET /api/health` is the unauthenticated readiness check. It returns `200` only when the API can execute a database probe and `503` otherwise; it never includes connection details. Use `Cache-Control: no-store` and the returned `X-Request-Id` when correlating an incident.
+- Run the API regression suite with `npm.cmd run test:regression`. It uses a loopback-only synthetic Prisma URL and stubs database/provider calls; it does not provision fixtures or contact external services.
+- For a TypeScript/build validation, run `node .\node_modules\typescript\bin\tsc --noEmit --incremental false -p .\tsconfig.json` followed by `npm.cmd run build`. Treat repeated database timeout or pool exhaustion as a performance incident and inspect route query counts before increasing connection limits.
 - Error logs are generally designed to emit error types rather than raw exceptions, but some legacy routes log full error objects. Redact sensitive context before sharing logs.
 
 ## Incident and external-service handling

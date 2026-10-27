@@ -77,17 +77,33 @@ export async function GET(req: NextRequest) {
 
   // For order-specific streams the owner check was completed above and the
   // stream only accepts that exact ID. The global customer stream resolves
-  // every event's order against the authenticated user before forwarding it.
-  const isOwnedOrder = (orderId: string) => {
-    if (isAdmin) return Promise.resolve(true);
+  // We use an in-memory connection-level cache to prevent repeated database queries for the same order ID.
+  const isSyncOwnedOrder = (orderId: string): boolean => {
+    if (isAdmin) return true;
+    return orderId === trackedOrder.trackedOrderId;
+  };
+
+  const orderOwnershipCache = new Map<string, boolean>();
+  const isOwnedOrder = async (orderId: string): Promise<boolean> => {
+    if (isAdmin) return true;
     if (trackedOrder.trackedOrderId) {
       return orderId === trackedOrder.trackedOrderId;
     }
 
-    return db.order.findFirst({
+    if (orderOwnershipCache.has(orderId)) {
+      return orderOwnershipCache.get(orderId)!;
+    }
+
+    const isOwned = await db.order.findFirst({
       where: { id: orderId, customer: { userId } },
       select: { id: true },
     }).then(Boolean);
+
+    if (orderOwnershipCache.size >= 100) {
+      orderOwnershipCache.clear();
+    }
+    orderOwnershipCache.set(orderId, isOwned);
+    return isOwned;
   };
 
   // The global stream authorizes each event against the database. Bound the
@@ -119,7 +135,7 @@ export async function GET(req: NextRequest) {
       if (trackedOrder.trackedOrderId) {
         // This order's ownership was verified before subscribing, and its
         // synchronous check preserves event order for tracking state updates.
-        if (shouldForwardCustomerEvent(event, trackedOrder, isOwnedOrder) as boolean) {
+        if (shouldForwardCustomerEvent(event, trackedOrder, isSyncOwnedOrder)) {
           send(event.event, event.payload);
         }
         return;

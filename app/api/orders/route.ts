@@ -129,23 +129,38 @@ export async function GET(req: NextRequest) {
     if (
       authUser.role === 'CUSTOMER'
     ) {
+      const customerIdentityConditions = [
+        ...(authUser.customerId ? [{ customerId: authUser.customerId }] : []),
+        ...(authUser.userId ? [{ customer: { userId: authUser.userId } }] : []),
+      ];
+
       whereClause = {
-        customerId:
-          authUser.customerId ||
-          'unmatched',
+        ...(customerIdentityConditions.length > 0
+          ? { OR: customerIdentityConditions }
+          : { customerId: 'unmatched' }),
 
-        OR: [
+        AND: [
           {
-            financialDirection: {
-              not: 'CUSTOMER_PAYS',
-            },
-          },
-          {
-            financialDirection:
-              'CUSTOMER_PAYS',
-
-            paymentStatus:
-              'CAPTURED',
+            OR: [
+              {
+                financialDirection: {
+                  not: 'CUSTOMER_PAYS',
+                },
+              },
+              {
+                financialDirection: 'CUSTOMER_PAYS',
+                OR: [
+                  {
+                    paymentStatus: {
+                      in: ['CAPTURED', 'REFUND_PENDING', 'REFUNDED'],
+                    },
+                  },
+                  {
+                    status: 'CANCELLED',
+                  },
+                ],
+              },
+            ],
           },
         ],
       };

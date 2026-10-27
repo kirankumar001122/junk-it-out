@@ -807,6 +807,7 @@ export default function OrderTrackingPage() {
       const res = await fetch(`/api/orders/${order.id}/cancel`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ cancellationReason: finalReason }),
       });
 
@@ -818,7 +819,10 @@ export default function OrderTrackingPage() {
         await fetchOrderDetails();
       } else {
         setCancelError(
-          data.message || "Failed to cancel order. Please verify order status and try again."
+          getApiErrorMessage(
+            data,
+            "Failed to cancel order. Please verify order status and try again."
+          )
         );
       }
     } catch {
