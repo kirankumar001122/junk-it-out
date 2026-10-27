@@ -297,6 +297,7 @@ export async function refundRazorpayPayment(
     }
     body.amount = amountInPaise;
   }
+  if (notes) body.notes = notes;
   if (
     process.env.NODE_ENV !== 'production' &&
     (paymentId.startsWith('pay_test_') ||

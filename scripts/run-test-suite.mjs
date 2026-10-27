@@ -40,7 +40,11 @@ const standaloneTests = [
   'tests/refund-workflow.test.ts',
   'tests/sse.test.ts',
   'tests/tracking-location.test.ts',
+  'tests/order-tracking-access.test.ts',
+  'tests/order-idempotency.test.ts',
+  'tests/booking-payload-idempotency.test.ts',
 ];
+const standaloneOnly = process.argv.includes('--standalone-only');
 
 function run(label, cli, args, nodeOptions = []) {
   console.log('\n=== ' + label + ' ===');
@@ -73,8 +77,10 @@ function run(label, cli, args, nodeOptions = []) {
   return true;
 }
 
-for (const [stage, files] of vitestStages) {
-  if (!run(stage, vitestCli, ['run', ...files])) process.exit(process.exitCode || 1);
+if (!standaloneOnly) {
+  for (const [stage, files] of vitestStages) {
+    if (!run(stage, vitestCli, ['run', ...files])) process.exit(process.exitCode || 1);
+  }
 }
 
 for (const file of standaloneTests) {
