@@ -11,6 +11,7 @@ interface MapMarker {
   type?: 'AGENT' | 'PICKUP' | 'ZONE';
   status?: string;
   vehicleNumber?: string;
+  orderId?: string;
 }
 
 interface MapProps {
@@ -208,13 +209,69 @@ export default function InteractiveMap({
       );
     }
 
+    const infoWindow = new maps.InfoWindow();
+    overlays.push(infoWindow);
+
     markers.forEach((item) => {
+      const isAgent = item.type === 'AGENT';
+
+      const agentSvg = encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="38" height="38" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="11" fill="#059669" stroke="#ffffff" stroke-width="2"/>
+          <path d="M14 14V8a1 1 0 0 0-1-1H6a1 1 0 0 0-1 1v6" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round"/>
+          <path d="M14 10h3l2 2v2h-5" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round"/>
+          <circle cx="8" cy="15" r="1.5" fill="#ffffff"/>
+          <circle cx="16" cy="15" r="1.5" fill="#ffffff"/>
+        </svg>
+      `);
+
+      const pickupSvg = encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="11" fill="#2563eb" stroke="#ffffff" stroke-width="2"/>
+          <path d="M7 8h10l1 7H6z" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M10 8V6a2 2 0 0 1 4 0v2" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      `);
+
       const marker = new maps.Marker({
         position: { lat: item.lat, lng: item.lng },
         map,
         title: item.title,
-        draggable: item.type === 'PICKUP',
+        draggable: item.type === 'PICKUP' && Boolean(onLocationSelect),
+        icon: {
+          url: `data:image/svg+xml;charset=UTF-8,${isAgent ? agentSvg : pickupSvg}`,
+          scaledSize: new maps.Size(isAgent ? 34 : 30, isAgent ? 34 : 30),
+          anchor: new maps.Point(isAgent ? 17 : 15, isAgent ? 17 : 15),
+        },
       });
+
+      const popupContent = `
+        <div style="font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 4px 6px; min-width: 190px; max-width: 260px; color: #0f172a;">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
+            <span style="font-size: 10px; font-weight: 800; text-transform: uppercase; padding: 2px 8px; border-radius: 9999px; background: ${isAgent ? '#d1fae5' : '#dbeafe'}; color: ${isAgent ? '#065f46' : '#1e40af'};">
+              ${isAgent ? 'Field Agent' : 'Pickup Order'}
+            </span>
+            ${item.status ? `<span style="font-size: 10px; font-weight: 800; color: #475569; background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">${item.status}</span>` : ''}
+          </div>
+          <div style="font-size: 13px; font-weight: 800; color: #0f172a; line-height: 1.3; margin-bottom: 3px;">
+            ${item.title}
+          </div>
+          ${item.subtitle ? `<div style="font-size: 11px; color: #64748b; line-height: 1.35; margin-bottom: 4px;">${item.subtitle}</div>` : ''}
+          ${item.orderId ? `
+            <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #e2e8f0;">
+              <a href="/admin/orders/${item.orderId}" style="font-size: 11px; font-weight: 700; color: #059669; text-decoration: none;">
+                Open Order Details &rarr;
+              </a>
+            </div>
+          ` : ''}
+        </div>
+      `;
+
+      marker.addListener('click', () => {
+        infoWindow.setContent(popupContent);
+        infoWindow.open(map, marker);
+      });
+
       marker.addListener('dragend', (event: any) =>
         onLocationSelect?.(event.latLng.lat(), event.latLng.lng())
       );

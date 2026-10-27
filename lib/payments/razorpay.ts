@@ -289,7 +289,23 @@ export async function refundRazorpayPayment(
     }
     body.amount = amountInPaise;
   }
-  if (notes) body.notes = notes;
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    (paymentId.startsWith('pay_test_') ||
+      process.env.RAZORPAY_KEY_SECRET === 'YOUR_RAZORPAY_SECRET' ||
+      process.env.RAZORPAY_SECRET === 'YOUR_RAZORPAY_SECRET' ||
+      process.env.RAZORPAY_SECRET === 'your_test_secret')
+  ) {
+    console.log('[DEV_MOCK_RAZORPAY_REFUND_SUCCESS]', { paymentId, amountInPaise });
+    return {
+      id: `rfnd_test_${Date.now()}`,
+      entity: 'refund',
+      amount: amountInPaise || 0,
+      currency: 'INR',
+      payment_id: paymentId,
+      status: 'processed',
+    };
+  }
 
   try {
     const data = await razorpayRequest(

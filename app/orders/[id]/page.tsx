@@ -151,15 +151,15 @@ export default function OrderTrackingPage() {
           if (snapshot) {
             setAgentLocation((previous) =>
               previous?.orderId === snapshot.orderId &&
-              previous.agentId === snapshot.agentId &&
-              previous.updatedAt > snapshot.updatedAt
+                previous.agentId === snapshot.agentId &&
+                previous.updatedAt > snapshot.updatedAt
                 ? previous
                 : snapshot,
             );
           } else {
             setAgentLocation((previous) =>
               previous?.orderId === String(o.id) &&
-              previous.agentId === String(assignedAgentId)
+                previous.agentId === String(assignedAgentId)
                 ? previous
                 : null,
             );
@@ -218,7 +218,7 @@ export default function OrderTrackingPage() {
       order.financialDirection === "CUSTOMER_PAYS" &&
       order.paymentStatus !== "CAPTURED"
     ) {
-      loadRazorpayScript().catch(() => {});
+      loadRazorpayScript().catch(() => { });
     }
   }, [order]);
 
@@ -876,9 +876,22 @@ export default function OrderTrackingPage() {
                 : "20-30 Mins"}
           </span>
 
+          {!["CANCELLED", "PICKUP_COMPLETED", "SETTLEMENT_COMPLETED"].includes(order.status) && (
+            <button
+              onClick={() => {
+                setShowCancelModal(true);
+                setCancelError(null);
+              }}
+              className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-bold text-xs rounded-xl transition-colors"
+            >
+              Cancel Order
+            </button>
+          )}
+
           <button
             onClick={() => fetchOrderDetails()}
             className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300"
+            title="Refresh order details"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
@@ -925,13 +938,12 @@ export default function OrderTrackingPage() {
             return (
               <div
                 key={st.key}
-                className={`p-2 rounded-xl border text-[11px] font-bold transition-all duration-500 ${
-                  isCurrent
+                className={`p-2 rounded-xl border text-[11px] font-bold transition-all duration-500 ${isCurrent
                     ? "bg-emerald-600 text-white border-emerald-600 shadow-md scale-105 pulse-emerald-glow"
                     : isDone
                       ? "bg-emerald-50 text-emerald-800 border-emerald-200"
                       : "bg-slate-50 text-slate-400 border-slate-200"
-                }`}
+                  }`}
               >
                 <span className="block text-[10px] opacity-75">
                   Step {idx + 1}
@@ -1095,32 +1107,32 @@ export default function OrderTrackingPage() {
 
                 ...(agentLocation
                   ? [
-                      {
-                        id: "agent",
-                        lat: agentLocation.lat,
-                        lng: agentLocation.lng,
-                        title: order.agent
-                          ? order.agent.user.name
-                          : "Pickup Agent",
-                        vehicleNumber: order.agent?.vehicleNumber,
-                        type: "AGENT" as const,
-                        status: order.agent?.status,
-                      },
-                    ]
+                    {
+                      id: "agent",
+                      lat: agentLocation.lat,
+                      lng: agentLocation.lng,
+                      title: order.agent
+                        ? order.agent.user.name
+                        : "Pickup Agent",
+                      vehicleNumber: order.agent?.vehicleNumber,
+                      type: "AGENT" as const,
+                      status: order.agent?.status,
+                    },
+                  ]
                   : []),
               ]}
               routePoints={
                 agentLocation
                   ? [
-                      {
-                        lat: agentLocation.lat,
-                        lng: agentLocation.lng,
-                      },
-                      {
-                        lat: pickupLat,
-                        lng: pickupLng,
-                      },
-                    ]
+                    {
+                      lat: agentLocation.lat,
+                      lng: agentLocation.lng,
+                    },
+                    {
+                      lat: pickupLat,
+                      lng: pickupLng,
+                    },
+                  ]
                   : []
               }
               className="h-72 w-full rounded-2xl border border-slate-200 overflow-hidden shadow-inner"
@@ -1553,6 +1565,70 @@ export default function OrderTrackingPage() {
                 ) : (
                   "Confirm Cancellation"
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CANCEL ORDER MODAL */}
+      {showCancelModal && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center font-bold text-base">
+                ✕
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">Cancel Pickup Order?</h3>
+                <p className="text-xs text-slate-500">Order #{order.orderNumber}</p>
+              </div>
+            </div>
+
+            {cancelError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs font-bold text-rose-700">
+                {cancelError}
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700">Reason for Cancellation</label>
+              <select
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-900"
+              >
+                <option value="Customer rescheduled">Customer rescheduled</option>
+                <option value="Booked by mistake">Booked by mistake</option>
+                <option value="Changed mind / No longer needed">Changed mind / No longer needed</option>
+                <option value="Agent delayed">Agent delayed</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-900 space-y-1">
+              <p className="font-bold">Notice:</p>
+              <p className="text-[11px] text-amber-800">
+                If an agent was assigned, their status will be restored to Available so they can accept new pickups.
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                disabled={cancelling}
+                onClick={() => setShowCancelModal(false)}
+                className="w-1/2 bg-slate-100 text-slate-700 font-bold text-xs py-3 rounded-xl hover:bg-slate-200"
+              >
+                Keep Order
+              </button>
+              <button
+                type="button"
+                disabled={cancelling}
+                onClick={handleCancelOrder}
+                className="w-1/2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs py-3 rounded-xl shadow-md flex items-center justify-center gap-2"
+              >
+                {cancelling ? "Cancelling..." : "Confirm Cancellation"}
               </button>
             </div>
           </div>
