@@ -4,6 +4,56 @@ import { getAuthUser } from '@/lib/auth/middleware';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 
+const SAFE_HYDRATED_ORDER_INCLUDE = {
+  agent: {
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+        },
+      },
+    },
+  },
+  customer: {
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+        },
+      },
+    },
+  },
+  address: true,
+  items: {
+    include: {
+      category: true,
+    },
+  },
+};
+
+function formatOrderResponse(
+  orderData: any,
+  fallback: { id: string; orderNumber: string; agentId?: string | null; status: string }
+) {
+  if (!orderData) {
+    return {
+      id: fallback.id,
+      orderId: fallback.id,
+      orderNumber: fallback.orderNumber,
+      agentId: fallback.agentId,
+      status: fallback.status,
+    };
+  }
+  return {
+    ...orderData,
+    orderId: orderData.id ?? fallback.id,
+  };
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -60,12 +110,18 @@ export async function POST(
       !['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'].includes(order.status)
     ) {
       // Idempotent retry: Order is already accepted or beyond by this exact agent
-      return successResponse({
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        agentId: order.agentId,
-        status: order.status,
+      const hydratedOrder = await db.order.findUnique({
+        where: { id: order.id },
+        include: SAFE_HYDRATED_ORDER_INCLUDE,
       });
+      return successResponse(
+        formatOrderResponse(hydratedOrder, {
+          id: order.id,
+          orderNumber: order.orderNumber,
+          agentId: order.agentId,
+          status: order.status,
+        })
+      );
     }
 
     if (order.agentId !== null && order.agentId !== agentId) {
@@ -118,14 +174,19 @@ export async function POST(
 
     if (updateResult.count === 0) {
       // Another concurrent request updated the order first. Re-verify state.
-      const recheckOrder = await db.order.findUnique({ where: { id: order.id } });
+      const recheckOrder = await db.order.findUnique({
+        where: { id: order.id },
+        include: SAFE_HYDRATED_ORDER_INCLUDE,
+      });
       if (recheckOrder?.agentId === agentId) {
-        return successResponse({
-          orderId: order.id,
-          orderNumber: order.orderNumber,
-          agentId: agentId,
-          status: recheckOrder.status,
-        });
+        return successResponse(
+          formatOrderResponse(recheckOrder, {
+            id: order.id,
+            orderNumber: order.orderNumber,
+            agentId: agentId,
+            status: recheckOrder.status,
+          })
+        );
       }
       return errorResponse(
         'CONFLICT',
@@ -158,12 +219,7 @@ export async function POST(
     // Fetch updated order for broadcasting
     const updatedOrder = await db.order.findUnique({
       where: { id: order.id },
-      include: {
-        agent: { include: { user: true } },
-        customer: { include: { user: true } },
-        address: true,
-        items: { include: { category: true } },
-      },
+      include: SAFE_HYDRATED_ORDER_INCLUDE,
     });
 
     if (updatedOrder) {
@@ -191,12 +247,14 @@ export async function POST(
       }
     }
 
-    return successResponse(updatedOrder || {
-      orderId: order.id,
-      orderNumber: order.orderNumber,
-      agentId: agentId,
-      status: newStatus,
-    });
+    return successResponse(
+      formatOrderResponse(updatedOrder, {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        agentId: agentId,
+        status: newStatus,
+      })
+    );
   } catch (err: any) {
     console.error('Accept order error:', err);
     return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to accept pickup order.', 500);

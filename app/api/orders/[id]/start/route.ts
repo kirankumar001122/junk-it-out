@@ -7,6 +7,56 @@ import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { sendDispatchUpdate } from '@/lib/services/whatsappService';
 
+const SAFE_HYDRATED_ORDER_INCLUDE = {
+  agent: {
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+        },
+      },
+    },
+  },
+  customer: {
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+        },
+      },
+    },
+  },
+  address: true,
+  items: {
+    include: {
+      category: true,
+    },
+  },
+};
+
+function formatOrderResponse(
+  orderData: any,
+  fallback: { id: string; orderNumber: string; agentId?: string | null; status: string }
+) {
+  if (!orderData) {
+    return {
+      id: fallback.id,
+      orderId: fallback.id,
+      orderNumber: fallback.orderNumber,
+      agentId: fallback.agentId,
+      status: fallback.status,
+    };
+  }
+  return {
+    ...orderData,
+    orderId: orderData.id ?? fallback.id,
+  };
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -20,7 +70,7 @@ export async function POST(
 
     const order = await db.order.findUnique({
       where: { id },
-      include: { agent: { include: { user: true } }, customer: { include: { user: true } } },
+      include: SAFE_HYDRATED_ORDER_INCLUDE,
     });
 
     if (!order) {
@@ -34,44 +84,62 @@ export async function POST(
     const oldStatus = order.status;
     const newStatus = 'AGENT_ON_WAY';
 
+    // Idempotent retry: order is already in AGENT_ON_WAY for this agent
+    if (oldStatus === newStatus) {
+      return successResponse(
+        formatOrderResponse(order, {
+          id: order.id,
+          orderNumber: order.orderNumber,
+          agentId: order.agentId,
+          status: newStatus,
+        })
+      );
+    }
+
     if (!validateStatusTransition(oldStatus, newStatus)) {
       return errorResponse('INVALID_STATUS_TRANSITION', `Cannot transition order status from ${oldStatus} to ${newStatus}.`, 400);
     }
 
-    const updatedOrder = await db.order.update({
-      where: { id },
-      data: {
-        status: newStatus,
-        statusHistory: {
-          create: {
-            oldStatus,
-            newStatus,
-            changedByUserId: authUser?.userId || null,
-            notes: `Agent started journey to customer location.`,
+    const updatedOrder = await db.$transaction(async (tx) => {
+      const updated = await tx.order.update({
+        where: { id },
+        data: {
+          status: newStatus,
+          statusHistory: {
+            create: {
+              oldStatus,
+              newStatus,
+              changedByUserId: authUser?.userId || null,
+              notes: `Agent started journey to customer location.`,
+            },
           },
         },
-      },
-      include: {
-        agent: { include: { user: true } },
-        customer: { include: { user: true } },
-        address: true,
-        items: { include: { category: true } },
-      },
-    });
-
-    if (order.agentId) {
-      await db.agent.update({
-        where: { id: order.agentId },
-        data: { status: 'EN_ROUTE' },
+        include: SAFE_HYDRATED_ORDER_INCLUDE,
       });
-    }
+
+      if (order.agentId) {
+        await tx.agent.update({
+          where: { id: order.agentId },
+          data: { status: 'EN_ROUTE' },
+        });
+      }
+
+      return updated;
+    }, { isolationLevel: 'ReadCommitted', maxWait: 5000, timeout: 5000 });
 
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
     broadcaster.broadcast('AGENT_STARTED', { orderId: id, agentId: order.agentId });
 
-    // Notifications are nonessential to the journey transition and may involve
-    // a slow third-party request. Keep them out of the action response path.
-    after(async () => {
+    const scheduleNotification = (task: () => Promise<void>) => {
+      try {
+        after(task);
+      } catch {
+        // Safe fallback for standalone test runners outside Next.js request scope
+        Promise.resolve().then(task).catch(() => {});
+      }
+    };
+
+    scheduleNotification(async () => {
       try {
         const customerPhone = updatedOrder.customer?.user?.phone;
         const customerName = updatedOrder.customer?.user?.name || 'Valued Customer';
@@ -118,7 +186,14 @@ export async function POST(
       }
     });
 
-    return successResponse(updatedOrder);
+    return successResponse(
+      formatOrderResponse(updatedOrder, {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        agentId: order.agentId,
+        status: newStatus,
+      })
+    );
   } catch (err: any) {
     console.error('Start journey error:', err);
     return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to start journey.', 500);

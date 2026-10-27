@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { NextRequest } from 'next/server';
 import { POST as cancelOrder } from '../app/api/orders/[id]/cancel/route';
+import { GET as getOrders } from '../app/api/orders/route';
 import { db } from '../lib/db';
 import { signToken } from '../lib/auth/jwt';
 
@@ -13,6 +14,7 @@ type MockOrder = {
   status: string;
   paymentStatus: string;
   cancellationReason: string | null;
+  financialDirection?: string;
 };
 
 const initialOrder: MockOrder = {
@@ -24,6 +26,7 @@ const initialOrder: MockOrder = {
   status: 'BOOKING_RECEIVED',
   paymentStatus: 'PENDING',
   cancellationReason: null,
+  financialDirection: 'CUSTOMER_PAYS',
 };
 
 let state = initialOrder;
@@ -41,10 +44,46 @@ function clone<T>(value: T): T {
 
 const orderDelegate = db.order as any;
 const originalFindUnique = orderDelegate.findUnique;
+const originalFindFirst = orderDelegate.findFirst;
+const originalFindMany = orderDelegate.findMany;
 const originalTransaction = (db as any).$transaction;
 
 orderDelegate.findUnique = async ({ where }: { where: { id: string } }) =>
   where.id === state.id ? clone(state) : null;
+
+orderDelegate.findFirst = async ({ where }: any) => {
+  if (where?.id === state.id || where?.orderNumber === state.orderNumber) {
+    return clone(state);
+  }
+  if (where?.OR?.some((c: any) => c.id === state.id || c.orderNumber === state.orderNumber)) {
+    return clone(state);
+  }
+  return null;
+};
+
+orderDelegate.findMany = async ({ where }: any) => {
+  let orders = [clone(state)];
+  if (where?.AND) {
+    for (const condition of where.AND) {
+      if (condition?.OR) {
+        orders = orders.filter((o) =>
+          condition.OR.some((branch: any) => {
+            if (branch.financialDirection?.not && o.financialDirection !== branch.financialDirection.not) return true;
+            if (branch.financialDirection && branch.OR) {
+              return branch.OR.some((sub: any) => {
+                if (sub.paymentStatus?.in && sub.paymentStatus.in.includes(o.paymentStatus)) return true;
+                if (sub.status && o.status === sub.status) return true;
+                return false;
+              });
+            }
+            return false;
+          })
+        );
+      }
+    }
+  }
+  return orders;
+};
 
 (db as any).$transaction = async (callback: (tx: any) => Promise<unknown>) => {
   let release!: () => void;
@@ -226,9 +265,67 @@ async function run() {
     assert.equal(refundAttemptEvents[0].eventType, 'ORDER_CANCELLED');
     assert.equal(refundAttemptEvents[0].status, 'REFUND_PENDING');
 
-    console.log('Order cancellation authorization, state, concurrency, rollback, and paid refund tracking tests passed.');
+    // Regression Test 1: Order cancellation using human-readable orderNumber (e.g. JIO-TEST-1)
+    await reset();
+    const byOrderNumber = await cancelOrder(
+      new NextRequest('http://localhost/api/orders/JIO-TEST-1/cancel', {
+        method: 'POST',
+        headers: {
+          Cookie: `jio_token=${signToken({ userId: 'user-1', customerId: 'customer-1', phone: 'test-only', role: 'CUSTOMER' })}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ cancellationReason: 'Cancelled via pickup order number' }),
+      }),
+      { params: Promise.resolve({ id: 'JIO-TEST-1' }) },
+    );
+    assert.equal(byOrderNumber.status, 200, 'cancelling by human-readable order number must succeed');
+    assert.equal(state.status, 'CANCELLED');
+    assert.equal(state.cancellationReason, 'Cancelled via pickup order number');
+
+    // Regression Test 2: Customer ownership authorized via customer.userId when customerId omitted from session token
+    await reset();
+    const byUserIdOnly = await invoke(
+      new NextRequest('http://localhost/api/orders/order-1/cancel', {
+        method: 'POST',
+        headers: {
+          Cookie: `jio_token=${signToken({ userId: 'user-1', phone: 'test-only', role: 'CUSTOMER' })}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ cancellationReason: 'Cancelled via customer userId ownership' }),
+      }),
+    );
+    assert.equal(byUserIdOnly.status, 200, 'customer owning order via userId can cancel even if customerId not on token');
+    assert.equal(state.status, 'CANCELLED');
+
+    // Regression Test 3: Cancelled orders with REFUND_PENDING are returned in GET /api/orders for dashboard
+    await reset('CANCELLED', 'REFUND_PENDING');
+    state.financialDirection = 'CUSTOMER_PAYS';
+    const customerDashboardReq = new NextRequest('http://localhost/api/orders', {
+      method: 'GET',
+      headers: {
+        Cookie: `jio_token=${signToken({ userId: 'user-1', customerId: 'customer-1', phone: 'test-only', role: 'CUSTOMER' })}`,
+      },
+    });
+    const dashboardRes = await getOrders(customerDashboardReq);
+    const dashboardData = await dashboardRes.json();
+    assert.equal(dashboardRes.status, 200);
+    assert.equal(dashboardData.data.length, 1, 'cancelled order awaiting refund must remain visible in customer dashboard');
+    assert.equal(dashboardData.data[0].id, 'order-1');
+    assert.equal(dashboardData.data[0].status, 'CANCELLED');
+
+    // Regression Test 4: Unpaid active booking is excluded from customer dashboard
+    await reset('BOOKING_RECEIVED', 'PENDING');
+    state.financialDirection = 'CUSTOMER_PAYS';
+    const unpaidDashboardRes = await getOrders(customerDashboardReq);
+    const unpaidData = await unpaidDashboardRes.json();
+    assert.equal(unpaidDashboardRes.status, 200);
+    assert.equal(unpaidData.data.length, 0, 'unpaid pending bookings must not clutter the customer dashboard');
+
+    console.log('Order cancellation authorization, state, concurrency, rollback, order-number lookup, and dashboard pickup retrieval tests passed.');
   } finally {
     orderDelegate.findUnique = originalFindUnique;
+    orderDelegate.findFirst = originalFindFirst;
+    orderDelegate.findMany = originalFindMany;
     (db as any).$transaction = originalTransaction;
     await db.$disconnect();
   }

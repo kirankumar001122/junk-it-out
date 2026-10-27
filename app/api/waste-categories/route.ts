@@ -3,8 +3,24 @@ import { db } from '@/lib/db';
 import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 
+let cachedCategories: any = null;
+let cacheExpiry = 0;
+const CACHE_TTL_MS = 60_000;
+
+export function invalidateCategoriesCache() {
+  cachedCategories = null;
+  cacheExpiry = 0;
+}
+
 export async function GET(req: NextRequest) {
   try {
+    if (cachedCategories && Date.now() < cacheExpiry) {
+      const cachedResponse = successResponse(cachedCategories);
+      cachedResponse.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+      cachedResponse.headers.set('X-Cache', 'HIT');
+      return cachedResponse;
+    }
+
     const categorySelect = {
       id: true,
       name: true,
@@ -48,8 +64,12 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    cachedCategories = categories;
+    cacheExpiry = Date.now() + CACHE_TTL_MS;
+
     const response = successResponse(categories);
     response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+    response.headers.set('X-Cache', 'MISS');
     return response;
   } catch (err: any) {
     return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to fetch waste categories.', 500);
@@ -117,6 +137,7 @@ export async function PUT(req: NextRequest) {
       },
     });
 
+    invalidateCategoriesCache();
     return successResponse(updatedCategory);
   } catch (err: any) {
     console.error('Update waste category error:', err);
@@ -168,6 +189,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    invalidateCategoriesCache();
     return successResponse(createdCategory, 201);
   } catch (err: any) {
     console.error('Create waste category error:', err);
