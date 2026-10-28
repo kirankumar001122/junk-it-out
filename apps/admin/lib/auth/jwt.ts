@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'crypto';
+import { getJwtSecret } from '../../../../lib/auth/jwtSecret';
 
 export interface JwtPayload {
   userId: string;
@@ -12,14 +13,6 @@ export interface JwtPayload {
   exp: number;
 }
 
-function getJwtSecret(): string {
-  const secret = process.env.JWT_SECRET?.trim();
-  if (!secret || Buffer.byteLength(secret, 'utf8') < 32) {
-    throw new Error('JWT_SECRET must be configured with at least 32 bytes.');
-  }
-  return secret;
-}
-
 function base64UrlDecode(str: string): string {
   let base64 = str.replace(/-/g, '+').replace(/_/g, '/');
   while (base64.length % 4) {
@@ -29,6 +22,7 @@ function base64UrlDecode(str: string): string {
 }
 
 export function verifyToken(token: string): JwtPayload | null {
+  const secret = getJwtSecret();
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
@@ -36,7 +30,7 @@ export function verifyToken(token: string): JwtPayload | null {
     const [encodedHeader, encodedPayload, signature] = parts;
     const dataToSign = `${encodedHeader}.${encodedPayload}`;
 
-    const expectedSignature = createHmac('sha256', getJwtSecret())
+    const expectedSignature = createHmac('sha256', secret)
       .update(dataToSign)
       .digest('base64')
       .replace(/=/g, '')

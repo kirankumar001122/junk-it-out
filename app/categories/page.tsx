@@ -24,6 +24,7 @@ import {
   pickupCartEvent,
   PickupCartItem,
 } from '@/lib/pickupCart';
+import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
 
 const categoryImages: Record<string, string> = {
   'E-Waste': '/categories/e-waste.webp',
@@ -31,7 +32,6 @@ const categoryImages: Record<string, string> = {
   'Paper & Cardboard': '/categories/paper-carboard.jpg',
   'Plastic Waste': '/categories/plastic-waste.jpg?v=2',
 };
-const CUSTOMER_CATEGORY_NAMES = new Set(Object.keys(categoryImages));
 
 const icons = [
   FileText,
@@ -54,13 +54,13 @@ export default function CategoriesPage() {
 
     setQuery(initial);
 
-    fetch('/api/waste-categories')
+    fetch('/api/waste-categories?customer=true')
       .then((r) => r.json())
       .then((d) => {
         const data = Array.isArray(d?.data) ? d.data : [];
 
         setCategories(
-          data.filter((category: any) => CUSTOMER_CATEGORY_NAMES.has(category.name?.trim()))
+          data.filter(isCustomerWasteCategory)
         );
       })
       .catch(() => {});
@@ -84,7 +84,7 @@ export default function CategoriesPage() {
     const search = query.trim().toLowerCase();
 
     return categories.filter((category) => {
-      if (!CUSTOMER_CATEGORY_NAMES.has(category.name?.trim())) {
+      if (!isCustomerWasteCategory(category)) {
         return false;
       }
 

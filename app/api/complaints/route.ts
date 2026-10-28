@@ -10,7 +10,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, message: 'Authentication required.' }, { status: 401 });
     }
 
+    const { searchParams } = new URL(req.url);
     let whereClause: any = {};
+    const page = Math.max(1, Number(searchParams.get('page') || 1) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(searchParams.get('pageSize') || 25) || 25));
     if (authUser.role === 'CUSTOMER') {
       whereClause = { customerId: authUser.customerId || 'unmatched' };
     } else if (authUser.role === 'AGENT') {
@@ -20,12 +23,18 @@ export async function GET(req: NextRequest) {
     const complaints = await db.complaint.findMany({
       where: whereClause,
       include: {
-        customer: { include: { user: true } },
+        customer: {
+          include: {
+            user: { select: { id: true, name: true, phone: true, email: true } },
+          },
+        },
         order: true,
       },
       orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
     });
-    return NextResponse.json({ success: true, data: complaints });
+    return NextResponse.json({ success: true, data: complaints, page, pageSize });
   } catch (error: any) {
     return NextResponse.json({ success: false, message: error.message }, { status: 500 });
   }
@@ -76,12 +85,6 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, message: 'You are not authorized to report an issue for this order.' }, { status: 403 });
       }
       targetOrderId = order.id;
-    }
-
-    try {
-      await db.$executeRawUnsafe(`ALTER TABLE "Complaint" ALTER COLUMN "orderId" DROP NOT NULL;`);
-    } catch (_e) {
-      // Schema synchronized
     }
 
     const complaint = await db.complaint.create({

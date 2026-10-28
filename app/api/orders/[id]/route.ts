@@ -59,8 +59,16 @@ export async function GET(
       : await db.order.findFirst({
           where: getOrderIdentifierWhere(id),
           include: {
-            customer: { include: { user: true } },
-            agent: { include: { user: true } },
+            customer: {
+              include: {
+                user: { select: { id: true, name: true, phone: true, email: true } },
+              },
+            },
+            agent: {
+              include: {
+                user: { select: { id: true, name: true, phone: true, email: true } },
+              },
+            },
             address: true,
             items: { include: { category: true } },
             statusHistory: { orderBy: { timestamp: 'desc' } },
@@ -87,14 +95,14 @@ export async function GET(
       }
     } else if (authUser.role === 'AGENT') {
       const isAssignedAgent = Boolean(authUser.agentId && order.agentId === authUser.agentId);
-      if (order.agentId && !isAssignedAgent) {
+      const isUnassignedOpen =
+        order.agentId === null &&
+        (order.status === 'BOOKING_RECEIVED' || order.status === 'AGENT_BEING_ASSIGNED');
+      if (!isAssignedAgent && !isUnassignedOpen) {
         return errorResponse('FORBIDDEN', 'Order is not assigned to your agent profile.', 403);
       }
 
       if (!isAssignedAgent) {
-        if (order.status !== 'BOOKING_RECEIVED' || order.agentId !== null) {
-          return errorResponse('FORBIDDEN', 'Order is not assigned to your agent profile.', 403);
-        }
 
         const agent = authUser.agentId
           ? await db.agent.findUnique({

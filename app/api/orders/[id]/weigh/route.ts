@@ -57,6 +57,7 @@ export async function POST(
       return errorResponse('INVALID_STATUS_TRANSITION', `Cannot record weights from current status (${oldStatus}).`, 400);
     }
 
+    const matchedItemIds = new Set<string>();
     for (const itemInput of actualWeights) {
       const dbItem = order.items.find(
         (i) => (itemInput?.itemId && i.id === itemInput.itemId) || i.categoryId === itemInput?.categoryId || i.id === itemInput?.categoryId
@@ -64,6 +65,10 @@ export async function POST(
       if (!dbItem || typeof itemInput.actualWeight !== 'number' || !Number.isFinite(itemInput.actualWeight) || itemInput.actualWeight <= 0) {
         return errorResponse('INVALID_WEIGH_DATA', 'Each actual weight must be a positive number for a valid order item.', 400);
       }
+      if (matchedItemIds.has(dbItem.id)) {
+        return errorResponse('INVALID_WEIGH_DATA', 'Each order item may only have one actual weight entry.', 400);
+      }
+      matchedItemIds.add(dbItem.id);
     }
 
     const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -72,12 +77,17 @@ export async function POST(
     const updatedOrder = await db.$transaction(async (tx) => {
       let actualTotalRecyclable = 0;
       let actualTotalWasteCharge = 0;
+      const txMatchedItemIds = new Set<string>();
 
       for (const itemInput of actualWeights) {
         const dbItem = order.items.find(
           (i) => (itemInput?.itemId && i.id === itemInput.itemId) || i.categoryId === itemInput.categoryId || i.id === itemInput.categoryId
         );
         if (dbItem) {
+          if (txMatchedItemIds.has(dbItem.id)) {
+            throw new Error('Duplicate weight entry for the same order item.');
+          }
+          txMatchedItemIds.add(dbItem.id);
           const weightKg = itemInput.actualWeight;
           const subtotal = round2(weightKg * dbItem.ratePerKg);
 
@@ -115,31 +125,70 @@ export async function POST(
         },
       });
 
-      // Update Order Status & Financial Totals
-      const updated = await tx.order.update({
-        where: { id },
-        data: {
-          status: newStatus,
-          actualTotal: actualTotalRecyclable,
-          financialDirection,
-          finalAmount,
-          statusHistory: {
-            create: {
+      // Update Order Status & Financial Totals with CAS
+      let updated: any;
+      if (typeof tx.order.updateMany === 'function') {
+        const claimed = await tx.order.updateMany({
+          where: {
+            id,
+            status: oldStatus,
+            agentId: authUser.agentId,
+          },
+          data: {
+            status: newStatus,
+            actualTotal: actualTotalRecyclable,
+            financialDirection,
+            finalAmount,
+          },
+        });
+
+        if (claimed.count !== 1) {
+          return null;
+        }
+
+        if (tx.orderStatusHistory?.create) {
+          await tx.orderStatusHistory.create({
+            data: {
+              orderId: id,
               oldStatus,
               newStatus,
               changedByUserId: authUser?.userId || null,
               notes: `Recorded doorstep digital scale weights. Net amount: ₹${finalAmount.toFixed(2)}`,
             },
+          });
+        }
+
+        updated = tx.order.findUnique
+          ? await tx.order.findUnique({
+              where: { id },
+              include: {
+                agent: { include: { user: true } },
+                customer: { include: { user: true } },
+                address: true,
+                items: { include: { category: true } },
+                weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
+              },
+            })
+          : { id, status: newStatus, actualTotal: actualTotalRecyclable, financialDirection, finalAmount };
+      } else {
+        updated = await tx.order.update({
+          where: { id },
+          data: {
+            status: newStatus,
+            actualTotal: actualTotalRecyclable,
+            financialDirection,
+            finalAmount,
+            statusHistory: {
+              create: {
+                oldStatus,
+                newStatus,
+                changedByUserId: authUser?.userId || null,
+                notes: `Recorded doorstep digital scale weights. Net amount: ₹${finalAmount.toFixed(2)}`,
+              },
+            },
           },
-        },
-        include: {
-          agent: { include: { user: true } },
-          customer: { include: { user: true } },
-          address: true,
-          items: { include: { category: true } },
-          weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
-        },
-      });
+        });
+      }
 
       if (financialDirection === 'JUNKITOUT_PAYS' && finalAmount > 0) {
         await tx.settlement.upsert({
@@ -165,6 +214,23 @@ export async function POST(
       maxWait: 10000,
       timeout: 15000,
     });
+
+    if (!updatedOrder) {
+      const recheck = await db.order.findUnique({
+        where: { id },
+        include: {
+          agent: { include: { user: true } },
+          customer: { include: { user: true } },
+          address: true,
+          items: { include: { category: true } },
+          weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
+        },
+      });
+      if (recheck?.status === newStatus || recheck?.status === 'PICKUP_COMPLETED') {
+        return successResponse(recheck);
+      }
+      return errorResponse('CONFLICT', 'The order state changed or was cancelled before recording weights.', 409);
+    }
 
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
     broadcaster.broadcast('WEIGHING_STARTED', { orderId: id, actualTotal: updatedOrder.actualTotal });

@@ -36,14 +36,20 @@ describe('admin JWT configuration', () => {
     vi.stubEnv('RAZORPAY_SECRET', 'payment-secret-that-must-not-sign-tokens');
     vi.stubEnv('PAYMENT_KEY_SECRET', 'legacy-payment-secret-that-must-not-sign-tokens');
 
-    expect(verifyAdminToken(tokenSignedWith('payment-secret-that-must-not-sign-tokens'))).toBeNull();
-    expect(verifyAdminToken(tokenSignedWith('legacy-payment-secret-that-must-not-sign-tokens'))).toBeNull();
-    expect(
+    expect(() => verifyAdminToken(tokenSignedWith('payment-secret-that-must-not-sign-tokens'))).toThrow(
+      'JWT_SECRET must be configured with at least 32 bytes',
+    );
+    expect(() => verifyAdminToken(tokenSignedWith('legacy-payment-secret-that-must-not-sign-tokens'))).toThrow(
+      'JWT_SECRET must be configured with at least 32 bytes',
+    );
+    expect(() =>
       verifyAdminToken(tokenSignedWith('junkitout_production_jwt_fallback_secret_key_2026')),
-    ).toBeNull();
+    ).toThrow('JWT_SECRET must be configured with at least 32 bytes');
     expect(() => signToken({ userId: 'test-user', phone: 'test-only', role: 'ADMIN' }))
       .toThrow('JWT_SECRET must be configured with at least 32 bytes');
-    expect(verifyRootToken(tokenSignedWith('01234567890123456789012345678901'))).toBeNull();
+    expect(() => verifyRootToken(tokenSignedWith('01234567890123456789012345678901'))).toThrow(
+      'JWT_SECRET must be configured with at least 32 bytes',
+    );
   });
 
   test('both verifiers reject missing, invalid, and expired expiry claims', () => {

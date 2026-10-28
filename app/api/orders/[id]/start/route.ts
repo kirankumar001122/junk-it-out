@@ -1,4 +1,3 @@
-import { after } from 'next/server';
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
@@ -6,6 +5,7 @@ import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { sendDispatchUpdate } from '@/lib/services/whatsappService';
+import { runBackgroundTask } from '@/lib/utils/backgroundTask';
 
 const SAFE_HYDRATED_ORDER_INCLUDE = {
   agent: {
@@ -162,16 +162,9 @@ export async function POST(
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
     broadcaster.broadcast('AGENT_STARTED', { orderId: id, agentId: order.agentId });
 
-    const scheduleNotification = (task: () => Promise<void>) => {
-      try {
-        after(task);
-      } catch {
-        // Safe fallback for standalone test runners outside Next.js request scope
-        Promise.resolve().then(task).catch(() => {});
-      }
-    };
-
-    scheduleNotification(async () => {
+    // Notifications are nonessential to the journey transition and may involve
+    // a slow third-party request. Keep them out of the action response path.
+    runBackgroundTask(async () => {
       try {
         const customerPhone = updatedOrder.customer?.user?.phone;
         const customerName = updatedOrder.customer?.user?.name || 'Valued Customer';

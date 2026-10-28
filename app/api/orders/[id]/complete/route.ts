@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth/middleware';
 import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
+import { runBackgroundTask } from '@/lib/utils/backgroundTask';
 
 export async function POST(
   req: NextRequest,
@@ -230,19 +231,36 @@ export async function POST(
       }
 
       if (!currentOrder.invoices || currentOrder.invoices.length === 0) {
-        orderUpdateData.invoices = {
-          create: {
-            invoiceNumber,
-            totalAmount: finalAmount,
-            pdfDataJson: JSON.stringify({
-              orderNumber: order.orderNumber,
+        if (typeof (tx as any).invoice?.create === 'function') {
+          await (tx as any).invoice.create({
+            data: {
+              orderId: id,
               invoiceNumber,
-              items: invoiceItems,
-              finalAmount: finalAmount,
-              financialDirection: financialDirection,
-            }),
-          },
-        };
+              totalAmount: finalAmount,
+              pdfDataJson: JSON.stringify({
+                orderNumber: order.orderNumber,
+                invoiceNumber,
+                items: invoiceItems,
+                finalAmount: finalAmount,
+                financialDirection: financialDirection,
+              }),
+            },
+          });
+        } else {
+          orderUpdateData.invoices = {
+            create: {
+              invoiceNumber,
+              totalAmount: finalAmount,
+              pdfDataJson: JSON.stringify({
+                orderNumber: order.orderNumber,
+                invoiceNumber,
+                items: invoiceItems,
+                finalAmount: finalAmount,
+                financialDirection: financialDirection,
+              }),
+            },
+          };
+        }
       }
 
       const updated = await tx.order.update({
@@ -307,6 +325,28 @@ export async function POST(
       });
     }
     logTiming('response ready');
+
+    runBackgroundTask(async () => {
+      try {
+        const customerUserId = completedOrder.customer?.userId;
+        const customerPhone = completedOrder.customer?.user?.phone;
+        if (!customerUserId || !customerPhone) return;
+
+        const invNum = completedOrder.invoices?.[0]?.invoiceNumber || invoiceNumber;
+        await db.notification.create({
+          data: {
+            userId: customerUserId,
+            orderId: id,
+            type: 'WHATSAPP',
+            recipient: customerPhone,
+            content: `Pickup #${completedOrder.orderNumber} completed! Invoice ${invNum} generated. Total: ₹${completedOrder.finalAmount.toFixed(2)}. Thank you for recycling with Junk It Out.`,
+            status: 'SENT',
+          },
+        });
+      } catch (notifErr: any) {
+        console.warn('[COMPLETE NOTIFICATION NOTICE] Safe notification error:', notifErr?.message);
+      }
+    });
 
     return successResponse(completedOrder);
   } catch (err: any) {

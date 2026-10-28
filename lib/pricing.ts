@@ -33,11 +33,16 @@ export function calculateOrderValuation(
   basePickupCharge: number = 69.0,
   couponDiscount: number = 0.0
 ): CalculationResult {
-  let totalWasteItemsValue = 0;
+  let totalRecyclableValue = 0;
+  let totalWasteCharge = 0;
 
   const itemResults = itemsInput.map((item) => {
     const subtotal = item.weightKg * item.pricePerKg;
-    totalWasteItemsValue += subtotal;
+    if (item.type === 'WASTE_CHARGE') {
+      totalWasteCharge += subtotal;
+    } else {
+      totalRecyclableValue += subtotal;
+    }
 
     return {
       categoryId: item.categoryId,
@@ -49,15 +54,17 @@ export function calculateOrderValuation(
     };
   });
 
-  const rawPayable = totalWasteItemsValue + basePickupCharge - couponDiscount;
-  const netAmount = Math.max(1, Math.round(rawPayable * 100) / 100);
-  const financialDirection: 'CUSTOMER_PAYS' = 'CUSTOMER_PAYS';
-  const summaryLabel = `Customer pays ₹${netAmount.toFixed(2)}`;
+  const netBalance = totalRecyclableValue - totalWasteCharge - basePickupCharge + couponDiscount;
+  const netAmount = Math.max(0, Math.round(Math.abs(netBalance) * 100) / 100);
+  const financialDirection = netBalance >= 0 ? 'JUNKITOUT_PAYS' : 'CUSTOMER_PAYS';
+  const summaryLabel = financialDirection === 'JUNKITOUT_PAYS'
+    ? `Junk It Out pays ₹${netAmount.toFixed(2)}`
+    : `Customer pays ₹${netAmount.toFixed(2)}`;
 
   return {
     items: itemResults,
-    totalRecyclableValue: Math.round(totalWasteItemsValue * 100) / 100,
-    totalWasteCharge: Math.round(totalWasteItemsValue * 100) / 100,
+    totalRecyclableValue: Math.round(totalRecyclableValue * 100) / 100,
+    totalWasteCharge: Math.round(totalWasteCharge * 100) / 100,
     basePickupCharge,
     discountAmount: couponDiscount,
     netAmount,

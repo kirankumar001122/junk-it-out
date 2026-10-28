@@ -48,6 +48,10 @@ export async function POST(
       return successResponse(order, 200, { message: 'Agent is already assigned to this order.' });
     }
 
+    if (agent.status !== 'AVAILABLE' && order.agentId !== agentId) {
+      return errorResponse('AGENT_NOT_AVAILABLE', 'Agent is currently offline or unavailable for new assignments.', 400);
+    }
+
     const oldStatus = order.status;
     const newStatus = 'AGENT_ASSIGNED';
 
