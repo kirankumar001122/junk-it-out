@@ -18,9 +18,9 @@ export default function AdminHeader() {
   };
 
   return (
-    <header className="bg-slate-900 text-white px-4 sm:px-6 py-3.5 rounded-2xl shadow-md flex items-center justify-between gap-3 sm:gap-4 mb-6 border border-slate-800">
+    <header className="bg-slate-900 text-white px-3.5 sm:px-6 py-3 sm:py-3.5 rounded-2xl shadow-md flex items-center justify-between gap-2 sm:gap-4 mb-6 border border-slate-800">
       {/* Left: Branding/Hub Title & Mobile Menu Toggle */}
-      <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
         <button
           type="button"
           onClick={() => {
@@ -48,10 +48,10 @@ export default function AdminHeader() {
       </div>
 
       {/* Right: Actions (Notifications, Profile, Logout) */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
         <Link
           href="/admin/notifications"
-          className="relative p-2.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-slate-700 shadow-xs"
+          className="relative p-2 sm:p-2.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-slate-700 shadow-xs shrink-0"
           title="System Alerts & Notifications"
         >
           <Bell className="w-4 h-4" />
@@ -59,11 +59,11 @@ export default function AdminHeader() {
         </Link>
 
         {/* Admin Profile */}
-        <div className="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-slate-800/80 border border-slate-700 shadow-xs">
+        <div className="flex items-center gap-2 px-2.5 sm:px-3.5 py-1.5 rounded-full bg-slate-800/80 border border-slate-700 shadow-xs">
           <div className="w-7 h-7 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
             <User className="w-4 h-4" />
           </div>
-          <div className="text-left">
+          <div className="text-left hidden sm:block">
             <span className="block text-xs font-extrabold text-white leading-none">DARSHAN TEJOMAYA M</span>
             <span className="text-[10px] text-emerald-400 font-semibold">Operations Lead</span>
           </div>
@@ -72,7 +72,7 @@ export default function AdminHeader() {
         {/* Logout */}
         <button
           onClick={handleLogout}
-          className="btn-glossy-danger rounded-full px-4 py-2 text-xs font-bold shadow-sm"
+          className="btn-glossy-danger rounded-full px-3 sm:px-4 py-2 text-xs font-bold shadow-sm shrink-0"
           title="Logout Admin Session"
         >
           <LogOut className="w-3.5 h-3.5" />

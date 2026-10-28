@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { SOUTH_BENGALURU_ZONES } from '@/lib/geofence';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
-import { getAuthUser } from '@/lib/auth/middleware';
+import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 
 let cachedZones: any = null;
 let cacheExpiry = 0;
@@ -54,7 +54,11 @@ export async function GET(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
-    if (!authUser || !['ADMIN', 'SUPER_ADMIN'].includes(authUser.role)) {
+    const authorizationStatus = getAdminAuthorizationStatus(authUser);
+    if (authorizationStatus === 401) {
+      return errorResponse('UNAUTHORIZED', 'Authentication is required.', 401);
+    }
+    if (authorizationStatus === 403) {
       return errorResponse('FORBIDDEN', 'Admin access required.', 403);
     }
 
@@ -85,6 +89,16 @@ export async function PUT(req: NextRequest) {
         centerLng: defaultZone?.centerLng || 77.5996,
       },
     });
+
+    await db.auditLog.create({
+      data: {
+        userId: authUser?.userId || null,
+        userName: authUser?.name || 'Admin Operations',
+        action: 'UPDATE_SERVICE_AREA',
+        oldValue: `Area: ${id}, Status: ${existing?.status || 'DEFAULT'}`,
+        newValue: `Area: ${id}, Status: ${status}`,
+      },
+    }).catch(() => null);
 
     invalidateServiceAreasCache();
     return successResponse(updated);

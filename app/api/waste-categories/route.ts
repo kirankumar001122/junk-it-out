@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     const customerOnly = req.nextUrl.searchParams.get('customer') === 'true';
     if (cachedCategories && Date.now() < cacheExpiry) {
       const visibleCategories = customerOnly
-        ? cachedCategories.filter(isCustomerWasteCategory)
+        ? cachedCategories.filter((c: any) => c.active && isCustomerWasteCategory(c))
         : cachedCategories;
       const cachedResponse = successResponse(visibleCategories);
       cachedResponse.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
@@ -38,22 +38,22 @@ export async function GET(req: NextRequest) {
       active: true,
     } as const;
 
+    // Fetch all categories without restricting to active only, so cachedCategories has the full catalog
     let categories = await db.wasteCategory.findMany({
-      where: { active: true },
       orderBy: { name: 'asc' },
       select: categorySelect,
     });
 
     if (categories.length === 0) {
       const defaultCategories = [
-        { name: 'Plastic Waste', description: 'Bottles, containers, polythene, packaging materials, hard plastics', icon: 'Recycle', type: 'RECYCLABLE_BUY', pricePerKg: 18.0 },
-        { name: 'Paper & Cardboard', description: 'Carton boxes, newspapers, magazines, office paper, shredded paper', icon: 'FileText', type: 'RECYCLABLE_BUY', pricePerKg: 14.0 },
-        { name: 'Scrap Metal', description: 'Iron, steel, aluminium cans, copper wire, brass fittings, tin', icon: 'Hammer', type: 'RECYCLABLE_BUY', pricePerKg: 32.0 },
-        { name: 'E-Waste', description: 'Keyboards, chargers, old phones, motherboards, small appliances', icon: 'Monitor', type: 'RECYCLABLE_BUY', pricePerKg: 45.0 },
-        { name: 'Household Dry Waste', description: 'Clean dry packaging, fabric scraps, wooden pieces, rubber items', icon: 'Trash2', type: 'RECYCLABLE_BUY', pricePerKg: 8.0 },
-        { name: 'Glass & Bottles', description: 'Intact glass bottles, glass jars, non-broken glass scrap', icon: 'Wine', type: 'RECYCLABLE_BUY', pricePerKg: 4.0 },
-        { name: 'Old Furniture & Heavy Scrap', description: 'Chairs, tables, beds, metal frames, heavy bulky junk', icon: 'Armchair', type: 'WASTE_CHARGE', pricePerKg: 15.0 },
-        { name: 'Appliances (Fridge/AC/Washing Machine)', description: 'Refrigerators, AC units, washing machines, microwaves', icon: 'Tv', type: 'RECYCLABLE_BUY', pricePerKg: 25.0 },
+        { name: 'Plastic Waste', description: 'Bottles, containers, polythene, packaging materials, hard plastics', icon: 'Recycle', type: 'RECYCLABLE_BUY', pricePerKg: 18.0, active: true },
+        { name: 'Paper & Cardboard', description: 'Carton boxes, newspapers, magazines, office paper, shredded paper', icon: 'FileText', type: 'RECYCLABLE_BUY', pricePerKg: 14.0, active: true },
+        { name: 'Scrap Metal', description: 'Iron, steel, aluminium cans, copper wire, brass fittings, tin', icon: 'Hammer', type: 'RECYCLABLE_BUY', pricePerKg: 32.0, active: true },
+        { name: 'E-Waste', description: 'Keyboards, chargers, old phones, motherboards, small appliances', icon: 'Monitor', type: 'RECYCLABLE_BUY', pricePerKg: 45.0, active: true },
+        { name: 'Household Dry Waste', description: 'Clean dry packaging, fabric scraps, wooden pieces, rubber items', icon: 'Trash2', type: 'RECYCLABLE_BUY', pricePerKg: 8.0, active: true },
+        { name: 'Glass & Bottles', description: 'Intact glass bottles, glass jars, non-broken glass scrap', icon: 'Wine', type: 'RECYCLABLE_BUY', pricePerKg: 4.0, active: true },
+        { name: 'Old Furniture & Heavy Scrap', description: 'Chairs, tables, beds, metal frames, heavy bulky junk', icon: 'Armchair', type: 'WASTE_CHARGE', pricePerKg: 15.0, active: true },
+        { name: 'Appliances (Fridge/AC/Washing Machine)', description: 'Refrigerators, AC units, washing machines, microwaves', icon: 'Tv', type: 'RECYCLABLE_BUY', pricePerKg: 25.0, active: true },
       ];
 
       await Promise.all(defaultCategories.map((cat) => db.wasteCategory.upsert({
@@ -63,7 +63,6 @@ export async function GET(req: NextRequest) {
         })));
 
       categories = await db.wasteCategory.findMany({
-        where: { active: true },
         orderBy: { name: 'asc' },
         select: categorySelect,
       });
@@ -72,13 +71,16 @@ export async function GET(req: NextRequest) {
     cachedCategories = categories;
     cacheExpiry = Date.now() + CACHE_TTL_MS;
 
-    const response = successResponse(
-      customerOnly ? categories.filter(isCustomerWasteCategory) : categories
-    );
+    const visibleCategories = customerOnly
+      ? categories.filter((c: any) => c.active && isCustomerWasteCategory(c))
+      : categories;
+
+    const response = successResponse(visibleCategories);
     response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
     response.headers.set('X-Cache', 'MISS');
     return response;
   } catch (err: any) {
+    console.error('Fetch waste categories error:', err);
     return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to fetch waste categories.', 500);
   }
 }
@@ -133,14 +135,15 @@ export async function PUT(req: NextRequest) {
       },
     });
 
-    // Record Audit Log for rate change
+    // Record Audit Log for rate or activation change
+    const action = active !== undefined ? 'UPDATE_WASTE_CATEGORY_STATUS' : 'UPDATE_WASTE_RATE';
     await db.auditLog.create({
       data: {
         userId: authUser?.userId || null,
-        userName: authUser?.name || 'Admin',
-        action: 'UPDATE_WASTE_RATE',
-        oldValue: `${existing.name}: ₹${existing.pricePerKg}/kg`,
-        newValue: `${updatedCategory.name}: ₹${updatedCategory.pricePerKg}/kg`,
+        userName: authUser?.name || 'Admin Operations',
+        action,
+        oldValue: `${existing.name}: ₹${existing.pricePerKg}/kg (Active: ${existing.active})`,
+        newValue: `${updatedCategory.name}: ₹${updatedCategory.pricePerKg}/kg (Active: ${updatedCategory.active})`,
       },
     });
 
@@ -184,15 +187,17 @@ export async function POST(req: NextRequest) {
         description: description.trim(),
         type: type.trim(),
         pricePerKg: pricePerKg ?? 20.0,
+        active: true,
       },
     });
 
     await db.auditLog.create({
       data: {
         userId: authUser?.userId || null,
-        userName: authUser?.name || 'Admin',
+        userName: authUser?.name || 'Admin Operations',
         action: 'CREATE_WASTE_CATEGORY',
-        newValue: `${createdCategory.name}: ₹${createdCategory.pricePerKg}/kg`,
+        oldValue: null,
+        newValue: `${createdCategory.name}: ₹${createdCategory.pricePerKg}/kg (Active: true)`,
       },
     });
 

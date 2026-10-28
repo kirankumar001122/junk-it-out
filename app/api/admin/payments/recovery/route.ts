@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthUser, isAdminRole } from '@/lib/auth/middleware';
 import { reconcileUndispatchedPaidOrders } from '@/lib/payments/dispatchRecovery';
+import { db } from '@/lib/db';
 
 export async function POST(req: NextRequest) {
   const authUser = await getAuthUser(req);
@@ -19,6 +20,16 @@ export async function POST(req: NextRequest) {
       serviceArea: typeof serviceArea === 'string' ? serviceArea : undefined,
       limit: typeof limit === 'number' ? limit : undefined,
     });
+
+    await db.auditLog.create({
+      data: {
+        userId: authUser?.userId || null,
+        userName: authUser?.name || 'Admin Operations',
+        action: 'DISPATCH_RECOVERY_TRIGGERED',
+        oldValue: null,
+        newValue: `Reconciled undispatched orders: ${summary?.assigned ?? 0} assigned (${summary?.scanned ?? 0} scanned), Area: ${serviceArea || 'ALL'}`,
+      },
+    }).catch(() => null);
 
     return NextResponse.json({ success: true, data: summary });
   } catch (error: any) {

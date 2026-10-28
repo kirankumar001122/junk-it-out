@@ -28,6 +28,7 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     include: [
       'tests/security-route-handlers.test.ts',
+      'tests/admin-security-hardening.test.ts',
       'tests/payment-idempotency.test.ts',
       'tests/payment-retry-and-feedback.test.ts',
       'tests/booking-coupon-support.test.ts',

@@ -49,6 +49,18 @@ export default function AdminSidebar() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [mobileOpen]);
 
+  // Lock background scroll when mobile drawer is open
+  useEffect(() => {
+    if (mobileOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [mobileOpen]);
+
   // Close mobile drawer when pathname changes
   useEffect(() => {
     setMobileOpen(false);

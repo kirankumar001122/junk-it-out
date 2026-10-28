@@ -16,14 +16,12 @@ export async function POST(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
 
-    if (
-      !authUser ||
-      authUser.role !== 'CUSTOMER' ||
-      !authUser.customerId
-    ) {
+    const isAdmin = authUser && ['ADMIN', 'SUPER_ADMIN'].includes(authUser.role);
+    const isCustomer = authUser && authUser.role === 'CUSTOMER' && Boolean(authUser.customerId);
+    if (!isAdmin && !isCustomer) {
       return errorResponse(
         'UNAUTHORIZED',
-        'Authenticated customer session required to place a pickup order.',
+        'Authenticated customer or admin session required to place a pickup order.',
         401
       );
     }
