@@ -14,7 +14,10 @@ export async function checkGeofenceServiceability(
 
   // 1. Check database service area boundary polygons
   try {
-    const dbAreas = await db.serviceArea.findMany();
+    const dbAreas = await db.serviceArea.findMany({
+      where: { status: { in: ['ACTIVE', 'INACTIVE'] } },
+      take: 1000,
+    });
     if (dbAreas.length > 0) {
       for (const area of dbAreas) {
         try {

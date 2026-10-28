@@ -77,7 +77,11 @@ export function validateCreateOrderInput(body: any): { valid: boolean; error?: s
     if (!item.categoryId || typeof item.categoryId !== 'string') {
       return { valid: false, error: 'Each waste item must specify a valid categoryId.' };
     }
-    if (typeof item.estimatedWeight !== 'number' || item.estimatedWeight <= 0) {
+    if (
+      typeof item.estimatedWeight !== 'number' ||
+      !Number.isFinite(item.estimatedWeight) ||
+      item.estimatedWeight <= 0
+    ) {
       return { valid: false, error: 'Estimated weight must be a positive number.' };
     }
   }
@@ -86,11 +90,21 @@ export function validateCreateOrderInput(body: any): { valid: boolean; error?: s
     return { valid: false, error: 'Photos must be an array of image URLs.' };
   }
 
+  if (body.pickupType !== undefined && !['ASAP', 'SCHEDULED'].includes(body.pickupType)) {
+    return { valid: false, error: 'Pickup type must be ASAP or SCHEDULED.' };
+  }
+
   if (body.pickupType === 'SCHEDULED' && (!body.scheduledSlot || typeof body.scheduledSlot !== 'string')) {
     return { valid: false, error: 'A valid date and time slot must be selected for scheduled pickups.' };
   }
 
   return { valid: true };
+}
+
+export function calculateTotalBookingWeight(
+  items: Array<{ estimatedWeight: number }>
+): number {
+  return items.reduce((total, item) => total + item.estimatedWeight, 0);
 }
 
 const ALLOWED_STATUS_TRANSITIONS: Record<string, string[]> = {

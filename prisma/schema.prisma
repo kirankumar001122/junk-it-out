@@ -54,6 +54,7 @@ model Customer {
   orders       Order[]
   reviews      Review[]
   settlements  Settlement[]
+  orderIdempotencyRecords OrderIdempotency[]
 }
 
 model Agent {
@@ -185,9 +186,25 @@ model Order {
   reviews            Review?
   settlement         Settlement?
   weightRecords      WeightRecord[]
+  orderIdempotency   OrderIdempotency?
 
   @@index([customerId, createdAt])
   @@index([agentId, status, createdAt])
+}
+
+model OrderIdempotency {
+  id           String   @id @default(uuid())
+  customerId   String
+  key          String
+  payloadHash  String
+  orderId      String   @unique
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime?
+  customer     Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, key])
+  @@index([expiresAt])
 }
 
 model OrderItem {

@@ -140,8 +140,35 @@ async function runTests() {
       assert.equal(body.error?.code, 'WEIGHING_REQUIRED');
     }
 
-    // TEST 5: Atomic single-request weighing and completion (JUNKITOUT_PAYS payout)
-    console.log('Test 5: Atomic single-request weighing and completion (JUNKITOUT_PAYS)...');
+    // TEST 5: Reject duplicate item measurements
+    console.log('Test 5: Rejects duplicate item measurements...');
+    {
+      database.order.findUnique = async () => ({
+        id: 'order-duplicate-1',
+        agentId: 'agent-123',
+        status: 'AGENT_ARRIVED',
+        weightRecords: [],
+        invoices: [],
+        items: [{ id: 'item-1', categoryId: 'cat-1', ratePerKg: 15, category: { type: 'RECYCLABLE' } }],
+      });
+
+      const req = makeRequest('http://localhost:3000/api/orders/order-duplicate-1/complete', {
+        token: createAgentToken('agent-123'),
+        body: {
+          actualWeights: [
+            { itemId: 'item-1', actualWeight: 5 },
+            { itemId: 'item-1', actualWeight: 10 },
+          ],
+        },
+      });
+      const res = await completeOrder(req, { params: Promise.resolve({ id: 'order-duplicate-1' }) });
+      assert.equal(res.status, 400, 'Should reject duplicate measurements for one order item');
+      const body = await res.json();
+      assert.equal(body.error?.code, 'INVALID_WEIGH_DATA');
+    }
+
+    // TEST 6: Atomic single-request weighing and completion (JUNKITOUT_PAYS payout)
+    console.log('Test 6: Atomic single-request weighing and completion (JUNKITOUT_PAYS)...');
     {
       let transactionExecuted = false;
       let recordedWeight = 0;
@@ -194,6 +221,10 @@ async function runTests() {
             },
           },
           order: {
+            updateMany: async ({ data }: any) => {
+              orderStatusUpdated = data.status;
+              return { count: 1 };
+            },
             update: async ({ data }: any) => {
               orderStatusUpdated = data.status;
               if (data.invoices?.create) {
@@ -210,6 +241,29 @@ async function runTests() {
                 finalAmount: data.finalAmount,
                 paymentStatus: data.paymentStatus,
               };
+            },
+            findUnique: async () => ({
+              id: 'order-atomic-1',
+              orderNumber: 'JIO-ATOMIC-01',
+              agentId: 'agent-123',
+              status: 'PICKUP_COMPLETED',
+              actualTotal: 200,
+              financialDirection: 'JUNKITOUT_PAYS',
+              finalAmount: 200,
+              paymentStatus: 'SETTLEMENT_PENDING',
+              items: [{ id: 'item-1', actualWeight: 10, subtotal: 200 }],
+              weightRecords: [{ id: 'w-rec-1' }],
+              invoices: [{ invoiceNumber: 'INV-ATOMIC-01' }],
+            }),
+          },
+          orderStatusHistory: {
+            create: async () => ({ id: 'history-1' }),
+          },
+          invoice: {
+            create: async ({ data }: any) => {
+              invoiceCreated = true;
+              assert.equal(data.totalAmount, 200);
+              return { id: 'invoice-1', ...data };
             },
           },
           agent: {
@@ -243,8 +297,8 @@ async function runTests() {
       assert.equal(agentStatusUpdated, 'AVAILABLE', 'Agent status must be updated to AVAILABLE');
     }
 
-    // TEST 6: Idempotent repeat call on completed order
-    console.log('Test 6: Idempotency check on already completed order...');
+    // TEST 7: Idempotent repeat call on completed order
+    console.log('Test 7: Idempotency check on already completed order...');
     {
       database.order.findUnique = async () => ({
         id: 'order-completed-1',
@@ -265,8 +319,8 @@ async function runTests() {
       assert.equal(body.meta?.message, 'Order was already completed.');
     }
 
-    // TEST 7: Legacy completion (pre-weighed order completing with empty body)
-    console.log('Test 7: Legacy completion flow (order pre-weighed, completing with empty body)...');
+    // TEST 8: Legacy completion (pre-weighed order completing with empty body)
+    console.log('Test 8: Legacy completion flow (order pre-weighed, completing with empty body)...');
     {
       let invoiceCreated = false;
       let orderStatusUpdated = '';
@@ -293,10 +347,23 @@ async function runTests() {
       database.$transaction = async (callback: any) => {
         const tx = {
           order: {
-            update: async ({ data }: any) => {
+            updateMany: async ({ data }: any) => {
               orderStatusUpdated = data.status;
-              invoiceCreated = Boolean(data.invoices?.create);
-              return { id: 'order-preweighed-1', status: data.status };
+              return { count: 1 };
+            },
+            findUnique: async () => ({
+              id: 'order-preweighed-1',
+              status: 'PICKUP_COMPLETED',
+              invoices: [{ invoiceNumber: 'INV-PREWEIGHED-01' }],
+            }),
+          },
+          orderStatusHistory: {
+            create: async () => ({ id: 'history-preweighed-1' }),
+          },
+          invoice: {
+            create: async ({ data }: any) => {
+              invoiceCreated = true;
+              return { id: 'invoice-preweighed-1', ...data };
             },
           },
           agent: {
