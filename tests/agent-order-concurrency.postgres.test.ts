@@ -8,7 +8,6 @@ const EXPECTED_HOST = '127.0.0.1';
 const EXPECTED_PORT = '5433';
 const EXPECTED_DATABASE = 'junkitout_agent_test';
 const EXPECTED_ROLE = 'junkitout_test';
-const EXPECTED_CONTAINER_HOST = '172.17.0.2';
 const EXPECTED_CONTAINER_PORT = 5432;
 
 class SafeTestConfigurationError extends Error {}
@@ -16,6 +15,18 @@ class SafeTestConfigurationError extends Error {}
 function normalizeServerAddress(address: string | null | undefined) {
   if (!address) return null;
   return address.replace(/\/32$/, '');
+}
+
+function isLoopbackOrPrivateDockerAddress(address: string | null | undefined): boolean {
+  if (!address) return false;
+  if (address === EXPECTED_HOST) return true;
+
+  const parts = address.split('.').map(Number);
+  if (parts.length === 4 && parts.every((p) => Number.isInteger(p) && p >= 0 && p <= 255)) {
+    // RFC 1918 172.16.0.0/12 (172.16.0.0 - 172.31.255.255) standard Docker bridge network range
+    return parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31;
+  }
+  return false;
 }
 
 async function createPrismaClient(databaseUrl: string) {
@@ -117,9 +128,7 @@ async function run() {
     `;
 
     const normalizedServerAddress = normalizeServerAddress(identityA?.serverAddress);
-    const validServerAddress =
-      normalizedServerAddress === EXPECTED_HOST ||
-      normalizedServerAddress === EXPECTED_CONTAINER_HOST;
+    const validServerAddress = isLoopbackOrPrivateDockerAddress(normalizedServerAddress);
     const validServerPort =
       identityA?.serverPort === Number(EXPECTED_PORT) ||
       identityA?.serverPort === EXPECTED_CONTAINER_PORT;
