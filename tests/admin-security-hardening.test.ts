@@ -25,7 +25,7 @@ import { GET as getSyncSchema } from '../app/api/admin/sync-schema/route';
 import { PUT as putServiceArea } from '../app/api/service-areas/route';
 import { PUT as putWasteCategory, POST as postWasteCategory } from '../app/api/waste-categories/route';
 
-process.env.JWT_SECRET = 'admin-security-test-secret';
+process.env.JWT_SECRET = 'admin-security-test-secret-at-least-32-bytes!';
 
 type Role = 'CUSTOMER' | 'AGENT' | 'ADMIN' | 'SUPER_ADMIN';
 

@@ -528,7 +528,7 @@ export async function createOrder(
         });
 
         if (normalizedIdempotencyKey && customerId && durableIdempotencyAvailable) {
-          await tx.orderIdempotency.create({
+          await (tx as any).orderIdempotency.create({
             data: {
               customerId,
               key: normalizedIdempotencyKey,
