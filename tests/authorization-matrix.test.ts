@@ -12,7 +12,7 @@ Module._resolveFilename = function (request: string, parent: any, isMain: boolea
   return originalResolve.call(this, request, parent, isMain, options);
 };
 
-process.env.JWT_SECRET = 'auth-matrix-test-secret';
+process.env.JWT_SECRET = 'auth-matrix-test-secret-at-least-32-bytes!';
 
 async function run() {
   const { NextRequest } = await import('next/server');
