@@ -157,22 +157,47 @@ export async function POST(
     }
 
     // 6. Atomic Conditional Update (Race-Condition Prevention)
-    // Update status to AGENT_ACCEPTED if order is unassigned or assigned to this agent in AGENT_ASSIGNED state
-    const updateResult = await db.order.updateMany({
-      where: {
-        id: order.id,
-        OR: [
-          { agentId: null, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
-          { agentId: agentId, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
-        ],
-      },
-      data: {
-        agentId: agentId,
-        status: 'AGENT_ACCEPTED',
-      },
+    const oldStatus = order.status;
+    const newStatus = 'AGENT_ACCEPTED';
+
+    const txSuccess = await db.$transaction(async (tx) => {
+      const updateResult = await tx.order.updateMany({
+        where: {
+          id: order.id,
+          OR: [
+            { agentId: null, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
+            { agentId: agentId, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
+          ],
+        },
+        data: {
+          agentId: agentId,
+          status: 'AGENT_ACCEPTED',
+        },
+      });
+
+      if (updateResult.count === 0) {
+        return false;
+      }
+
+      await tx.orderStatusHistory.create({
+        data: {
+          orderId: order.id,
+          oldStatus,
+          newStatus,
+          changedByUserId: authUser.userId || null,
+          notes: `Pickup accepted by field agent ${agent.user.name} (${agent.vehicleNumber}).`,
+        },
+      });
+
+      await tx.agent.update({
+        where: { id: agentId },
+        data: { status: 'ASSIGNED' },
+      });
+
+      return true;
     });
 
-    if (updateResult.count === 0) {
+    if (!txSuccess) {
       // Another concurrent request updated the order first. Re-verify state.
       const recheckOrder = await db.order.findUnique({
         where: { id: order.id },
@@ -194,27 +219,6 @@ export async function POST(
         409
       );
     }
-
-    // 7. Post-Acceptance Updates & Realtime Event Broadcasting
-    const oldStatus = order.status;
-    const newStatus = 'AGENT_ACCEPTED';
-
-    // Record Order Status History
-    await db.orderStatusHistory.create({
-      data: {
-        orderId: order.id,
-        oldStatus,
-        newStatus,
-        changedByUserId: authUser.userId || null,
-        notes: `Pickup accepted by field agent ${agent.user.name} (${agent.vehicleNumber}).`,
-      },
-    });
-
-    // Update Agent status to ASSIGNED
-    await db.agent.update({
-      where: { id: agentId },
-      data: { status: 'ASSIGNED' },
-    });
 
     // Fetch updated order for broadcasting
     const updatedOrder = await db.order.findUnique({

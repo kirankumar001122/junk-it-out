@@ -113,23 +113,37 @@ export async function POST(
         },
       });
 
-      // Update Order Status & Financial Totals
-      const updated = await tx.order.update({
-        where: { id },
+      // Update Order Status & Financial Totals with CAS
+      const claimed = await tx.order.updateMany({
+        where: {
+          id,
+          status: oldStatus,
+          agentId: authUser.agentId,
+        },
         data: {
           status: newStatus,
           actualTotal: actualTotalRecyclable,
           financialDirection,
           finalAmount,
-          statusHistory: {
-            create: {
-              oldStatus,
-              newStatus,
-              changedByUserId: authUser?.userId || null,
-              notes: `Recorded doorstep digital scale weights. Net amount: ₹${finalAmount.toFixed(2)}`,
-            },
-          },
         },
+      });
+
+      if (claimed.count !== 1) {
+        return null;
+      }
+
+      await tx.orderStatusHistory.create({
+        data: {
+          orderId: id,
+          oldStatus,
+          newStatus,
+          changedByUserId: authUser?.userId || null,
+          notes: `Recorded doorstep digital scale weights. Net amount: ₹${finalAmount.toFixed(2)}`,
+        },
+      });
+
+      const updated = await tx.order.findUnique({
+        where: { id },
         include: {
           agent: { include: { user: true } },
           customer: { include: { user: true } },
@@ -163,6 +177,23 @@ export async function POST(
       maxWait: 10000,
       timeout: 15000,
     });
+
+    if (!updatedOrder) {
+      const recheck = await db.order.findUnique({
+        where: { id },
+        include: {
+          agent: { include: { user: true } },
+          customer: { include: { user: true } },
+          address: true,
+          items: { include: { category: true } },
+          weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
+        },
+      });
+      if (recheck?.status === newStatus || recheck?.status === 'PICKUP_COMPLETED') {
+        return successResponse(recheck);
+      }
+      return errorResponse('CONFLICT', 'The order state changed or was cancelled before recording weights.', 409);
+    }
 
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
     broadcaster.broadcast('WEIGHING_STARTED', { orderId: id, actualTotal: updatedOrder.actualTotal });
