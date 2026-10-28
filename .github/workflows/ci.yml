@@ -20,10 +20,26 @@ jobs:
     name: Validate applications
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: junkitout_test
+          POSTGRES_PASSWORD: ci_test_password
+          POSTGRES_DB: junkitout_agent_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
       JWT_SECRET: ci-only-jwt-secret-not-valid-outside-tests
-      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/junkitout_ci?schema=public
-      DIRECT_URL: postgresql://ci:ci@127.0.0.1:5432/junkitout_ci?schema=public
+      DATABASE_URL: postgresql://junkitout_test:ci_test_password@127.0.0.1:5433/junkitout_agent_test?schema=public
+      DIRECT_URL: postgresql://junkitout_test:ci_test_password@127.0.0.1:5433/junkitout_agent_test?schema=public
 
     steps:
       - name: Check out repository
@@ -39,8 +55,19 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Synchronize disposable CI database schema
+        run: npx prisma db push --skip-generate
+
       - name: Run isolated tests
         run: npm test
+
+      - name: Run PostgreSQL integration tests
+        run: |
+          npm run test:pg-agent-notifications
+          npm run test:pg-agent-concurrency
 
       - name: Type-check main application
         run: npx tsc --noEmit --incremental false -p ./tsconfig.json

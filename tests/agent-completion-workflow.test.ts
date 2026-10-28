@@ -313,6 +313,7 @@ async function runTests() {
     {
       let transactionExecuted = false;
       let recordedWeight = 0;
+      let recordedScalePhoto: string | null = 'not-checked';
       let settlementCreated = false;
       let invoiceCreated = false;
       let orderStatusUpdated = '';
@@ -352,6 +353,7 @@ async function runTests() {
           },
           weightRecord: {
             create: async ({ data }: any) => {
+              recordedScalePhoto = data.scalePhotoUrl;
               return { id: 'w-rec-1', ...data };
             },
           },
@@ -402,7 +404,6 @@ async function runTests() {
         token: createAgentToken('agent-123'),
         body: {
           actualWeights: [{ itemId: 'item-1', categoryId: 'cat-metal', actualWeight: 10 }],
-          scalePhotoUrl: 'https://example.com/scale.jpg',
           notes: 'Doorstep weighing verified',
         },
       });
@@ -413,10 +414,66 @@ async function runTests() {
       assert.equal(body.success, true);
       assert.equal(transactionExecuted, true, 'Must execute within a single transaction');
       assert.equal(recordedWeight, 10, 'Actual weight should be 10kg');
+      assert.equal(recordedScalePhoto, null, 'missing scale-photo evidence must not be replaced by a stock image');
       assert.equal(settlementCreated, true, 'Settlement should be created for JUNKITOUT_PAYS');
       assert.equal(invoiceCreated, true, 'Invoice should be created');
       assert.equal(orderStatusUpdated, 'PICKUP_COMPLETED');
       assert.equal(agentStatusUpdated, 'AVAILABLE', 'Agent status must be updated to AVAILABLE');
+    }
+
+    console.log('Test 7a: Weighing stores no stock-image URL when photo evidence is absent...');
+    {
+      let recordedScalePhoto: string | null = 'not-checked';
+      database.order.findUnique = async () => ({
+        id: 'order-weigh-no-photo',
+        orderNumber: 'JIO-WEIGH-NO-PHOTO',
+        agentId: 'agent-123',
+        customerId: 'cust-123',
+        status: 'AGENT_ARRIVED',
+        pickupCharge: 0,
+        discountAmount: 0,
+        actualTotal: 0,
+        finalAmount: 0,
+        financialDirection: 'JUNKITOUT_PAYS',
+        weightRecords: [],
+        items: [{
+          id: 'item-no-photo',
+          categoryId: 'category-no-photo',
+          ratePerKg: 0,
+          category: { type: 'RECYCLABLE' },
+        }],
+        customer: { userId: 'user-customer' },
+        agent: { userId: 'user-agent-123' },
+      });
+      database.$transaction = async (callback: any) => callback({
+        orderItem: { update: async () => ({}) },
+        weightRecord: {
+          create: async ({ data }: any) => {
+            recordedScalePhoto = data.scalePhotoUrl;
+            return { id: 'weight-no-photo', ...data };
+          },
+        },
+        order: {
+          update: async ({ data }: any) => ({
+            id: 'order-weigh-no-photo',
+            status: data.status,
+            actualTotal: data.actualTotal,
+            financialDirection: data.financialDirection,
+            finalAmount: data.finalAmount,
+          }),
+        },
+      });
+      const response = await weighOrder(
+        makeRequest('http://localhost:3000/api/orders/order-weigh-no-photo/weigh', {
+          token: createAgentToken('agent-123'),
+          body: {
+            actualWeights: [{ itemId: 'item-no-photo', categoryId: 'category-no-photo', actualWeight: 5 }],
+          },
+        }),
+        { params: Promise.resolve({ id: 'order-weigh-no-photo' }) },
+      );
+      assert.equal(response.status, 200);
+      assert.equal(recordedScalePhoto, null);
     }
 
     // TEST 8: Concurrent completion requests serialize on the order row

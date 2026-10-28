@@ -173,7 +173,9 @@ export async function POST(
           data: {
             orderId: id,
             recordedByUserId: authUser?.userId || order.agent?.userId || order.customer?.userId,
-            scalePhotoUrl: scalePhotoUrl || 'https://images.unsplash.com/photo-1589939705384-5185137a7f0f?q=80&w=600',
+            scalePhotoUrl: typeof scalePhotoUrl === 'string' && scalePhotoUrl.trim()
+              ? scalePhotoUrl.trim()
+              : null,
             weightJson: JSON.stringify(actualWeights),
             notes: notes || 'Scale weights recorded at doorstep.',
           },

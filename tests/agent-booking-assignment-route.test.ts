@@ -56,7 +56,9 @@ async function run() {
   orderDelegate.findFirst = async () => order;
   agentDelegate.findUnique = async ({ where }: any) => agents.get(where.id) || agent;
   (db as any).$transaction = async (callback: (tx: any) => Promise<unknown>) => callback({
+    $queryRaw: async () => [],
     order: {
+      findFirst: async () => null,
       updateMany: async ({ where, data }: any) => {
         assert.equal(where.id, order.id);
         if (Array.isArray(where.OR)) {
@@ -88,7 +90,10 @@ async function run() {
         return { count: 1 };
       },
     },
-    agent: { update: async ({ where }: any) => agents.get(where.id) || agent },
+    agent: {
+      findUnique: async ({ where }: any) => agents.get(where.id) || agent,
+      update: async ({ where }: any) => agents.get(where.id) || agent,
+    },
     auditLog: { create: async () => ({ id: 'audit-1' }) },
   });
 

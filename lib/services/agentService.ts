@@ -1,3 +1,4 @@
+import { persistAgentBookingNotificationOnce } from './agentBookingNotification';
 import { db } from '../db';
 
 export async function getActiveAgents(serviceAreaName?: string) {
@@ -172,3 +173,185 @@ export function selectNearestEligibleAgent<
     .sort((a, b) => a.distance - b.distance || (a.agent.id < b.agent.id ? -1 : a.agent.id > b.agent.id ? 1 : 0))[0]?.agent ?? null;
 }
 
+
+export const SAFE_HYDRATED_ORDER_INCLUDE = {
+  agent: {
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+        },
+      },
+    },
+  },
+  customer: {
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+        },
+      },
+    },
+  },
+  address: true,
+  items: {
+    include: {
+      category: true,
+    },
+  },
+};
+
+export interface ExecuteAgentAcceptParams {
+  order: {
+    id: string;
+    orderNumber: string;
+    agentId?: string | null;
+    status: string;
+    financialDirection?: string | null;
+    paymentStatus?: string | null;
+  };
+  agentId: string;
+  agentName?: string;
+  vehicleNumber?: string;
+  agentUserId?: string;
+  userId?: string | null;
+}
+
+export type ExecuteAgentAcceptResult =
+  | { changed: true; alreadyAssignedToAgent: true; order: any; notificationCreated: boolean; reason?: undefined }
+  | { changed: false; reason: 'activeAssignment' | 'agentUnavailable' | 'orderChanged'; alreadyAssignedToAgent: boolean; order: any | null; notificationCreated: false };
+
+export async function executeAgentAcceptTransaction(
+  client: any,
+  params: ExecuteAgentAcceptParams,
+): Promise<ExecuteAgentAcceptResult> {
+  const { order, agentId, agentName, vehicleNumber, agentUserId, userId } = params;
+
+  const runWithTx = async (tx: any): Promise<ExecuteAgentAcceptResult> => {
+    await tx.$queryRaw`SELECT "id" FROM "Agent" WHERE "id" = ${agentId} FOR UPDATE`;
+
+    const activeOrder = await tx.order.findFirst({
+      where: {
+        agentId,
+        status: { in: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WASTE_VERIFICATION', 'WEIGHING'] },
+      },
+      select: { id: true },
+    });
+    if (activeOrder && activeOrder.id !== order.id) {
+      return {
+        changed: false,
+        reason: 'activeAssignment',
+        alreadyAssignedToAgent: false,
+        order: null,
+        notificationCreated: false,
+      };
+    }
+
+    if (
+      order.agentId === agentId &&
+      !['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'].includes(order.status)
+    ) {
+      const existingOrder = await tx.order.findUnique({
+        where: { id: order.id },
+        include: SAFE_HYDRATED_ORDER_INCLUDE,
+      });
+      return {
+        changed: false,
+        reason: 'orderChanged',
+        alreadyAssignedToAgent: existingOrder?.agentId === agentId,
+        order: existingOrder,
+        notificationCreated: false,
+      };
+    }
+
+    const currentAgent = await tx.agent.findUnique({
+      where: { id: agentId },
+      select: { id: true, status: true },
+    });
+    const canAcceptAssignedOrder =
+      currentAgent?.status === 'ASSIGNED' &&
+      (order.agentId === agentId || activeOrder?.id === order.id);
+    if (!currentAgent || (currentAgent.status !== 'AVAILABLE' && !canAcceptAssignedOrder)) {
+      return {
+        changed: false,
+        reason: 'agentUnavailable',
+        alreadyAssignedToAgent: false,
+        order: null,
+        notificationCreated: false,
+      };
+    }
+
+    const updateResult = await tx.order.updateMany({
+      where: {
+        id: order.id,
+        OR: [
+          { agentId: null, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
+          { agentId, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
+        ],
+        ...(order.financialDirection === 'CUSTOMER_PAYS' ? { paymentStatus: 'CAPTURED' } : {}),
+      },
+      data: { agentId, status: 'AGENT_ACCEPTED' },
+    });
+
+    if (updateResult.count === 0) {
+      const recheckOrder = await tx.order.findUnique({
+        where: { id: order.id },
+        include: SAFE_HYDRATED_ORDER_INCLUDE,
+      });
+      return {
+        changed: false,
+        reason: 'orderChanged',
+        alreadyAssignedToAgent: recheckOrder?.agentId === agentId,
+        order: recheckOrder,
+        notificationCreated: false,
+      };
+    }
+
+    await tx.orderStatusHistory.create({
+      data: {
+        orderId: order.id,
+        oldStatus: order.status,
+        newStatus: 'AGENT_ACCEPTED',
+        changedByUserId: userId || null,
+        notes: `Pickup accepted by field agent ${agentName || 'Agent'} (${vehicleNumber || 'Vehicle'}).`,
+      },
+    });
+
+    await tx.agent.update({
+      where: { id: agentId },
+      data: { status: 'ASSIGNED' },
+    });
+
+    let notificationCreated = false;
+    if (order.financialDirection !== 'CUSTOMER_PAYS' || order.paymentStatus === 'CAPTURED') {
+      notificationCreated = await persistAgentBookingNotificationOnce(tx, {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        agentId,
+        agentUserId: agentUserId || '',
+        status: 'AGENT_ACCEPTED',
+      });
+    }
+
+    const updatedOrder = await tx.order.findUnique({
+      where: { id: order.id },
+      include: SAFE_HYDRATED_ORDER_INCLUDE,
+    });
+
+    return {
+      changed: true,
+      alreadyAssignedToAgent: true,
+      order: updatedOrder,
+      notificationCreated,
+    };
+  };
+
+  if (typeof client.$transaction === 'function') {
+    return client.$transaction(runWithTx);
+  }
+  return runWithTx(client);
+}

@@ -58,6 +58,24 @@ async function runTests() {
   const origOrderFindUnique = database.order.findUnique;
   const origOrderUpdateMany = database.order.updateMany;
   const origHistoryCreate = database.orderStatusHistory.create;
+  const origTransaction = database.$transaction;
+  database.$transaction = async (callback: (tx: any) => Promise<unknown>) => callback({
+    $queryRaw: async () => [],
+    order: {
+      findFirst: async () => null,
+      updateMany: (args: any) => database.order.updateMany(args),
+      findUnique: (args: any) => database.order.findUnique(args),
+    },
+    agent: {
+      findUnique: async () => ({ id: 'agent-123', status: 'AVAILABLE' }),
+      update: (args: any) => database.agent.update(args),
+    },
+    orderStatusHistory: {
+      create: (args: any) => database.orderStatusHistory.create(args),
+    },
+    notification: { createMany: async () => ({ count: 1 }) },
+    auditLog: { create: async () => ({ id: 'audit-1' }) },
+  });
 
   try {
     // 1. Authorization: Unauthenticated
@@ -88,10 +106,25 @@ async function runTests() {
     {
       database.agent.findUnique = async ({ where }: any) => {
         if (where.id === 'agent-123') {
-          return { id: 'agent-123', status: 'OFFLINE', tokenVersion: 1, user: { name: 'Agent' } };
+          return {
+            id: 'agent-123',
+            status: 'OFFLINE',
+            serviceAreas: 'all',
+            tokenVersion: 1,
+            user: { name: 'Agent' },
+          };
         }
         return null;
       };
+      database.order.findFirst = async () => ({
+        id: 'order-1',
+        orderNumber: 'ORD-1',
+        agentId: null,
+        status: 'BOOKING_RECEIVED',
+        financialDirection: 'JUNKITOUT_PAYS',
+        paymentStatus: 'PENDING',
+        address: { area: 'Indiranagar' },
+      });
 
       const req = makeRequest('http://localhost:3000/api/orders/order-1/accept', {
         token: createAgentToken('agent-123'),
@@ -440,6 +473,7 @@ async function runTests() {
     database.order.findUnique = origOrderFindUnique;
     database.order.updateMany = origOrderUpdateMany;
     database.orderStatusHistory.create = origHistoryCreate;
+    database.$transaction = origTransaction;
   }
 }
 

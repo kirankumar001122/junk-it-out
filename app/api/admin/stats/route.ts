@@ -6,7 +6,7 @@ import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 let cachedStats: { payload: any; expiresAt: number } | null = null;
 const STATS_CACHE_TTL_MS = 5_000;
 
-export function invalidateAdminStatsCache() {
+function invalidateAdminStatsCache() {
   cachedStats = null;
 }
 

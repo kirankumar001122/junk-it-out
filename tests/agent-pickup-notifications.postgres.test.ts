@@ -13,11 +13,14 @@ const EXPECTED_HOST = '127.0.0.1';
 const EXPECTED_PORT = '5433';
 const EXPECTED_DATABASE = 'junkitout_agent_test';
 const EXPECTED_ROLE = 'junkitout_test';
+const EXPECTED_CONTAINER_HOST = '172.17.0.2';
+const EXPECTED_CONTAINER_PORT = 5432;
 
 class SafeTestConfigurationError extends Error {}
 
 function normalizeServerAddress(address: string | null | undefined) {
-  return address === `${EXPECTED_HOST}/32` ? EXPECTED_HOST : address ?? null;
+  if (!address) return null;
+  return address.replace(/\/32$/, '');
 }
 
 async function createPrismaClient(databaseUrl: string) {
@@ -107,11 +110,19 @@ async function run() {
         inet_server_port() AS "serverPort"
     `;
 
+    const normalizedServerAddress = normalizeServerAddress(identity?.serverAddress);
+    const validServerAddress =
+      normalizedServerAddress === EXPECTED_HOST ||
+      normalizedServerAddress === EXPECTED_CONTAINER_HOST;
+    const validServerPort =
+      identity?.serverPort === Number(EXPECTED_PORT) ||
+      identity?.serverPort === EXPECTED_CONTAINER_PORT;
+
     const matches = {
       database: identity?.database === EXPECTED_DATABASE,
       role: identity?.role === EXPECTED_ROLE,
-      serverAddress: normalizeServerAddress(identity?.serverAddress) === EXPECTED_HOST,
-      serverPort: identity?.serverPort === Number(EXPECTED_PORT),
+      serverAddress: validServerAddress,
+      serverPort: validServerPort,
     };
     const identityMatches = Object.values(matches).every(Boolean);
 
@@ -120,7 +131,7 @@ async function run() {
         database: identity?.database ?? null,
         role: identity?.role ?? null,
         serverAddress: identity?.serverAddress ?? null,
-        normalizedServerAddress: normalizeServerAddress(identity?.serverAddress),
+        normalizedServerAddress,
         serverPort: identity?.serverPort ?? null,
       },
       matches,

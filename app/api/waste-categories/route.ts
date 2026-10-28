@@ -7,7 +7,7 @@ let cachedCategories: any = null;
 let cacheExpiry = 0;
 const CACHE_TTL_MS = 60_000;
 
-export function invalidateCategoriesCache() {
+function invalidateCategoriesCache() {
   cachedCategories = null;
   cacheExpiry = 0;
 }

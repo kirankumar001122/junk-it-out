@@ -100,32 +100,64 @@ export async function POST(
       return errorResponse('INVALID_STATUS_TRANSITION', `Cannot transition order status from ${oldStatus} to ${newStatus}.`, 400);
     }
 
-    const updatedOrder = await db.$transaction(async (tx) => {
-      const updated = await tx.order.update({
-        where: { id },
-        data: {
-          status: newStatus,
-          statusHistory: {
-            create: {
-              oldStatus,
-              newStatus,
-              changedByUserId: authUser?.userId || null,
-              notes: `Agent started journey to customer location.`,
-            },
-          },
-        },
-        include: SAFE_HYDRATED_ORDER_INCLUDE,
+    const transition = await db.$transaction(async (tx) => {
+      const result = await tx.order.updateMany({
+        where: { id, agentId: authUser.agentId, status: oldStatus },
+        data: { status: newStatus },
       });
 
-      if (order.agentId) {
-        await tx.agent.update({
-          where: { id: order.agentId },
-          data: { status: 'EN_ROUTE' },
-        });
+      if (result.count !== 1) {
+        return {
+          kind: 'conflict' as const,
+          order: await tx.order.findUnique({
+            where: { id },
+            include: SAFE_HYDRATED_ORDER_INCLUDE,
+          }),
+        };
       }
 
-      return updated;
+      await tx.orderStatusHistory.create({
+        data: {
+          orderId: id,
+          oldStatus,
+          newStatus,
+          changedByUserId: authUser.userId || null,
+          notes: 'Agent started journey to customer location.',
+        },
+      });
+
+      await tx.agent.update({
+        where: { id: authUser.agentId },
+        data: { status: 'EN_ROUTE' },
+      });
+
+      return {
+        kind: 'updated' as const,
+        order: await tx.order.findUnique({
+          where: { id },
+          include: SAFE_HYDRATED_ORDER_INCLUDE,
+        }),
+      };
     }, { isolationLevel: 'ReadCommitted', maxWait: 5000, timeout: 5000 });
+
+    if (transition.kind === 'conflict') {
+      if (transition.order?.agentId === authUser.agentId && transition.order.status === newStatus) {
+        return successResponse(
+          formatOrderResponse(transition.order, {
+            id: order.id,
+            orderNumber: order.orderNumber,
+            agentId: order.agentId,
+            status: newStatus,
+          })
+        );
+      }
+      return errorResponse('ORDER_STATE_CHANGED', 'The order changed while starting the journey. Refresh and try again.', 409);
+    }
+
+    const updatedOrder = transition.order;
+    if (!updatedOrder) {
+      return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
+    }
 
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
     broadcaster.broadcast('AGENT_STARTED', { orderId: id, agentId: order.agentId });

@@ -8,7 +8,7 @@ let cachedZones: any = null;
 let cacheExpiry = 0;
 const CACHE_TTL_MS = 60_000;
 
-export function invalidateServiceAreasCache() {
+function invalidateServiceAreasCache() {
   cachedZones = null;
   cacheExpiry = 0;
 }
