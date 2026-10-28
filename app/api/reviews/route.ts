@@ -35,6 +35,8 @@ export async function GET(req: NextRequest) {
     }
 
     let whereClause: any = {};
+    const page = Math.max(1, Number(searchParams.get('page') || 1) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(searchParams.get('pageSize') || 25) || 25));
     if (authUser.role === 'CUSTOMER') {
       whereClause = { customerId: authUser.customerId || 'unmatched' };
     } else if (authUser.role === 'AGENT') {
@@ -49,8 +51,10 @@ export async function GET(req: NextRequest) {
         order: true,
       },
       orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
     });
-    return NextResponse.json({ success: true, data: reviews });
+    return NextResponse.json({ success: true, data: reviews, page, pageSize });
   } catch (error: any) {
     return NextResponse.json({ success: false, message: error.message }, { status: 500 });
   }

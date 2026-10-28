@@ -77,13 +77,21 @@ export function validateCreateOrderInput(body: any): { valid: boolean; error?: s
     if (!item.categoryId || typeof item.categoryId !== 'string') {
       return { valid: false, error: 'Each waste item must specify a valid categoryId.' };
     }
-    if (typeof item.estimatedWeight !== 'number' || item.estimatedWeight <= 0) {
+    if (
+      typeof item.estimatedWeight !== 'number' ||
+      !Number.isFinite(item.estimatedWeight) ||
+      item.estimatedWeight <= 0
+    ) {
       return { valid: false, error: 'Estimated weight must be a positive number.' };
     }
   }
 
   if (body.photos !== undefined && body.photos !== null && !Array.isArray(body.photos)) {
     return { valid: false, error: 'Photos must be an array of image URLs.' };
+  }
+
+  if (body.pickupType !== undefined && !['ASAP', 'SCHEDULED'].includes(body.pickupType)) {
+    return { valid: false, error: 'Pickup type must be ASAP or SCHEDULED.' };
   }
 
   if (body.pickupType === 'SCHEDULED' && (!body.scheduledSlot || typeof body.scheduledSlot !== 'string')) {
@@ -93,9 +101,15 @@ export function validateCreateOrderInput(body: any): { valid: boolean; error?: s
   return { valid: true };
 }
 
+export function calculateTotalBookingWeight(
+  items: Array<{ estimatedWeight: number }>
+): number {
+  return items.reduce((total, item) => total + item.estimatedWeight, 0);
+}
+
 const ALLOWED_STATUS_TRANSITIONS: Record<string, string[]> = {
   BOOKING_RECEIVED: ['AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'CANCELLED'],
-  AGENT_BEING_ASSIGNED: ['AGENT_ASSIGNED', 'CANCELLED'],
+  AGENT_BEING_ASSIGNED: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'CANCELLED'],
   AGENT_ASSIGNED: ['AGENT_ACCEPTED', 'AGENT_ON_WAY', 'CANCELLED'],
   AGENT_ACCEPTED: ['AGENT_ON_WAY', 'CANCELLED'],
   AGENT_ON_WAY: ['AGENT_ARRIVED', 'CANCELLED'],

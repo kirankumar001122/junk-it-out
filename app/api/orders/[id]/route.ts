@@ -73,7 +73,9 @@ export async function GET(
       }
     } else if (authUser.role === 'AGENT') {
       const isAssignedAgent = authUser.agentId && order.agentId === authUser.agentId;
-      const isUnassignedOpen = order.status === 'BOOKING_RECEIVED';
+      const isUnassignedOpen =
+        order.agentId === null &&
+        (order.status === 'BOOKING_RECEIVED' || order.status === 'AGENT_BEING_ASSIGNED');
       if (!isAssignedAgent && !isUnassignedOpen) {
         return errorResponse('FORBIDDEN', 'Order is not assigned to your agent profile.', 403);
       }

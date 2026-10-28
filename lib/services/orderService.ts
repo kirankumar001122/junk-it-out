@@ -8,6 +8,7 @@ import {
   validateAndCalculateCoupon,
   InvalidCouponError,
 } from './couponService';
+import { calculateTotalBookingWeight } from '../validations/schemas';
 
 export { InvalidCouponError };
 
@@ -18,6 +19,36 @@ export class OrderIdempotencyConflictError extends Error {
     super(message);
     this.name = 'OrderIdempotencyConflictError';
   }
+}
+
+export class InvalidWasteCategoryError extends Error {
+  constructor(message = 'One or more selected waste categories are unavailable.') {
+    super(message);
+    this.name = 'InvalidWasteCategoryError';
+  }
+}
+
+export class InvalidBookingWeightError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidBookingWeightError';
+  }
+}
+
+export class InvalidIdempotencyKeyError extends Error {
+  constructor() {
+    super('Idempotency-Key must be 10-128 characters using letters, numbers, "_" or "-".');
+    this.name = 'InvalidIdempotencyKeyError';
+  }
+}
+
+export function normalizeOrderIdempotencyKey(key?: string | null) {
+  if (key == null || key.trim() === '') return null;
+  const normalized = key.trim();
+  if (!/^[A-Za-z0-9_-]{10,128}$/.test(normalized)) {
+    throw new InvalidIdempotencyKeyError();
+  }
+  return normalized;
 }
 
 export function createOrderPayloadHash(input: any): string {
@@ -120,9 +151,44 @@ export async function createOrder(
   // ---------------------------------------------------------
 
   const payloadHash = createOrderPayloadHash(input);
+  const normalizedIdempotencyKey = normalizeOrderIdempotencyKey(idempotencyKey);
+  const customerId = authUser?.customerId;
+  const durableIdempotency = (db as any).orderIdempotency;
+  let durableIdempotencyAvailable = Boolean(durableIdempotency);
 
-  if (idempotencyKey) {
-    const cached = idempotencyStore.get(idempotencyKey);
+  if (normalizedIdempotencyKey && customerId && durableIdempotencyAvailable) {
+    try {
+      const existing = await durableIdempotency.findUnique({
+        where: { customerId_key: { customerId, key: normalizedIdempotencyKey } },
+      });
+      if (existing) {
+        if (existing.payloadHash !== payloadHash) {
+          throw new OrderIdempotencyConflictError();
+        }
+        const persistedOrder = await db.order.findUnique({
+          where: { id: existing.orderId },
+          include: {
+            customer: { include: { user: true } },
+            address: true,
+            items: { include: { category: true } },
+            statusHistory: true,
+          },
+        });
+        if (!persistedOrder) {
+          throw new Error('The idempotent order record no longer exists.');
+        }
+        return persistedOrder;
+      }
+    } catch (error: any) {
+      if (error?.code !== 'P2021') {
+        throw error;
+      }
+      durableIdempotencyAvailable = false;
+    }
+  }
+
+  if (normalizedIdempotencyKey) {
+    const cached = idempotencyStore.get(`${customerId || 'anonymous'}:${normalizedIdempotencyKey}`);
 
     if (
       cached &&
@@ -228,8 +294,49 @@ export async function createOrder(
         id: {
           in: categoryIds,
         },
+        active: true,
       },
     });
+
+  const activeCategoryIds = new Set(dbCategories.map((category) => category.id));
+  if (categoryIds.some((categoryId) => !activeCategoryIds.has(categoryId))) {
+    throw new InvalidWasteCategoryError(
+      'One or more selected waste categories are unavailable. Please refresh and try again.',
+    );
+  }
+
+  const totalBookingWeight = calculateTotalBookingWeight(input.items);
+  if (
+    input.items.some(
+      (item) =>
+        typeof item.estimatedWeight !== 'number' ||
+        !Number.isFinite(item.estimatedWeight) ||
+        item.estimatedWeight <= 0,
+    ) ||
+    !Number.isFinite(totalBookingWeight)
+  ) {
+    throw new InvalidBookingWeightError(
+      'Booking weights must be finite positive values and produce a finite total.',
+    );
+  }
+  for (const category of dbCategories) {
+    if (
+      Number.isFinite(category.minWeightKg) &&
+      totalBookingWeight < category.minWeightKg
+    ) {
+      throw new InvalidBookingWeightError(
+        `Total booking weight must be at least ${category.minWeightKg} kg for ${category.name}.`,
+      );
+    }
+    if (
+      Number.isFinite(category.maxWeightKg) &&
+      totalBookingWeight > category.maxWeightKg
+    ) {
+      throw new InvalidBookingWeightError(
+        `Total booking weight must not exceed ${category.maxWeightKg} kg for ${category.name}.`,
+      );
+    }
+  }
 
   let totalWasteItemsValue = 0;
 
@@ -242,8 +349,7 @@ export async function createOrder(
         (cat) => cat.id === item.categoryId
       );
 
-      const ratePerKg =
-        category?.pricePerKg ?? 20.0;
+      const ratePerKg = category!.pricePerKg;
 
       const subtotal =
         item.estimatedWeight * ratePerKg;
@@ -312,8 +418,9 @@ export async function createOrder(
   // 8. CREATE ORDER
   // ---------------------------------------------------------
 
-  const newOrder =
-    await db.$transaction(async (tx) => {
+  let newOrder: any;
+  try {
+    newOrder = await db.$transaction(async (tx) => {
       const createdOrder =
         await tx.order.create({
           data: {
@@ -399,8 +506,48 @@ export async function createOrder(
           },
         });
 
+      if (normalizedIdempotencyKey && customerId && durableIdempotencyAvailable) {
+        await tx.orderIdempotency.create({
+          data: {
+            customerId,
+            key: normalizedIdempotencyKey,
+            payloadHash,
+            orderId: createdOrder.id,
+            expiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_MS),
+          },
+        });
+      }
+
       return createdOrder;
     });
+  } catch (error: any) {
+    if (
+      normalizedIdempotencyKey &&
+      customerId &&
+      durableIdempotencyAvailable &&
+      (error?.code === 'P2002' || /unique constraint/i.test(String(error?.message || '')))
+    ) {
+      const existing = await durableIdempotency.findUnique({
+        where: { customerId_key: { customerId, key: normalizedIdempotencyKey } },
+      });
+      if (existing) {
+        if (existing.payloadHash !== payloadHash) {
+          throw new OrderIdempotencyConflictError();
+        }
+        const persistedOrder = await db.order.findUnique({
+          where: { id: existing.orderId },
+          include: {
+            customer: { include: { user: true } },
+            address: true,
+            items: { include: { category: true } },
+            statusHistory: true,
+          },
+        });
+        if (persistedOrder) return persistedOrder;
+      }
+    }
+    throw error;
+  }
 
   // ---------------------------------------------------------
   // 9. IMPORTANT
@@ -421,9 +568,9 @@ export async function createOrder(
   // 10. STORE IDEMPOTENCY RESPONSE
   // ---------------------------------------------------------
 
-  if (idempotencyKey) {
+  if (normalizedIdempotencyKey) {
     idempotencyStore.set(
-      idempotencyKey,
+      `${customerId || 'anonymous'}:${normalizedIdempotencyKey}`,
       {
         orderId:
           newOrder.id,

@@ -1,11 +1,12 @@
-import { after } from 'next/server';
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { validateStatusTransition } from '@/lib/validations/schemas';
+import { transitionOrder } from '@/lib/services/orderLifecycle';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { sendDispatchUpdate } from '@/lib/services/whatsappService';
+import { runBackgroundTask } from '@/lib/utils/backgroundTask';
 
 const SAFE_HYDRATED_ORDER_INCLUDE = {
   agent: {
@@ -100,46 +101,54 @@ export async function POST(
       return errorResponse('INVALID_STATUS_TRANSITION', `Cannot transition order status from ${oldStatus} to ${newStatus}.`, 400);
     }
 
-    const updatedOrder = await db.$transaction(async (tx) => {
-      const updated = await tx.order.update({
+    const transition = await transitionOrder<any>({
+      orderId: id,
+      expectedStatus: oldStatus,
+      expectedAgentId: authUser.agentId,
+      newStatus,
+      changedByUserId: authUser?.userId || null,
+      notes: `Agent started journey to customer location.`,
+      include: SAFE_HYDRATED_ORDER_INCLUDE,
+      afterHistory: async (tx) => {
+        if (order.agentId) {
+          await tx.agent.update({
+            where: { id: order.agentId },
+            data: { status: 'EN_ROUTE' },
+          });
+        }
+      },
+    });
+
+    if (!transition.changed || !transition.order) {
+      const recheck = await db.order.findUnique({
         where: { id },
-        data: {
-          status: newStatus,
-          statusHistory: {
-            create: {
-              oldStatus,
-              newStatus,
-              changedByUserId: authUser?.userId || null,
-              notes: `Agent started journey to customer location.`,
-            },
-          },
-        },
         include: SAFE_HYDRATED_ORDER_INCLUDE,
       });
-
-      if (order.agentId) {
-        await tx.agent.update({
-          where: { id: order.agentId },
-          data: { status: 'EN_ROUTE' },
-        });
+      if (recheck?.status === newStatus && recheck?.agentId === authUser.agentId) {
+        return successResponse(
+          formatOrderResponse(recheck, {
+            id: order.id,
+            orderNumber: order.orderNumber,
+            agentId: order.agentId,
+            status: newStatus,
+          })
+        );
       }
+      return errorResponse(
+        'CONFLICT',
+        'Order state has changed or was cancelled before journey start.',
+        409
+      );
+    }
 
-      return updated;
-    }, { isolationLevel: 'ReadCommitted', maxWait: 5000, timeout: 5000 });
+    const updatedOrder = transition.order;
 
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
     broadcaster.broadcast('AGENT_STARTED', { orderId: id, agentId: order.agentId });
 
-    const scheduleNotification = (task: () => Promise<void>) => {
-      try {
-        after(task);
-      } catch {
-        // Safe fallback for standalone test runners outside Next.js request scope
-        Promise.resolve().then(task).catch(() => {});
-      }
-    };
-
-    scheduleNotification(async () => {
+    // Notifications are nonessential to the journey transition and may involve
+    // a slow third-party request. Keep them out of the action response path.
+    runBackgroundTask(async () => {
       try {
         const customerPhone = updatedOrder.customer?.user?.phone;
         const customerName = updatedOrder.customer?.user?.name || 'Valued Customer';

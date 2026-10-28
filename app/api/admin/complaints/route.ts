@@ -15,12 +15,17 @@ export async function GET(req: NextRequest) {
       // Schema synchronized
     }
 
+    const { searchParams } = new URL(req.url);
+    const page = Math.max(1, Number(searchParams.get('page') || 1) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(searchParams.get('pageSize') || 25) || 25));
     const complaints = await db.complaint.findMany({
       include: {
         order: { select: { orderNumber: true } },
         customer: { include: { user: { select: { name: true, phone: true, email: true } } } },
       },
       orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
     });
 
     const formatted = complaints.map((c) => ({
@@ -44,7 +49,7 @@ export async function GET(req: NextRequest) {
       }),
     }));
 
-    return NextResponse.json({ success: true, data: formatted });
+    return NextResponse.json({ success: true, data: formatted, page, pageSize });
   } catch (error: any) {
     console.error('Fetch admin complaints error:', error);
     return NextResponse.json({ success: false, message: error.message }, { status: 500 });

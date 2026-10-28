@@ -125,6 +125,7 @@ paymentDelegate.findMany = async () => {
 
 paymentDelegate.findFirst = async ({ where }: any) => {
   for (const p of paymentsStore.values()) {
+    if (where.id?.not && p.id === where.id.not) continue;
     if (where.direction && p.direction !== where.direction) continue;
     if (where.gateway && p.gateway !== where.gateway) continue;
     if (where.paymentId && p.paymentId !== where.paymentId) continue;
@@ -680,7 +681,90 @@ async function run() {
     assert.equal(ordersStore.get('order_1')!.paymentStatus, 'REFUNDED', 'reconciliation must NEVER overwrite refunded order to CAPTURED');
   }
 
-  // 9. PARTIAL REFUNDS WORKFLOW & AMOUNT VALIDATION
+  // 9. LATE CAPTURE AFTER CANCELLATION
+  setupFixtures();
+  {
+    const capturePayload = {
+      event: 'payment.captured',
+      payload: {
+        payment: {
+          entity: {
+            id: 'pay_provider_1',
+            order_id: 'order_rzp_1',
+            amount: 14900,
+            currency: 'INR',
+          },
+        },
+      },
+    };
+
+    ordersStore.get('order_1')!.status = 'CANCELLED';
+    paymentsStore.get('pay_rec_1')!.status = 'PENDING';
+
+    const invalidSignatureRes = await paymentWebhookRoute(makeWebhookRequest(capturePayload, 'wrong_secret'));
+    assert.equal(invalidSignatureRes.status, 400, 'invalid capture webhook signatures must be rejected');
+    assert.equal(paymentsStore.get('pay_rec_1')!.status, 'PENDING');
+    assert.equal(attemptsStore.size, 0);
+
+    let refundPostCount = 0;
+    razorpayHandler = (_path, method, body) => {
+      if (method === 'POST') {
+        refundPostCount += 1;
+        return {
+          status: 200,
+          body: {
+            id: 'rfnd_late_capture_1',
+            payment_id: 'pay_provider_1',
+            amount: 14900,
+            currency: 'INR',
+            status: 'processed',
+            notes: { refund_request_key: refundIdempotencyKey('pay_rec_1') },
+          },
+        };
+      }
+      return { status: 200, body: { items: [] } };
+    };
+
+    const firstCaptureRes = await paymentWebhookRoute(makeWebhookRequest(capturePayload));
+    assert.equal(firstCaptureRes.status, 200);
+    assert.equal(paymentsStore.get('pay_rec_1')!.status, 'REFUNDED');
+    assert.equal(ordersStore.get('order_1')!.paymentStatus, 'REFUNDED');
+    assert.equal(attemptsStore.get(refundAttemptId('pay_rec_1'))!.status, 'REFUNDED');
+    assert.equal(refundPostCount, 1, 'the first late capture must initiate one provider refund');
+
+    const duplicateCaptureRes = await paymentWebhookRoute(makeWebhookRequest(capturePayload));
+    assert.equal(duplicateCaptureRes.status, 200, 'duplicate capture delivery must be idempotent');
+    assert.equal(refundPostCount, 1, 'duplicate capture delivery must not repeat the provider refund');
+    assert.equal(paymentsStore.get('pay_rec_1')!.status, 'REFUNDED');
+    assert.equal(ordersStore.get('order_1')!.paymentStatus, 'REFUNDED');
+
+    setupFixtures();
+    ordersStore.get('order_1')!.status = 'CANCELLED';
+    paymentsStore.get('pay_rec_1')!.status = 'PENDING';
+    refundPostCount = 0;
+    razorpayHandler = () => {
+      refundPostCount += 1;
+      return {
+        status: 422,
+        body: { error: { description: 'Provider refund rejected' } },
+      };
+    };
+
+    const failedCaptureRes = await paymentWebhookRoute(makeWebhookRequest(capturePayload));
+    assert.equal(failedCaptureRes.status, 200, 'provider failure is recorded as a handled webhook result');
+    assert.equal(paymentsStore.get('pay_rec_1')!.status, 'REFUND_FAILED');
+    assert.equal(ordersStore.get('order_1')!.paymentStatus, 'REFUND_FAILED');
+    assert.equal(attemptsStore.get(refundAttemptId('pay_rec_1'))!.status, 'REFUND_FAILED');
+    assert.equal(refundPostCount, 1);
+
+    const retryCaptureRes = await paymentWebhookRoute(makeWebhookRequest(capturePayload));
+    assert.equal(retryCaptureRes.status, 200, 'retrying the failed capture delivery remains safe');
+    assert.equal(refundPostCount, 1, 'a repeated webhook must not duplicate a failed refund attempt');
+    assert.equal(paymentsStore.get('pay_rec_1')!.status, 'REFUND_FAILED');
+    assert.equal(ordersStore.get('order_1')!.paymentStatus, 'REFUND_FAILED');
+  }
+
+  // 10. PARTIAL REFUNDS WORKFLOW & AMOUNT VALIDATION
   setupFixtures();
   {
     // A. Rejection of negative amount

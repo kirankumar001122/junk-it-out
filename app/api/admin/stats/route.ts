@@ -30,6 +30,7 @@ export async function GET(req: NextRequest) {
 
     const startOfDay = new Date(`${kolkataDateStr}T00:00:00+05:30`);
     const endOfDay = new Date(`${kolkataDateStr}T23:59:59.999+05:30`);
+    const slaWindowStart = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
 
     // Short-lived in-memory cache (5 seconds) to absorb concurrent admin polling bursts
     const bypassCache = req.headers.get('cache-control') === 'no-cache' || process.env.NODE_ENV === 'test';
@@ -101,8 +102,12 @@ export async function GET(req: NextRequest) {
       }),
       db.order.count({ where: { status: 'CANCELLED' } }),
       db.order.findMany({
-        where: { status: { in: ['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'] } },
+        where: {
+          status: { in: ['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'] },
+          updatedAt: { gte: slaWindowStart },
+        },
         select: { createdAt: true, updatedAt: true },
+        take: 10000,
       }),
     ]);
 
