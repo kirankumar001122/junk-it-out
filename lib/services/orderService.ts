@@ -168,7 +168,18 @@ export async function createOrder(
         const persistedOrder = await db.order.findUnique({
           where: { id: existing.orderId },
           include: {
-            customer: { include: { user: true } },
+            customer: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    name: true,
+                    phone: true,
+                    email: true,
+                  },
+                },
+              },
+            },
             address: true,
             items: { include: { category: true } },
             statusHistory: true,
@@ -417,12 +428,15 @@ export async function createOrder(
   // ---------------------------------------------------------
   // 8. CREATE ORDER
   // ---------------------------------------------------------
+  // Note: Prisma executes nested creates (items, statusHistory) atomically
+  // in a single database transaction internally, avoiding interactive
+  // transaction timeout (P2028) contention.
 
   let newOrder: any;
   try {
-    newOrder = await db.$transaction(async (tx) => {
-      const createdOrder =
-        await tx.order.create({
+    newOrder = await db.$transaction(
+      async (tx) => {
+        const createdOrder = await tx.order.create({
           data: {
             orderNumber,
 
@@ -490,7 +504,14 @@ export async function createOrder(
           include: {
             customer: {
               include: {
-                user: true,
+                user: {
+                  select: {
+                    id: true,
+                    name: true,
+                    phone: true,
+                    email: true,
+                  },
+                },
               },
             },
 
@@ -506,20 +527,25 @@ export async function createOrder(
           },
         });
 
-      if (normalizedIdempotencyKey && customerId && durableIdempotencyAvailable) {
-        await tx.orderIdempotency.create({
-          data: {
-            customerId,
-            key: normalizedIdempotencyKey,
-            payloadHash,
-            orderId: createdOrder.id,
-            expiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_MS),
-          },
-        });
-      }
+        if (normalizedIdempotencyKey && customerId && durableIdempotencyAvailable) {
+          await tx.orderIdempotency.create({
+            data: {
+              customerId,
+              key: normalizedIdempotencyKey,
+              payloadHash,
+              orderId: createdOrder.id,
+              expiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_MS),
+            },
+          });
+        }
 
-      return createdOrder;
-    });
+        return createdOrder;
+      },
+      {
+        maxWait: 5000,
+        timeout: 15000,
+      }
+    );
   } catch (error: any) {
     if (
       normalizedIdempotencyKey &&
@@ -537,7 +563,18 @@ export async function createOrder(
         const persistedOrder = await db.order.findUnique({
           where: { id: existing.orderId },
           include: {
-            customer: { include: { user: true } },
+            customer: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    name: true,
+                    phone: true,
+                    email: true,
+                  },
+                },
+              },
+            },
             address: true,
             items: { include: { category: true } },
             statusHistory: true,

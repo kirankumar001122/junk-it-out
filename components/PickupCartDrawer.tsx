@@ -26,9 +26,10 @@ import {
   readPickupCart,
   removeFromPickupCart,
   updatePickupCartQuantity,
+  isCustomerPickupCategory,
   type PickupCartItem,
 } from '@/lib/pickupCart';
-import { getCachedClientJson } from '@/lib/clientRequestCache';
+import { getCachedClientJson, invalidateCachedClientJson } from '@/lib/clientRequestCache';
 import { clearSelectedLocation } from '@/lib/selectedLocation';
 import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
 
@@ -71,14 +72,17 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
     return trimmed.substring(0, 2).toUpperCase();
   };
 
-  const checkAuth = useCallback(async () => {
+  const checkAuth = useCallback(async (force = false) => {
     setCheckingAuth(true);
     try {
+      if (force) {
+        invalidateCachedClientJson('authenticated-user');
+      }
       const data = await getCachedClientJson<any>(
         'authenticated-user',
         '/api/auth/me',
         10_000,
-        { cache: 'no-store' }
+        { cache: 'no-store', force }
       );
       const authenticatedCustomer = data.success && data.data?.user?.role === 'CUSTOMER';
       if (authenticatedCustomer) {
@@ -124,7 +128,7 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
         60_000,
         { cache: 'force-cache' }
       ),
-      checkAuth(),
+      checkAuth(true),
     ])
       .then(([categoryData]) => {
         setCategories(
@@ -139,10 +143,13 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
       .finally(() => setLoading(false));
 
     window.addEventListener(pickupCartEvent, refresh);
-    window.addEventListener('jio_auth_change', checkAuth);
+    const handleAuthChange = () => {
+      void checkAuth(true);
+    };
+    window.addEventListener('jio_auth_change', handleAuthChange);
     return () => {
       window.removeEventListener(pickupCartEvent, refresh);
-      window.removeEventListener('jio_auth_change', checkAuth);
+      window.removeEventListener('jio_auth_change', handleAuthChange);
     };
   }, [open, checkAuth]);
 
@@ -234,7 +241,8 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
       }
 
       // Refresh server-side session authority
-      await checkAuth();
+      invalidateCachedClientJson('authenticated-user');
+      await checkAuth(true);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('jio_auth_change'));
       }
@@ -253,6 +261,8 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
     setLoggingOut(true);
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
+      invalidateCachedClientJson('authenticated-user');
+      await checkAuth(true);
       clearSelectedLocation();
       window.dispatchEvent(new CustomEvent('jio_auth_change', { detail: { type: 'logout' } }));
     } catch (err) {
@@ -514,7 +524,14 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
                         {item.category.type === 'WASTE_CHARGE' ? '🧰' : '♻️'}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <h3 className="truncate text-sm font-black text-slate-950">{item.category.name}</h3>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h3 className="truncate text-sm font-black text-slate-950">{item.category.name}</h3>
+                          {!isCustomerPickupCategory(item.category.name) && (
+                            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                              Bulk Evaluation
+                            </span>
+                          )}
+                        </div>
                         <p className="mt-0.5 text-xs font-semibold text-emerald-700">
                           ₹{item.category.pricePerKg}/kg · {item.category.type === 'RECYCLABLE_BUY' ? 'Recyclable value' : 'Service category'}
                         </p>

@@ -289,7 +289,7 @@ export async function refundRazorpayPayment(
     }
     body.amount = amountInPaise;
   }
-  if (notes) {
+  if (notes && typeof notes === 'object') {
     body.notes = notes;
   }
   if (
@@ -307,6 +307,7 @@ export async function refundRazorpayPayment(
       currency: 'INR',
       payment_id: paymentId,
       status: 'processed',
+      notes,
     };
   }
 

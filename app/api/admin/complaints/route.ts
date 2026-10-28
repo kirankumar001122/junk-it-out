@@ -9,12 +9,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, message: 'Admin access required.' }, { status: 403 });
     }
 
-    try {
-      await db.$executeRawUnsafe(`ALTER TABLE "Complaint" ALTER COLUMN "orderId" DROP NOT NULL;`);
-    } catch (_e) {
-      // Schema synchronized
-    }
-
     const { searchParams } = new URL(req.url);
     const page = Math.max(1, Number(searchParams.get('page') || 1) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(searchParams.get('pageSize') || 25) || 25));

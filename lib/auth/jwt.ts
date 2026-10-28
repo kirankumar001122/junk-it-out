@@ -1,4 +1,7 @@
 import { createHmac, timingSafeEqual } from 'crypto';
+import { getJwtSecret, JwtConfigurationError } from './jwtSecret';
+
+export { JwtConfigurationError };
 
 export interface JwtPayload {
   userId: string;
@@ -11,14 +14,6 @@ export interface JwtPayload {
   tokenVersion?: number;
   iat?: number;
   exp?: number;
-}
-
-function getJwtSecret(): string {
-  const secret = process.env.JWT_SECRET?.trim();
-  if (!secret) {
-    throw new Error('JWT_SECRET must be configured on the server.');
-  }
-  return secret;
 }
 
 function base64UrlEncode(str: string): string {
@@ -63,6 +58,7 @@ export function signToken(payload: Omit<JwtPayload, 'iat' | 'exp'>, expiresInDay
 }
 
 export function verifyToken(token: string): JwtPayload | null {
+  const secret = getJwtSecret();
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
@@ -70,7 +66,7 @@ export function verifyToken(token: string): JwtPayload | null {
     const [encodedHeader, encodedPayload, signature] = parts;
     const dataToSign = `${encodedHeader}.${encodedPayload}`;
 
-    const expectedSignature = createHmac('sha256', getJwtSecret())
+    const expectedSignature = createHmac('sha256', secret)
       .update(dataToSign)
       .digest('base64')
       .replace(/=/g, '')

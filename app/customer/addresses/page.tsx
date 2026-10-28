@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { Plus, Trash2, Home, Briefcase } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Plus, Trash2, Home, Briefcase, Lock } from 'lucide-react';
+import CustomerOtpLogin from '@/components/CustomerOtpLogin';
 
 export default function CustomerAddressesPage() {
   const [addresses, setAddresses] = useState<any[]>([]);
@@ -10,6 +11,8 @@ export default function CustomerAddressesPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [isCustomer, setIsCustomer] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
   const [newLabel, setNewLabel] = useState('Home');
   const [newHouse, setNewHouse] = useState('');
   const [newStreet, setNewStreet] = useState('');
@@ -18,24 +21,40 @@ export default function CustomerAddressesPage() {
   const savingRef = useRef(false);
   const deletingRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/customer/addresses', { credentials: 'same-origin' })
-      .then(async (res) => {
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data.success) throw new Error(data.message || 'Unable to load saved addresses.');
-        if (!cancelled) setAddresses(Array.isArray(data.data) ? data.data : []);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to load saved addresses.');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+  const fetchAddresses = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/customer/addresses', { credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        setIsCustomer(false);
+        setAddresses([]);
+        return;
+      }
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Unable to load saved addresses.');
+      }
+      setIsCustomer(true);
+      setAddresses(Array.isArray(data.data) ? data.data : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load saved addresses.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void fetchAddresses();
+
+    const handleAuthChange = () => {
+      void fetchAddresses();
+    };
+    window.addEventListener('jio_auth_change', handleAuthChange);
+    return () => {
+      window.removeEventListener('jio_auth_change', handleAuthChange);
+    };
+  }, [fetchAddresses]);
 
   useEffect(() => {
     if (!showAddModal) return;
@@ -104,17 +123,49 @@ export default function CustomerAddressesPage() {
     }
   };
 
+  if (!loading && !isCustomer) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-16 text-center space-y-6">
+        <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
+            <Lock className="w-7 h-7" />
+          </div>
+          <div className="space-y-1">
+            <h1 className="text-xl font-black text-slate-900">Saved Addresses</h1>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">
+              Log in with your mobile OTP to view and manage your doorstep pickup addresses in South Bengaluru.
+            </p>
+          </div>
+          <button
+            onClick={() => setLoginOpen(true)}
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-3.5 rounded-2xl shadow-md uppercase tracking-wider transition-colors cursor-pointer"
+          >
+            LOGIN WITH MOBILE OTP
+          </button>
+        </div>
+
+        <CustomerOtpLogin
+          open={loginOpen}
+          onClose={() => setLoginOpen(false)}
+          onAuthenticated={() => {
+            setLoginOpen(false);
+            void fetchAddresses();
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="customer-page space-y-6">
-      <div className="customer-page-header">
+    <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
+      <div className="flex items-center justify-between">
         <div>
-          <p className="customer-eyebrow">Pickup preferences</p>
-          <h1 className="customer-title mt-2">Saved addresses</h1>
-          <p className="customer-subtitle mt-2">Keep your regular pickup locations ready for a faster booking.</p>
+          <h1 className="text-2xl font-black text-slate-900">Saved Addresses</h1>
+          <p className="text-xs text-slate-500">Manage your Home, Work, and pickup locations in South Bengaluru</p>
         </div>
         <button
           onClick={() => setShowAddModal(true)}
-          className="customer-action flex items-center gap-1.5 bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-600/20 hover:bg-emerald-700"
+          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 shadow-sm"
         >
           <Plus className="w-4 h-4" />
           Add Address
@@ -131,11 +182,11 @@ export default function CustomerAddressesPage() {
         {loading ? (
           <div className="rounded-3xl bg-slate-100 h-28 animate-pulse" />
         ) : addresses.length === 0 ? (
-          <div className="customer-surface p-8 text-center text-xs text-slate-500">
+          <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-500">
             No saved addresses yet. Add one for faster booking.
           </div>
         ) : addresses.map((addr) => (
-          <div key={addr.id} className="customer-surface space-y-3 p-5">
+          <div key={addr.id} className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xs">
@@ -151,8 +202,7 @@ export default function CustomerAddressesPage() {
               <button
                 onClick={() => handleDeleteAddress(addr.id)}
                 disabled={deletingId === addr.id}
-                aria-label={`Delete ${addr.label} address`}
-                className="grid h-10 w-10 place-items-center rounded-xl text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+                className="text-slate-400 hover:text-rose-600 p-1 disabled:opacity-50"
               >
                 <Trash2 className={`w-4 h-4 ${deletingId === addr.id ? 'animate-pulse' : ''}`} />
               </button>

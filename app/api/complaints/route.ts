@@ -23,7 +23,11 @@ export async function GET(req: NextRequest) {
     const complaints = await db.complaint.findMany({
       where: whereClause,
       include: {
-        customer: { include: { user: true } },
+        customer: {
+          include: {
+            user: { select: { id: true, name: true, phone: true, email: true } },
+          },
+        },
         order: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -42,7 +46,10 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const { orderId, category, subject, description, message, name, phone, email, photoUrl } = body;
 
-    const ticketMessage = (description || message || '').trim() || null;
+    const ticketMessage = (description || message || '').trim();
+    if (!ticketMessage) {
+      return NextResponse.json({ success: false, message: 'Message description is required.' }, { status: 400 });
+    }
 
     let customerId: string | null = authUser?.customerId || null;
 
@@ -78,12 +85,6 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, message: 'You are not authorized to report an issue for this order.' }, { status: 403 });
       }
       targetOrderId = order.id;
-    }
-
-    try {
-      await db.$executeRawUnsafe(`ALTER TABLE "Complaint" ALTER COLUMN "orderId" DROP NOT NULL;`);
-    } catch (_e) {
-      // Schema synchronized
     }
 
     const complaint = await db.complaint.create({
