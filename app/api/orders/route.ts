@@ -3,6 +3,9 @@ import {
   createOrder,
   OrderIdempotencyConflictError,
   InvalidCouponError,
+  InvalidWasteCategoryError,
+  InvalidBookingWeightError,
+  InvalidIdempotencyKeyError,
 } from '@/lib/services/orderService';
 import { validateCreateOrderInput } from '@/lib/validations/schemas';
 import { getAuthUser } from '@/lib/auth/middleware';
@@ -43,6 +46,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (idempotencyKey && !/^[A-Za-z0-9_-]{10,128}$/.test(idempotencyKey.trim())) {
+      return errorResponse(
+        'INVALID_IDEMPOTENCY_KEY',
+        'Idempotency-Key must be 10-128 characters using letters, numbers, "_" or "-".',
+        400,
+      );
+    }
+
     const order = await createOrder(
       body,
       idempotencyKey,
@@ -77,6 +88,35 @@ export async function POST(req: NextRequest) {
         err.message || 'Invalid or ineligible coupon code.',
         400
       );
+    }
+
+    if (
+      err instanceof InvalidWasteCategoryError ||
+      err?.name === 'InvalidWasteCategoryError'
+    ) {
+      return errorResponse(
+        'INVALID_WASTE_CATEGORY',
+        err.message || 'One or more selected waste categories are unavailable.',
+        400,
+      );
+    }
+
+    if (
+      err instanceof InvalidBookingWeightError ||
+      err?.name === 'InvalidBookingWeightError'
+    ) {
+      return errorResponse(
+        'INVALID_BOOKING_WEIGHT',
+        err.message,
+        400,
+      );
+    }
+
+    if (
+      err instanceof InvalidIdempotencyKeyError ||
+      err?.name === 'InvalidIdempotencyKeyError'
+    ) {
+      return errorResponse('INVALID_IDEMPOTENCY_KEY', err.message, 400);
     }
 
     return errorResponse(
@@ -251,7 +291,14 @@ export async function GET(req: NextRequest) {
         include: {
           customer: {
             include: {
-              user: true,
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  phone: true,
+                  email: true,
+                },
+              },
             },
           },
 

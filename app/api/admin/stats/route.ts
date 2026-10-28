@@ -41,6 +41,7 @@ export async function GET(req: NextRequest) {
 
     const startOfDay = new Date(`${kolkataDateStr}T00:00:00+05:30`);
     const endOfDay = new Date(`${kolkataDateStr}T23:59:59.999+05:30`);
+    const slaWindowStart = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
 
     // Grouped queries to prevent connection pool exhaustion on remote PgBouncer connections
     const orderStatusGroups = await db.order.groupBy({
@@ -79,7 +80,10 @@ export async function GET(req: NextRequest) {
     }).catch(() => ({ _sum: { actualWeight: 0 } }));
 
     const completedOrdersDates = await db.order.findMany({
-      where: { status: { in: ['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'] } },
+      where: {
+        status: { in: ['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'] },
+        updatedAt: { gte: slaWindowStart },
+      },
       select: { createdAt: true, updatedAt: true },
       take: 200,
     }).catch(() => [] as Array<{ createdAt: Date; updatedAt: Date }>);

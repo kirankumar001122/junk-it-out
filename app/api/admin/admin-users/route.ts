@@ -13,11 +13,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, message: 'Admin access required.' }, { status: 403 });
     }
 
+    const { searchParams } = new URL(req.url);
+    const page = Math.max(1, Number(searchParams.get('page') || 1) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(searchParams.get('pageSize') || 25) || 25));
     const admins = await db.admin.findMany({
       include: {
         user: true,
       },
       orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
     });
 
     const formatted = admins.map((a) => ({
@@ -32,7 +37,7 @@ export async function GET(req: NextRequest) {
       status: 'ACTIVE',
     }));
 
-    return NextResponse.json({ success: true, data: formatted });
+    return NextResponse.json({ success: true, data: formatted, page, pageSize });
   } catch (error: any) {
     console.error('Fetch admin users error:', error);
     return NextResponse.json({ success: false, message: error.message }, { status: 500 });

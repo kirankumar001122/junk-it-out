@@ -13,6 +13,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, message: 'Admin access required.' }, { status: 403 });
     }
 
+    const { searchParams } = new URL(req.url);
+    const page = Math.max(1, Number(searchParams.get('page') || 1) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(searchParams.get('pageSize') || 25) || 25));
     const customers = await db.customer.findMany({
       include: {
         user: {
@@ -21,6 +24,7 @@ export async function GET(req: NextRequest) {
           },
         },
         orders: {
+          take: 100,
           select: {
             id: true,
             status: true,
@@ -28,6 +32,8 @@ export async function GET(req: NextRequest) {
         },
       },
       orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
     });
 
     const formatted = customers.map((c) => {
@@ -62,7 +68,7 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    return NextResponse.json({ success: true, data: formatted });
+    return NextResponse.json({ success: true, data: formatted, page, pageSize });
   } catch (error: any) {
     console.error('Fetch admin customers error:', error);
     return NextResponse.json({ success: false, message: error.message }, { status: 500 });

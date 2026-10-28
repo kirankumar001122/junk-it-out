@@ -117,33 +117,36 @@ export default function Navbar() {
   return (
     <>
     <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/90 backdrop-blur-xl transition-all">
-      <div className="mx-auto flex max-w-7xl items-center gap-2 sm:gap-3 px-3 sm:px-6 py-2.5">
-        <Link href="/" prefetch className="flex shrink-0 items-center gap-2 transition-opacity hover:opacity-90" aria-label="Junk It Out home">
-          <span className="relative grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl bg-white border border-slate-200 shadow-sm overflow-hidden shrink-0">
-            <img src="/logo.png" alt="Junk It Out Logo" decoding="async" className="h-full w-full object-contain p-1" />
-          </span>
-          <span className="hidden text-base sm:text-lg font-bold tracking-tight text-slate-900 md:block">
-            JUNK IT <span className="text-emerald-600 font-extrabold">OUT</span>
-          </span>
-        </Link>
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-2 sm:gap-4 px-3 sm:px-6 py-2 sm:py-2.5">
+        {/* Left: Brand Identity & Location */}
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <Link href="/" prefetch className="flex shrink-0 items-center gap-2 transition-opacity hover:opacity-90" aria-label="Junk It Out home">
+            <span className="relative grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl bg-white border border-slate-200 shadow-sm overflow-hidden shrink-0">
+              <img src="/logo.png" alt="Junk It Out Logo" decoding="async" className="h-full w-full object-contain p-1" />
+            </span>
+            <span className="hidden text-base sm:text-lg font-bold tracking-tight text-slate-900 md:block">
+              JUNK IT <span className="text-emerald-600 font-extrabold">OUT</span>
+            </span>
+          </Link>
 
-        {/* Display-only location indicator */}
-        <button
-          type="button"
-          onClick={() => setLocationOpen(true)}
-          className="flex min-w-0 shrink-0 items-center gap-1.5 rounded-full bg-slate-50/90 px-2.5 py-1.5 text-left border border-slate-200/90 max-w-[112px] sm:max-w-[200px] sm:gap-2 sm:px-3 md:max-w-[240px] shadow-sm hover:border-emerald-300 hover:bg-white transition-all active:scale-95 cursor-pointer"
-          title={`Pickup Location: ${location}`}
-          aria-label={`Change pickup location. Current location: ${location}`}
-        >
-          <MapPin className="h-4 w-4 shrink-0 text-emerald-600" />
-          <span className="min-w-0 flex-1 overflow-hidden">
-            <span className="block text-[9px] sm:text-[10px] font-semibold uppercase tracking-wider text-slate-500 leading-tight">Picking Up From</span>
-            <span className="block truncate text-xs font-bold text-slate-900 leading-tight">{location}</span>
-          </span>
-        </button>
+          {/* Pickup location indicator & modal trigger */}
+          <button
+            type="button"
+            onClick={() => setLocationOpen(true)}
+            className="flex min-w-0 items-center gap-1.5 rounded-full bg-slate-50/90 px-2.5 py-1 sm:py-1.5 text-left border border-slate-200/90 max-w-[138px] min-[390px]:max-w-[165px] sm:max-w-[210px] md:max-w-[240px] shadow-sm hover:border-emerald-300 hover:bg-white transition-all active:scale-95 cursor-pointer"
+            title={`Pickup Location: ${location}`}
+            aria-label={`Change pickup location. Current location: ${location}`}
+          >
+            <MapPin className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0 text-emerald-600" />
+            <span className="min-w-0 flex-1 overflow-hidden">
+              <span className="block text-[8px] sm:text-[9px] font-semibold uppercase tracking-wider text-slate-400 leading-none mb-0.5">Picking Up From</span>
+              <span className="block truncate text-[11px] sm:text-xs font-bold text-slate-900 leading-tight">{location}</span>
+            </span>
+          </button>
+        </div>
 
-        {/* Search input */}
-        <form onSubmit={submitSearch} className="relative hidden min-w-0 flex-1 max-w-md mx-auto sm:block">
+        {/* Center: Search input (desktop/tablet) */}
+        <form onSubmit={submitSearch} className="relative hidden min-w-0 flex-1 max-w-md mx-4 sm:block">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             value={query}
@@ -154,31 +157,34 @@ export default function Navbar() {
           />
         </form>
 
-        <Link href="/customer/profile" prefetch className="hidden items-center gap-2 rounded-full border border-slate-200/70 bg-white/80 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-white hover:text-slate-900 hover:border-emerald-300 shadow-sm transition-all sm:flex active:scale-95">
-          <CircleUserRound className="h-4.5 w-4.5 text-slate-600" />
-          <span className="hidden lg:inline">{checkingAuth ? 'Account' : getDisplayName(user)}</span>
-        </Link>
+        {/* Right: Customer Actions */}
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2.5">
+          <Link href="/customer/profile" prefetch className="hidden items-center gap-2 rounded-full border border-slate-200/70 bg-white/80 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-white hover:text-slate-900 hover:border-emerald-300 shadow-sm transition-all sm:flex active:scale-95">
+            <CircleUserRound className="h-4.5 w-4.5 text-slate-600" />
+            <span className="hidden lg:inline">{checkingAuth ? 'Account' : getDisplayName(user)}</span>
+          </Link>
 
-        <Link
-          href="/customer/support"
-          aria-label="Customer support"
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-emerald-300 hover:text-emerald-700 sm:h-10 sm:w-10"
-        >
-          <Bell className="h-4 w-4" />
-        </Link>
+          <Link
+            href="/customer/support"
+            aria-label="Customer support"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-emerald-300 hover:text-emerald-700 active:scale-95 sm:h-10 sm:w-10"
+          >
+            <Bell className="h-4 w-4" />
+          </Link>
 
-        <button
-          onClick={() => setCartOpen(true)}
-          className="btn-glossy-dark relative grid h-9 w-9 shrink-0 place-items-center rounded-full text-white shadow-lg shadow-slate-900/10 sm:h-10 sm:w-10"
-          aria-label="Open pickup cart"
-        >
-          <ShoppingBasket className="h-4.5 w-4.5" />
-          {cartCount > 0 && (
-            <span aria-live="polite" className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-emerald-500 px-1 text-[10px] font-bold text-slate-950 shadow-sm animate-scale-in">
-              {cartCount}
-            </span>
-          )}
-        </button>
+          <button
+            onClick={() => setCartOpen(true)}
+            className="btn-glossy-dark relative grid h-9 w-9 shrink-0 place-items-center rounded-full text-white shadow-lg shadow-slate-900/10 active:scale-95 sm:h-10 sm:w-10"
+            aria-label="Open pickup cart"
+          >
+            <ShoppingBasket className="h-4.5 w-4.5" />
+            {cartCount > 0 && (
+              <span aria-live="polite" className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-emerald-500 px-1 text-[10px] font-bold text-slate-950 shadow-sm animate-scale-in">
+                {cartCount}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
     </header>

@@ -289,6 +289,9 @@ export async function refundRazorpayPayment(
     }
     body.amount = amountInPaise;
   }
+  if (notes && typeof notes === 'object') {
+    body.notes = notes;
+  }
   if (
     process.env.NODE_ENV !== 'production' &&
     (paymentId.startsWith('pay_test_') ||
@@ -304,6 +307,7 @@ export async function refundRazorpayPayment(
       currency: 'INR',
       payment_id: paymentId,
       status: 'processed',
+      notes,
     };
   }
 

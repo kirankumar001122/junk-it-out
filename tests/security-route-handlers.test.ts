@@ -12,7 +12,7 @@ import { db } from '../lib/db';
 import { signToken } from '../lib/auth/jwt';
 import { broadcaster } from '../lib/realtime';
 
-process.env.JWT_SECRET = 'security-route-test-secret';
+process.env.JWT_SECRET = 'security-route-test-secret-at-least-32-bytes';
 
 type Role = 'CUSTOMER' | 'AGENT' | 'ADMIN' | 'SUPER_ADMIN';
 

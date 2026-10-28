@@ -81,6 +81,7 @@ export async function POST(
     const itemUpdates: Array<{ id: string; actualWeight: number; subtotal: number }> = [];
 
     if (hasWeightPayload) {
+      const matchedItemIds = new Set<string>();
       let calcRecyclable = 0;
       let calcWasteCharge = 0;
       for (const itemInput of actualWeights) {
@@ -88,6 +89,10 @@ export async function POST(
           (i) => (itemInput?.itemId && i.id === itemInput.itemId) || i.categoryId === itemInput.categoryId || i.id === itemInput.categoryId
         );
         if (dbItem) {
+          if (matchedItemIds.has(dbItem.id)) {
+            return errorResponse('INVALID_WEIGH_DATA', 'Each order item may only have one actual weight entry.', 400);
+          }
+          matchedItemIds.add(dbItem.id);
           const weightKg = itemInput.actualWeight;
           const subtotal = round2(weightKg * dbItem.ratePerKg);
           if (dbItem.category.type === 'WASTE_CHARGE') {

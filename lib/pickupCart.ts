@@ -1,5 +1,17 @@
 export type PickupCartItem = { categoryId: string; quantity: number };
 
+export const ACTIVE_CUSTOMER_CATEGORIES = [
+  'E-Waste',
+  'Household Dry Waste',
+  'Paper & Cardboard',
+  'Plastic Waste',
+] as const;
+
+export function isCustomerPickupCategory(categoryName?: string | null): boolean {
+  if (!categoryName) return false;
+  return (ACTIVE_CUSTOMER_CATEGORIES as readonly string[]).includes(categoryName.trim());
+}
+
 const CART_KEY = 'junk-it-out-pickup-cart';
 const CART_EVENT = 'junk-it-out-cart-updated';
 
