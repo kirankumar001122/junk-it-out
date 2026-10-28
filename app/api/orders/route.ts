@@ -253,7 +253,14 @@ export async function GET(req: NextRequest) {
         include: {
           customer: {
             include: {
-              user: true,
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  phone: true,
+                  email: true,
+                },
+              },
             },
           },
 

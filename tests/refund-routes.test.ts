@@ -98,6 +98,12 @@ const paymentDelegate = db.payment as any;
 const orderDelegate = db.order as any;
 const attemptDelegate = (db as any).refundAttempt;
 const eventDelegate = (db as any).refundAttemptEvent;
+const refundRequestDelegate = (db as any).refundRequest || ((db as any).refundRequest = {});
+refundRequestDelegate.findFirst = async () => null;
+refundRequestDelegate.findUnique = async () => null;
+refundRequestDelegate.findMany = async () => [];
+refundRequestDelegate.create = async () => ({ id: 'mock-refund-request' });
+refundRequestDelegate.update = async () => ({ id: 'mock-refund-request' });
 
 paymentDelegate.findUnique = async ({ where }: any) => {
   const p = paymentsStore.get(where.id);
@@ -148,6 +154,32 @@ orderDelegate.findUnique = async ({ where }: any) => {
   if (!o) return null;
   const payments = Array.from(paymentsStore.values()).filter((p) => p.orderId === o.id);
   return { ...o, payments };
+};
+
+orderDelegate.findFirst = async ({ where }: any = {}) => {
+  for (const o of ordersStore.values()) {
+    if (where?.id && o.id !== where.id) continue;
+    if (where?.orderNumber && o.orderNumber !== where.orderNumber) continue;
+    const payments = Array.from(paymentsStore.values()).filter((p) => p.orderId === o.id);
+    return { ...o, payments };
+  }
+  return null;
+};
+
+orderDelegate.findMany = async () => {
+  return Array.from(ordersStore.values()).map((o) => ({
+    id: o.id,
+    orderNumber: o.orderNumber,
+    status: o.status,
+    finalAmount: 149,
+    estimatedTotal: 149,
+    financialDirection: o.financialDirection,
+    actualTotal: 149,
+    paymentStatus: o.paymentStatus,
+    createdAt: new Date(),
+    customer: { user: { name: 'Customer' } },
+    items: [],
+  }));
 };
 
 attemptDelegate.findUnique = async ({ where, include }: any) => {
@@ -380,6 +412,13 @@ orderDelegate.update = async ({ where, data }: any) => {
         }
         return { count };
       },
+    },
+    refundRequest: {
+      findFirst: async () => null,
+      findUnique: async () => null,
+      findMany: async () => [],
+      create: async () => ({ id: 'mock-refund-request' }),
+      update: async () => ({ id: 'mock-refund-request' }),
     },
   };
   return input(tx);
@@ -959,7 +998,8 @@ run()
     console.error('Test failure:', err);
     process.exitCode = 1;
   })
-  .finally(() => {
+  .finally(async () => {
     https.request = originalHttpsRequest;
     (db as any).$transaction = originalTransaction;
+    await db.$disconnect();
   });

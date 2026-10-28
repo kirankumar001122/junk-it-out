@@ -62,6 +62,7 @@ export default function OrderTrackingPage() {
   );
 
   const [now, setNow] = useState<number>(Date.now());
+  const [sseConnected, setSseConnected] = useState(false);
 
   const [showRatingModal, setShowRatingModal] = useState(false);
 
@@ -228,12 +229,13 @@ export default function OrderTrackingPage() {
   useEffect(() => {
     fetchOrderDetails(true);
 
+    const intervalMs = sseConnected ? 25_000 : 8_000;
     const pollInterval = setInterval(() => {
       if (isTerminalOrderStatus(orderRef.current?.status)) {
         return;
       }
       fetchOrderDetails();
-    }, 5000);
+    }, intervalMs);
 
     // Keep requests scoped to the ID whose tracking page created them.
     // An ID change aborts its current fetch and invalidates its response.
@@ -248,7 +250,7 @@ export default function OrderTrackingPage() {
     };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, sseConnected]);
 
   /*
    * CUSTOMER REALTIME ORDER + AGENT LOCATION STREAM
@@ -257,9 +259,15 @@ export default function OrderTrackingPage() {
    * which may be an order number), once the order has loaded.
    */
   const orderDbId: string | undefined = order?.id;
+  const isTerminal = isTerminalOrderStatus(order?.status);
 
   useEffect(() => {
-    if (!orderDbId || isTerminalOrderStatus(order?.status)) return;
+    if (!orderDbId || isTerminal) {
+      setSseConnected(false);
+      return;
+    }
+
+    let closed = false;
 
     const eventSource = new EventSource(
       `/api/customer/stream?orderId=${encodeURIComponent(orderDbId)}`,
@@ -271,6 +279,8 @@ export default function OrderTrackingPage() {
     );
 
     eventSource.addEventListener("connected", (e: MessageEvent) => {
+      if (closed) return;
+      setSseConnected(true);
       console.log("[tracking] Customer SSE connected:", e.data);
     });
 
@@ -388,6 +398,7 @@ export default function OrderTrackingPage() {
     );
 
     eventSource.onerror = (error) => {
+      if (!closed) setSseConnected(false);
       console.warn(
         "[tracking] Customer SSE connection error. Browser will attempt to reconnect.",
         error,
@@ -395,11 +406,13 @@ export default function OrderTrackingPage() {
     };
 
     return () => {
+      closed = true;
+      setSseConnected(false);
       eventSource.close();
     };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderDbId, order?.status]);
+  }, [orderDbId, isTerminal]);
 
   if (loading) {
     return (

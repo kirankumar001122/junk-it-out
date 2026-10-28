@@ -103,6 +103,7 @@ export default function BookingPage() {
   // Step 3: Summary, Pricing & Confirmation
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [categoryNotice, setCategoryNotice] = useState<string | null>(null);
   const [successOrder, setSuccessOrder] = useState<any>(null);
   const [pendingOrder, setPendingOrder] = useState<any | null>(null);
 
@@ -247,6 +248,13 @@ export default function BookingPage() {
                 estimatedWeight: Math.max(1, item.quantity || 1),
               }));
 
+            const unsupportedCount = cartItems.length - validItems.length;
+            if (unsupportedCount > 0) {
+              setCategoryNotice(
+                'Certain items in your cart require custom bulk evaluation and were held aside from quick doorstep pickup.'
+              );
+            }
+
             if (validItems.length > 0) {
               setSelectedItems(validItems);
             } else if (selectedCategory) {
@@ -262,6 +270,20 @@ export default function BookingPage() {
             setSelectedItems([
               { categoryId: selectedCategory.id, estimatedWeight: 1 },
             ]);
+          } else if (requestedCategory) {
+            const allDbCategory = data.data.find(
+              (c: any) => c.id === requestedCategory || c.name === requestedCategory
+            );
+            if (allDbCategory) {
+              setCategoryNotice(
+                `"${allDbCategory.name}" requires custom on-site bulk evaluation. Please select one of our active doorstep categories below or contact support for bulk scrap.`
+              );
+            }
+            if (defaultServiceCategory) {
+              setSelectedItems([
+                { categoryId: defaultServiceCategory.id, estimatedWeight: 1 },
+              ]);
+            }
           } else if (defaultServiceCategory) {
             setSelectedItems([
               { categoryId: defaultServiceCategory.id, estimatedWeight: 1 },
@@ -1043,6 +1065,17 @@ export default function BookingPage() {
       {/* STEP 1: CATEGORY SELECTION ("What are we picking up?") */}
       {step === 1 && (
         <div className="customer-surface rounded-[1.75rem] p-5 sm:p-7 space-y-6 animate-scale-in">
+          {categoryNotice && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs font-medium text-amber-800 flex items-start gap-2.5">
+              <span className="text-base leading-none">⚠️</span>
+              <div className="flex-1 space-y-1">
+                <p>{categoryNotice}</p>
+                <Link href="/customer/support" className="text-emerald-700 hover:text-emerald-800 font-bold underline text-[11px] inline-flex items-center gap-1">
+                  Need bulk pickup assistance? Contact Support &rarr;
+                </Link>
+              </div>
+            </div>
+          )}
           <div>
             <h2 className="text-lg font-bold text-slate-900 tracking-tight">What materials are you disposing?</h2>
             <p className="text-xs text-slate-500 font-medium mt-0.5">

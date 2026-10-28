@@ -44,8 +44,16 @@ export async function GET(req: NextRequest) {
     const reviews = await db.review.findMany({
       where: whereClause,
       include: {
-        customer: { include: { user: true } },
-        agent: { include: { user: true } },
+        customer: {
+          include: {
+            user: { select: { id: true, name: true, phone: true, email: true } },
+          },
+        },
+        agent: {
+          include: {
+            user: { select: { id: true, name: true, phone: true, email: true } },
+          },
+        },
         order: true,
       },
       orderBy: { createdAt: 'desc' },

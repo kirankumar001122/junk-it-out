@@ -51,8 +51,16 @@ export async function GET(
       : await db.order.findFirst({
           where: getOrderIdentifierWhere(id),
           include: {
-            customer: { include: { user: true } },
-            agent: { include: { user: true } },
+            customer: {
+              include: {
+                user: { select: { id: true, name: true, phone: true, email: true } },
+              },
+            },
+            agent: {
+              include: {
+                user: { select: { id: true, name: true, phone: true, email: true } },
+              },
+            },
             address: true,
             items: { include: { category: true } },
             statusHistory: { orderBy: { timestamp: 'desc' } },

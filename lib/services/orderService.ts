@@ -311,96 +311,112 @@ export async function createOrder(
   // ---------------------------------------------------------
   // 8. CREATE ORDER
   // ---------------------------------------------------------
+  // Note: Prisma executes nested creates (items, statusHistory) atomically
+  // in a single database transaction internally, avoiding interactive
+  // transaction timeout (P2028) contention.
 
   const newOrder =
-    await db.$transaction(async (tx) => {
-      const createdOrder =
-        await tx.order.create({
-          data: {
-            orderNumber,
+    await db.$transaction(
+      async (tx) => {
+        const createdOrder =
+          await tx.order.create({
+            data: {
+              orderNumber,
 
-            customerId:
-              user.customer!.id,
+              customerId:
+                user.customer!.id,
 
-            addressId:
-              savedAddress.id,
+              addressId:
+                savedAddress.id,
 
-            pickupType:
-              input.pickupType || 'ASAP',
+              pickupType:
+                input.pickupType || 'ASAP',
 
-            scheduledSlot:
-              input.scheduledSlot || null,
+              scheduledSlot:
+                input.scheduledSlot || null,
 
-            status:
-              'BOOKING_RECEIVED',
+              status:
+                'BOOKING_RECEIVED',
 
-            financialDirection,
+              financialDirection,
 
-            estimatedTotal:
-              totalWasteItemsValue,
+              estimatedTotal:
+                totalWasteItemsValue,
 
-            pickupCharge:
-              basePickupCharge,
+              pickupCharge:
+                basePickupCharge,
 
-            discountAmount,
+              discountAmount,
 
-            finalAmount,
+              finalAmount,
 
-            // IMPORTANT:
-            // Order starts unpaid.
-            paymentStatus:
-              'PENDING',
+              // IMPORTANT:
+              // Order starts unpaid.
+              paymentStatus:
+                'PENDING',
 
-            wastePhotos:
-              JSON.stringify(
-                input.photos || []
-              ),
+              wastePhotos:
+                JSON.stringify(
+                  input.photos || []
+                ),
 
-            notes:
-              input.notes || null,
+              notes:
+                input.notes || null,
 
-            items: {
-              create:
-                orderItemsData,
-            },
-
-            statusHistory: {
-              create: {
-                oldStatus: null,
-
-                newStatus:
-                  'BOOKING_RECEIVED',
-
-                changedByUserId:
-                  user.id,
-
-                notes:
-                  'Order placed by customer via web platform. Payment pending.',
+              items: {
+                create:
+                  orderItemsData,
               },
-            },
-          },
 
-          include: {
-            customer: {
-              include: {
-                user: true,
+              statusHistory: {
+                create: {
+                  oldStatus: null,
+
+                  newStatus:
+                    'BOOKING_RECEIVED',
+
+                  changedByUserId:
+                    user.id,
+
+                  notes:
+                    'Order placed by customer via web platform. Payment pending.',
+                },
               },
             },
 
-            address: true,
-
-            items: {
-              include: {
-                category: true,
+            include: {
+              customer: {
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      name: true,
+                      phone: true,
+                      email: true,
+                    },
+                  },
+                },
               },
+
+              address: true,
+
+              items: {
+                include: {
+                  category: true,
+                },
+              },
+
+              statusHistory: true,
             },
+          });
 
-            statusHistory: true,
-          },
-        });
-
-      return createdOrder;
-    });
+        return createdOrder;
+      },
+      {
+        maxWait: 5000,
+        timeout: 15000,
+      }
+    );
 
   // ---------------------------------------------------------
   // 9. IMPORTANT
