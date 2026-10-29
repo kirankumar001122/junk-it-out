@@ -3,6 +3,7 @@ import { beforeEach, describe, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { OrderExecutionTimer } from '@/lib/observability/orderTimingDiagnostics';
 import { checkGeofenceServiceability, invalidateServiceAreaCache } from '@/lib/services/serviceAreaService';
+import { invalidateCategoriesCache } from '@/lib/cache/wasteCategoriesCache';
 
 const state = {
   payment: null as any,
@@ -22,6 +23,7 @@ const state = {
   logs: [] as any[],
   serviceAreaFindManyCalls: 0,
   addressCreateCalls: 0,
+  wasteCategoryFindManyCalls: 0,
   ordersById: new Map<string, any>(),
 };
 
@@ -253,9 +255,12 @@ vi.mock('@/lib/db', () => {
   };
 
   const wasteCategory = {
-    findMany: vi.fn(async ({ where }: any) => [
-      { id: 'cat_ewaste_01', name: 'Electronic Waste', pricePerKg: 20.0, minWeightKg: 5, maxWeightKg: 20, active: true },
-    ].filter((category) => where.id.in.includes(category.id) && (!where.active || category.active === where.active))),
+    findMany: vi.fn(async ({ where }: any) => {
+      state.wasteCategoryFindManyCalls += 1;
+      return [
+        { id: 'cat_ewaste_01', name: 'Electronic Waste', pricePerKg: 20.0, minWeightKg: 5, maxWeightKg: 20, active: true },
+      ].filter((category) => where.id.in.includes(category.id) && (!where.active || category.active === where.active));
+    }),
   };
 
   const database = {
@@ -314,9 +319,11 @@ describe('Payment Delay Diagnostics & Timing Telemetry', () => {
     state.logs = [];
     state.serviceAreaFindManyCalls = 0;
     state.addressCreateCalls = 0;
+    state.wasteCategoryFindManyCalls = 0;
     state.ordersById.clear();
     state.currentUser.addresses = [];
     invalidateServiceAreaCache();
+    invalidateCategoriesCache();
     vi.spyOn(console, 'info').mockImplementation((msg: string) => {
       try {
         state.logs.push(JSON.parse(msg));
@@ -605,5 +612,222 @@ describe('Payment Delay Diagnostics & Timing Telemetry', () => {
 
     // Address create was NOT called because existing default address matched
     assert.equal(state.addressCreateCalls, 0, 'Must reuse existing default address without extra DB create call');
+  });
+  it('eliminates redundant DB roundtrips via waste-categories caching and in-memory relation assembly', async () => {
+    invalidateCategoriesCache();
+    state.wasteCategoryFindManyCalls = 0;
+
+    const req1 = createPostRequest(
+      '/api/orders',
+      validBookingPayload,
+      { 'Idempotency-Key': 'idem-perf-test-1' }
+    );
+    const res1 = await createOrderRoute(req1);
+    assert.equal(res1.status, 201);
+    const body1 = await res1.json();
+    assert.equal(body1.success, true);
+
+    // Initial order creation populated the waste categories cache
+    assert.equal(state.wasteCategoryFindManyCalls, 1, 'Initial request loads categories from DB');
+
+    // Verify all assembled relations are present on returned order
+    assert.ok(body1.data.customer, 'Customer relation is present');
+    assert.ok(body1.data.customer.user, 'Customer user relation is present');
+    assert.ok(body1.data.address, 'Address relation is present');
+    assert.ok(body1.data.items?.[0]?.category, 'OrderItem category relation is present');
+    assert.ok(body1.data.statusHistory?.length > 0, 'Status history is present');
+
+    // Second order for different items or new booking within cache TTL
+    const req2 = createPostRequest(
+      '/api/orders',
+      { ...validBookingPayload, notes: 'Second order testing waste cache' },
+      { 'Idempotency-Key': 'idem-perf-test-2' }
+    );
+    const res2 = await createOrderRoute(req2);
+    assert.equal(res2.status, 201);
+    const body2 = await res2.json();
+    assert.equal(body2.success, true);
+
+    // Cache hit: no extra wasteCategory DB query
+    assert.equal(
+      state.wasteCategoryFindManyCalls,
+      1,
+      'Subsequent request within TTL serves waste categories from cache without extra DB roundtrip'
+    );
+  });
+  it('benchmark: measures 3 consecutive booking/payment initialization runs', async () => {
+    const timings: number[] = [];
+    const phaseBreakdowns: any[] = [];
+
+    for (let run = 1; run <= 3; run++) {
+      state.logs = [];
+      const startTime = performance.now();
+      const req = createPostRequest(
+        '/api/orders',
+        {
+          ...validBookingPayload,
+          notes: `Benchmark execution run ${run}`,
+        },
+        {
+          'Idempotency-Key': `idem-benchmark-run-${run}-${Date.now()}`,
+          'x-request-id': `bench-req-${run}-${Date.now()}`,
+        }
+      );
+
+      const res = await createOrderRoute(req);
+      const endTime = performance.now();
+      const elapsedMs = endTime - startTime;
+      timings.push(elapsedMs);
+
+      assert.equal(res.status, 201);
+      const body = await res.json();
+      assert.equal(body.success, true);
+      assert.ok(body.data.paymentConfig);
+      assert.equal(body.data.paymentStatus, 'INITIATED');
+
+      const timingLog = state.logs.find((l: any) => l.event === 'order.execution.timing');
+      if (timingLog) {
+        phaseBreakdowns.push(timingLog.phases);
+      }
+    }
+
+    const avgMs = timings.reduce((a, b) => a + b, 0) / timings.length;
+    console.log('BENCHMARK_OUTPUT_START' + JSON.stringify({
+      benchmarkResults: {
+        run1_seconds: Number((timings[0] / 1000).toFixed(4)),
+        run2_seconds: Number((timings[1] / 1000).toFixed(4)),
+        run3_seconds: Number((timings[2] / 1000).toFixed(4)),
+        average_seconds: Number((avgMs / 1000).toFixed(4)),
+        run1_ms: Math.round(timings[0] * 100) / 100,
+        run2_ms: Math.round(timings[1] * 100) / 100,
+        run3_ms: Math.round(timings[2] * 100) / 100,
+        average_ms: Math.round(avgMs * 100) / 100,
+        phases_run1: phaseBreakdowns[0],
+        phases_run2: phaseBreakdowns[1],
+        phases_run3: phaseBreakdowns[2],
+      }
+    }) + 'BENCHMARK_OUTPUT_END');
+  });
+  it('handles concurrent distinct orders in parallel without lock interference', async () => {
+    const promises = [1, 2, 3].map(async (i) => {
+      const req = createPostRequest(
+        '/api/orders',
+        {
+          ...validBookingPayload,
+          notes: `Concurrent test order ${i}`,
+        },
+        {
+          'Idempotency-Key': `idem-concurrent-${i}-${Date.now()}`,
+          'x-request-id': `req-concurrent-${i}`,
+        }
+      );
+      const res = await createOrderRoute(req);
+      const body = await res.json();
+      return { status: res.status, body };
+    });
+
+    const results = await Promise.all(promises);
+    for (const r of results) {
+      assert.equal(r.status, 201);
+      assert.equal(r.body.success, true);
+      assert.ok(r.body.data.id);
+      assert.ok(r.body.data.paymentConfig);
+      assert.equal(r.body.data.paymentStatus, 'INITIATED');
+    }
+  });
+
+  it('deduplicates concurrent duplicate requests with identical idempotency key in-flight', async () => {
+    const sharedKey = `idem-race-double-click-${Date.now()}`;
+    const initialGatewayCalls = state.gatewayCalls;
+
+    // Simulate two simultaneous button clicks with exact same key
+    const [res1, res2] = await Promise.all([
+      createOrderRoute(
+        createPostRequest('/api/orders', validBookingPayload, { 'Idempotency-Key': sharedKey })
+      ),
+      createOrderRoute(
+        createPostRequest('/api/orders', validBookingPayload, { 'Idempotency-Key': sharedKey })
+      ),
+    ]);
+
+    assert.equal(res1.status, 201);
+    assert.equal(res2.status, 201);
+    const body1 = await res1.json();
+    const body2 = await res2.json();
+
+    assert.equal(body1.success, true);
+    assert.equal(body2.success, true);
+    assert.equal(body1.data.id, body2.data.id, 'Both concurrent calls must return the same order ID');
+    assert.equal(state.gatewayCalls, initialGatewayCalls + 1, 'Only one gateway order must be created for in-flight double clicks');
+  });
+
+  it('refreshes cached waste categories and service areas cleanly after TTL expiry', async () => {
+    invalidateCategoriesCache();
+    invalidateServiceAreaCache();
+    state.wasteCategoryFindManyCalls = 0;
+    state.serviceAreaFindManyCalls = 0;
+
+    // Run 1: cache miss
+    const res1 = await createOrderRoute(
+      createPostRequest('/api/orders', validBookingPayload, { 'Idempotency-Key': `idem-ttl-1-${Date.now()}` })
+    );
+    assert.equal(res1.status, 201);
+    assert.equal(state.wasteCategoryFindManyCalls, 1);
+    assert.equal(state.serviceAreaFindManyCalls, 1);
+
+    // Run 2: cache hit
+    const res2 = await createOrderRoute(
+      createPostRequest('/api/orders', validBookingPayload, { 'Idempotency-Key': `idem-ttl-2-${Date.now()}` })
+    );
+    assert.equal(res2.status, 201);
+    assert.equal(state.wasteCategoryFindManyCalls, 1, 'Cache hit: no extra category DB query');
+    assert.equal(state.serviceAreaFindManyCalls, 1, 'Cache hit: no extra service area DB query');
+
+    // Simulate TTL expiry by invalidating
+    invalidateCategoriesCache();
+    invalidateServiceAreaCache();
+
+    // Run 3: after expiry, cleanly refreshes from database
+    const res3 = await createOrderRoute(
+      createPostRequest('/api/orders', validBookingPayload, { 'Idempotency-Key': `idem-ttl-3-${Date.now()}` })
+    );
+    assert.equal(res3.status, 201);
+    assert.equal(state.wasteCategoryFindManyCalls, 2, 'Cache refresh: loads from DB after TTL expiry');
+    assert.equal(state.serviceAreaFindManyCalls, 2, 'Cache refresh: loads service areas after TTL expiry');
+  });
+
+  it('assembles complete order structure defensively even with minimal or missing optional customer and address fields', async () => {
+    const minimalPayload = {
+      name: 'Minimal User',
+      phone: '9123456789',
+      address: {
+        houseNo: '55',
+        street: 'Main Road',
+        area: 'JP Nagar',
+        pincode: '560078',
+        lat: 12.9077,
+        lng: 77.5854,
+        // Optional building, landmark, googlePlaceId omitted
+      },
+      items: [
+        {
+          categoryId: 'cat_ewaste_01',
+          estimatedWeight: 5,
+        },
+      ],
+      // Optional photos, notes, scheduledSlot omitted
+    };
+
+    const res = await createOrderRoute(
+      createPostRequest('/api/orders', minimalPayload, { 'Idempotency-Key': `idem-defensive-${Date.now()}` })
+    );
+    assert.equal(res.status, 201);
+    const body = await res.json();
+    assert.equal(body.success, true);
+    assert.ok(body.data.customer, 'Customer object assembled');
+    assert.ok(body.data.address, 'Address object assembled');
+    assert.ok(body.data.items?.[0]?.category, 'Category object assembled');
+    assert.ok(body.data.statusHistory?.[0]?.status || body.data.statusHistory?.[0]?.newStatus, 'Status history assembled');
+    assert.equal(body.data.paymentStatus, 'INITIATED');
   });
 });
