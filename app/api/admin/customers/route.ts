@@ -20,14 +20,28 @@ export async function GET(req: NextRequest) {
       include: {
         user: {
           include: {
-            addresses: true,
+            addresses: {
+              select: {
+                id: true,
+                isDefault: true,
+                area: true,
+                city: true,
+              },
+            },
           },
         },
         orders: {
-          take: 100,
+          where: {
+            status: { in: ['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'] },
+          },
           select: {
             id: true,
             status: true,
+          },
+        },
+        _count: {
+          select: {
+            orders: true,
           },
         },
       },
@@ -40,7 +54,7 @@ export async function GET(req: NextRequest) {
       const primaryAddress = c.user.addresses.find((a) => a.isDefault) || c.user.addresses[0];
       const area = primaryAddress ? `${primaryAddress.area}, ${primaryAddress.city}` : 'South Bengaluru';
       const createdAtDate = c.createdAt || c.user.createdAt;
-      const totalOrders = c.orders.length;
+      const totalOrders = (c as any)._count?.orders ?? c.orders?.length ?? 0;
 
       return {
         id: c.id,

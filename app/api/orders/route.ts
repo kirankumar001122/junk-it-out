@@ -144,12 +144,14 @@ export async function GET(req: NextRequest) {
     const { searchParams } =
       new URL(req.url);
 
+    const page = Math.max(1, Number(searchParams.get('page') || 1) || 1);
     const limit = Math.min(
       Number(
         searchParams.get('limit')
       ) || 20,
       100
     );
+    const skip = (page - 1) * limit;
 
     let whereClause: any = {};
 
@@ -382,16 +384,21 @@ export async function GET(req: NextRequest) {
             },
           },
 
-          statusHistory: {
-            orderBy: {
-              timestamp: 'desc',
-            },
-          },
+          ...(authUser.role !== 'CUSTOMER' || searchParams.get('includeHistory') === 'true'
+            ? {
+                statusHistory: {
+                  orderBy: {
+                    timestamp: 'desc',
+                  },
+                },
+              }
+            : {}),
         },
 
         orderBy: {
           createdAt: 'desc',
         },
+        skip,
         take: limit,
       });
     }
