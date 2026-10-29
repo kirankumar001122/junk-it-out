@@ -147,7 +147,8 @@ export async function createOrder(
   authUser?: {
     userId: string;
     customerId?: string | null;
-  } | null
+  } | null,
+  timer?: { recordPhase: (phase: string) => number }
 ) {
   // ---------------------------------------------------------
   // 1. IDEMPOTENCY CHECK
@@ -186,6 +187,11 @@ export async function createOrder(
             address: true,
             items: { include: { category: true } },
             statusHistory: true,
+            payments: {
+              where: { direction: 'CUSTOMER_PAYS' },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
           },
         });
         if (!persistedOrder) {
@@ -229,6 +235,7 @@ export async function createOrder(
   }
 
   const execute = async () => {
+    timer?.recordPhase('idempotency_lookup');
 
   // ---------------------------------------------------------
   // 2. PARALLEL LOOKUP: GEOFENCE, USER PROFILE, AND WASTE CATEGORIES
@@ -250,6 +257,10 @@ export async function createOrder(
           },
           include: {
             customer: true,
+            addresses: {
+              where: { isDefault: true },
+              take: 1,
+            },
           },
         })
       : Promise.resolve(null),
@@ -263,6 +274,7 @@ export async function createOrder(
     }),
   ]);
 
+  timer?.recordPhase('parallel_lookups');
   if (!geofence.serviceable) {
     throw new Error(
       geofence.message ||
@@ -290,27 +302,40 @@ export async function createOrder(
   }
 
   // ---------------------------------------------------------
-  // 4. SAVE PICKUP ADDRESS
+  // 4. SAVE PICKUP ADDRESS (Reuses existing default if identical)
   // ---------------------------------------------------------
 
-  const savedAddress =
-    await saveCustomerAddress(user.id, {
-      label: input.address.label || 'Home',
-      name: input.name,
-      phone: input.phone,
-      houseNo: input.address.houseNo,
-      building: input.address.building,
-      street: input.address.street,
-      area: input.address.area,
-      landmark: input.address.landmark,
-      pincode: input.address.pincode,
-      lat: input.address.lat,
-      lng: input.address.lng,
-      googlePlaceId:
-        input.address.googlePlaceId ||
-        undefined,
-      isDefault: true,
-    });
+  const existingDefaultAddr = user.addresses?.[0];
+  const isIdenticalAddress =
+    existingDefaultAddr &&
+    existingDefaultAddr.houseNo?.trim().toLowerCase() === input.address.houseNo?.trim().toLowerCase() &&
+    existingDefaultAddr.street?.trim().toLowerCase() === input.address.street?.trim().toLowerCase() &&
+    existingDefaultAddr.area?.trim().toLowerCase() === input.address.area?.trim().toLowerCase() &&
+    existingDefaultAddr.pincode?.trim() === input.address.pincode?.trim() &&
+    (input.address.building ? (existingDefaultAddr.building || '').trim().toLowerCase() === input.address.building.trim().toLowerCase() : true) &&
+    (input.address.landmark ? (existingDefaultAddr.landmark || '').trim().toLowerCase() === input.address.landmark.trim().toLowerCase() : true);
+
+  const savedAddress = isIdenticalAddress
+    ? existingDefaultAddr
+    : await saveCustomerAddress(user.id, {
+        label: input.address.label || 'Home',
+        name: input.name,
+        phone: input.phone,
+        houseNo: input.address.houseNo,
+        building: input.address.building,
+        street: input.address.street,
+        area: input.address.area,
+        landmark: input.address.landmark,
+        pincode: input.address.pincode,
+        lat: input.address.lat,
+        lng: input.address.lng,
+        googlePlaceId:
+          input.address.googlePlaceId ||
+          undefined,
+        isDefault: true,
+      });
+
+  timer?.recordPhase('save_customer_address');
 
   // ---------------------------------------------------------
   // 5. VALIDATE WASTE CATEGORIES & WEIGHT
@@ -406,6 +431,8 @@ export async function createOrder(
     discountAmount = couponValidation.discountAmount;
   }
 
+  timer?.recordPhase('coupon_validation');
+
   // ---------------------------------------------------------
   // 7. PAYMENT DIRECTION
   // ---------------------------------------------------------
@@ -479,6 +506,19 @@ export async function createOrder(
             paymentStatus:
               'PENDING',
 
+            ...(financialDirection === 'CUSTOMER_PAYS' && finalAmount > 0
+              ? {
+                  payments: {
+                    create: {
+                      amount: finalAmount,
+                      direction: 'CUSTOMER_PAYS',
+                      gateway: 'RAZORPAY',
+                      status: 'CREATION_PENDING',
+                    },
+                  },
+                }
+              : {}),
+
             wastePhotos:
               JSON.stringify(
                 input.photos || []
@@ -531,6 +571,12 @@ export async function createOrder(
             },
 
             statusHistory: true,
+
+            payments: {
+              where: { direction: 'CUSTOMER_PAYS' },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
           },
         });
 
@@ -553,6 +599,7 @@ export async function createOrder(
         timeout: 15000,
       }
     );
+    timer?.recordPhase('order_creation_tx');
   } catch (error: any) {
     if (
       normalizedIdempotencyKey &&
@@ -585,6 +632,11 @@ export async function createOrder(
             address: true,
             items: { include: { category: true } },
             statusHistory: true,
+            payments: {
+              where: { direction: 'CUSTOMER_PAYS' },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
           },
         });
         if (persistedOrder) return persistedOrder;
