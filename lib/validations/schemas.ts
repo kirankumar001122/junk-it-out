@@ -128,3 +128,47 @@ export function validateStatusTransition(currentStatus: string, targetStatus: st
   const allowed = ALLOWED_STATUS_TRANSITIONS[normCurrent];
   return allowed ? allowed.includes(normTarget) : false;
 }
+
+
+export function validateActualWeightsInput(
+  actualWeights: any,
+  orderItems?: Array<{ id: string; categoryId: string }>
+): { valid: boolean; error?: string } {
+  if (!Array.isArray(actualWeights) || actualWeights.length === 0) {
+    return { valid: false, error: 'Itemized actual weights array is required.' };
+  }
+
+  const matchedItemIds = new Set<string>();
+
+  for (const itemInput of actualWeights) {
+    if (!itemInput || typeof itemInput !== 'object') {
+      return { valid: false, error: 'Each actual weight item must be an object.' };
+    }
+
+    if (
+      typeof itemInput.actualWeight !== 'number' ||
+      !Number.isFinite(itemInput.actualWeight) ||
+      itemInput.actualWeight <= 0
+    ) {
+      return { valid: false, error: 'Each actual weight must be a positive number for a valid order item.' };
+    }
+
+    if (orderItems) {
+      const dbItem = orderItems.find(
+        (i) =>
+          (itemInput.itemId && i.id === itemInput.itemId) ||
+          i.categoryId === itemInput.categoryId ||
+          i.id === itemInput.categoryId
+      );
+      if (!dbItem) {
+        return { valid: false, error: 'Weight submitted for an item that is not in this order.' };
+      }
+      if (matchedItemIds.has(dbItem.id)) {
+        return { valid: false, error: 'Each order item may only have one actual weight entry.' };
+      }
+      matchedItemIds.add(dbItem.id);
+    }
+  }
+
+  return { valid: true };
+}

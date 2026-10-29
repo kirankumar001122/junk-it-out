@@ -123,7 +123,7 @@ if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'test') {
 }
 
 // Low-level HTTPS helper that bypasses Node's fetch issues and works with tests
-function razorpayRequest(
+function executeSingleRazorpayRequest(
   method: string,
   path: string,
   bodyData?: any,
@@ -147,7 +147,7 @@ function razorpayRequest(
           "Content-Length": Buffer.byteLength(payload),
           ...additionalHeaders,
         },
-        timeout: 15000,
+        timeout: 10000,
       },
       (res) => {
         let raw = "";
@@ -190,6 +190,47 @@ function razorpayRequest(
     }
     req.end();
   });
+}
+
+// Low-level HTTPS helper with timeout and transient retry support
+async function razorpayRequest(
+  method: string,
+  path: string,
+  bodyData?: any,
+  additionalHeaders: Record<string, string> = {},
+): Promise<any> {
+  const isIdempotent =
+    method === "GET" ||
+    Boolean(
+      additionalHeaders["X-Refund-Idempotency"] ||
+        additionalHeaders["X-Razorpay-Idempotency-Key"] ||
+        additionalHeaders["X-Idempotency-Key"]
+    );
+  const maxAttempts = isIdempotent ? 2 : 1;
+
+  let lastError: any = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      if (attempt > 1) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+      return await executeSingleRazorpayRequest(
+        method,
+        path,
+        bodyData,
+        additionalHeaders
+      );
+    } catch (err: any) {
+      lastError = err;
+      if (err instanceof RazorpayApiError && err.statusCode < 500) {
+        throw err;
+      }
+      if (attempt >= maxAttempts) {
+        throw err;
+      }
+    }
+  }
+  throw lastError;
 }
 
 // ---------------------------------------------------------
@@ -349,12 +390,12 @@ export async function refundRazorpayPayment(
   if (notes && typeof notes === 'object') {
     body.notes = notes;
   }
+  const { secret } = requireCredentials();
   if (
     process.env.NODE_ENV !== 'production' &&
     (paymentId.startsWith('pay_test_') ||
-      process.env.RAZORPAY_KEY_SECRET === 'YOUR_RAZORPAY_SECRET' ||
-      process.env.RAZORPAY_SECRET === 'YOUR_RAZORPAY_SECRET' ||
-      process.env.RAZORPAY_SECRET === 'your_test_secret')
+      secret === 'YOUR_RAZORPAY_SECRET' ||
+      secret === 'your_test_secret')
   ) {
     console.log('[DEV_MOCK_RAZORPAY_REFUND_SUCCESS]', { paymentId, amountInPaise });
     return {

@@ -84,8 +84,8 @@ export async function checkGeofenceServiceability(
   }
 
   // 2. Check preset Bengaluru zone polygons
-  const matchedZone = BENGALURU_ZONES.find((z) =>
-    z.status === 'ACTIVE' && isPointInPolygon(point, z.boundaryPolygon)
+  const matchedZone = BENGALURU_ZONES.find(
+    (z) => z.status === 'ACTIVE' && isPointInPolygon(point, z.boundaryPolygon)
   );
 
   if (matchedZone) {
