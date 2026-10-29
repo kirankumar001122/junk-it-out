@@ -1,5 +1,6 @@
 import { sendFast2SmsOtp, verifyFast2SmsOtp } from './fast2sms';
 import { opaqueKey } from './requestSecurity';
+import { getSafeErrorType, logStructured } from '../observability/structuredLogger';
 
 const RESEND_COOLDOWN_MS = 30_000;
 const SEND_WINDOW_MS = 10 * 60_000;
@@ -30,11 +31,14 @@ export async function sendOtp(phone: string, clientIp: string) {
   try {
     const provider = await sendFast2SmsOtp(phone.replace(/^\+91/, ''));
     if (!provider.ok) {
-      console.error('[SEND_OTP_PROVIDER_FAILED]', { errorDetails: provider.errorDetails });
+      logStructured('warn', 'auth.otp.send_failed', { dependency: 'fast2sms' });
       return { success: false, status: 'provider_failed' as const, retryAfterSeconds: 0, errorDetails: provider.errorDetails };
     }
   } catch (err: any) {
-    console.error('[SEND_OTP_EXCEPTION]', { error: err.message });
+    logStructured('error', 'auth.otp.send_exception', {
+      dependency: 'fast2sms',
+      errorType: getSafeErrorType(err),
+    });
     return { success: false, status: 'provider_failed' as const, retryAfterSeconds: 0, errorDetails: err.message };
   }
 
@@ -61,10 +65,13 @@ export async function verifyOtp(phone: string, inputCode: string, clientIp: stri
       verifyLimits.delete(key);
       return { valid: true, status: 'verified' as const };
     }
-    console.warn('[VERIFY_OTP_FAILED_PROVIDER]', { errorDetails: provider.errorDetails });
+    logStructured('warn', 'auth.otp.verify_failed', { dependency: 'fast2sms' });
     return { valid: false, status: 'failed' as const, errorDetails: provider.errorDetails };
   } catch (err: any) {
-    console.error('[VERIFY_OTP_EXCEPTION]', { error: err.message });
+    logStructured('error', 'auth.otp.verify_exception', {
+      dependency: 'fast2sms',
+      errorType: getSafeErrorType(err),
+    });
     return { valid: false, status: 'failed' as const, errorDetails: err.message };
   } finally {
     verifyLimits.set(

@@ -13,7 +13,10 @@ export default function AgentBottomNav() {
   const links = [{ href: '/agent', label: 'Dashboard', icon: LayoutDashboard }];
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-40 bg-slate-900 text-white border-t border-slate-800 px-3 py-2 shadow-2xl">
+    <nav
+      aria-label="Agent navigation"
+      className="fixed bottom-0 left-0 right-0 z-40 bg-slate-900 text-white border-t border-slate-800 px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] shadow-2xl"
+    >
       <div className="flex items-center justify-around">
         {links.map((link) => {
           const Icon = link.icon;
@@ -23,6 +26,7 @@ export default function AgentBottomNav() {
             <Link
               key={link.href}
               href={link.href}
+              aria-current={isActive ? 'page' : undefined}
               className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all ${
                 isActive
                   ? 'text-emerald-400 bg-slate-800/80 font-bold scale-105'
@@ -35,6 +39,6 @@ export default function AgentBottomNav() {
           );
         })}
       </div>
-    </div>
+    </nav>
   );
 }

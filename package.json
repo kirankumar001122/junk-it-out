@@ -11,10 +11,14 @@
     "db:seed": "prisma db seed",
     "db:seed:categories": "npx tsx prisma/seed-categories.ts",
     "test": "npm run test:regression && npm run test:standalone",
+    "test:feature-suite": "node scripts/run-test-suite.mjs",
     "test:regression": "vitest run",
-    "test:security": "vitest run tests/security-route-handlers.test.ts",
-    "test:payments": "vitest run tests/payment-idempotency.test.ts",
-    "test:standalone": "tsx tests/order-cancellation.test.ts && tsx tests/order-tracking-access.test.ts && tsx tests/tracking-location.test.ts && tsx tests/customer-pickups-response.test.ts && tsx tests/sse.test.ts && tsx tests/refund-workflow.test.ts && tsx tests/agent-location-route.test.ts && tsx tests/order-idempotency.test.ts && tsx tests/booking-payload-idempotency.test.ts && tsx tests/admin-functional-fixes.test.ts"
+    "test:pg-agent-notifications": "tsx tests/agent-pickup-notifications.postgres.test.ts",
+    "test:pg-agent-concurrency": "tsx tests/agent-order-concurrency.postgres.test.ts",
+    "test:security": "vitest run tests/security-route-handlers.test.ts tests/admin-jwt-config.test.ts tests/admin-security-hardening.test.ts",
+    "test:payments": "vitest run tests/payment-idempotency.test.ts tests/razorpay-order-creation.test.ts tests/payment-retry-and-feedback.test.ts",
+    "test:observability": "vitest run tests/health-routes.test.ts tests/health-route.test.ts tests/structured-logger.test.ts tests/instrumentation.test.ts",
+    "test:standalone": "node scripts/run-test-suite.mjs --standalone-only"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"
@@ -32,6 +36,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "recharts": "^3.10.1",
+    "server-only": "^0.0.1",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Truck,
   MapPin,
@@ -8,7 +8,6 @@ import {
   CheckCircle,
   Clock,
   Scale,
-  Camera,
   Play,
   Navigation,
   RefreshCw,
@@ -23,16 +22,24 @@ import {
   Eye,
   X,
 } from 'lucide-react';
+import {
+  getAgentGeolocationErrorMessage,
+  getFreshAgentCoordinates,
+} from '@/lib/agentGeolocation';
 
 export default function AgentDashboardPage() {
   const [agent, setAgent] = useState<any>(null);
   const [orders, setOrders] = useState<any[]>([]);
   const [activeOrder, setActiveOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [isOnline, setIsOnline] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(false);
+  const [locationSharing, setLocationSharing] = useState(false);
+  const [geolocationSupported, setGeolocationSupported] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<string | null>(null);
+  const [multipleActiveWarning, setMultipleActiveWarning] = useState<string | null>(null);
 
   // Realtime Pickup Notification & Read-Only View Modal State
   const [newPickupNotice, setNewPickupNotice] = useState<any | null>(null);
@@ -58,24 +65,30 @@ export default function AgentDashboardPage() {
     estimatedWeight: number;
     weightStr: string;
   }[]>([]);
-  const [scalePhotoUrl, setScalePhotoUrl] = useState('https://images.unsplash.com/photo-1589939705384-5185137a7f0f?q=80&w=600');
   const [weighNotes, setWeighNotes] = useState('');
   const [submittingWeigh, setSubmittingWeigh] = useState(false);
   const [weighModalError, setWeighModalError] = useState<string | null>(null);
   const dataRequestRef = useRef(false);
+  const refreshAfterRequestRef = useRef(false);
   const acceptingPickupRef = useRef(false);
   const actionRequestRef = useRef(false);
   const statusRequestRef = useRef(false);
   const weighingRequestRef = useRef(false);
   const loginRequestRef = useRef(false);
+  const seenBookingNotificationIdsRef = useRef(new Set<string>());
+  const locationUpdateRequestRef = useRef(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
-  const fetchAgentData = async () => {
-    if (dataRequestRef.current) return;
+  const fetchAgentData = useCallback(async (showLoading = true) => {
+    if (dataRequestRef.current) {
+      refreshAfterRequestRef.current = true;
+      return;
+    }
     dataRequestRef.current = true;
+    setDashboardError(null);
+    if (showLoading) setLoading(true);
+    else setIsRefreshing(true);
     try {
-      setLoading(true);
-      setAuthError(null);
-
       const [profileRes, ordersRes] = await Promise.all([
         fetch('/api/auth/me', { cache: 'no-store' }),
         fetch('/api/orders?limit=20', { cache: 'no-store' }),
@@ -86,7 +99,10 @@ export default function AgentDashboardPage() {
         setAgent(null);
         setOrders([]);
         setActiveOrder(null);
-        setLoading(false);
+        setMultipleActiveWarning(null);
+        if (!profileRes.ok && profileRes.status !== 401) {
+          setDashboardError('Unable to verify your agent session. Please retry.');
+        }
         return;
       }
 
@@ -97,7 +113,8 @@ export default function AgentDashboardPage() {
         setAgent(null);
         setOrders([]);
         setActiveOrder(null);
-        setLoading(false);
+        setMultipleActiveWarning(null);
+        setDashboardError('Your account does not have an active agent profile. Contact an administrator.');
         return;
       }
 
@@ -107,21 +124,34 @@ export default function AgentDashboardPage() {
         phone: agentUser.phone,
         email: agentUser.email,
       });
-      setIsOnline((agentProfile?.status || 'AVAILABLE') !== 'OFFLINE');
+      setIsOnline(agentProfile.status !== 'OFFLINE');
 
       const data = await ordersRes.json().catch(() => ({ success: false }));
-      if (data.success) {
-        const agentOrders = (data.data || []).filter((o: any) => o.agentId === agentProfile.id);
-        setOrders(agentOrders);
+      if (!ordersRes.ok || !data.success || !Array.isArray(data.data)) {
+        setDashboardError(data.error?.message || data.message || 'Unable to load pickups. Retry to refresh your assignments.');
+        return;
+      }
 
-        const assigned = agentOrders.find(
-          (o: any) => !['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED', 'CANCELLED'].includes(o.status)
-        ) || null;
+      const agentOrders = data.data.filter((o: any) => o.agentId === agentProfile.id);
+      setOrders(agentOrders);
 
-        setActiveOrder(assigned);
-        if (assigned) {
-          setActualWeightsInput(
-            (assigned.items || []).map((i: any) => ({
+      const activeAssignments = agentOrders.filter(
+        (o: any) => !['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED', 'CANCELLED'].includes(o.status)
+      );
+
+      const assigned = activeAssignments[0] || null;
+      setActiveOrder(assigned);
+
+      if (activeAssignments.length > 1) {
+        setMultipleActiveWarning(
+          `Notice: Multiple active pickups (${activeAssignments.length}) are currently assigned to your account. Showing pickup #${assigned.orderNumber || assigned.id}. Please contact dispatch.`
+        );
+      } else {
+        setMultipleActiveWarning(null);
+      }
+      setActualWeightsInput(
+        assigned
+          ? (assigned.items || []).map((i: any) => ({
               itemId: i.id,
               categoryId: i.categoryId,
               categoryName: i.category?.name || 'Waste item',
@@ -131,23 +161,25 @@ export default function AgentDashboardPage() {
                   ? String(i.actualWeight)
                   : '',
             }))
-          );
-        } else {
-          setActualWeightsInput([]);
-        }
-      }
-    } catch (e) {
-      console.error(e);
-      setAuthError('Network error while loading your pickup dashboard.');
+          : [],
+      );
+    } catch (error) {
+      console.error('Agent dashboard refresh failed:', error);
+      setDashboardError('Network error while loading your pickup dashboard.');
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
       dataRequestRef.current = false;
+      if (refreshAfterRequestRef.current) {
+        refreshAfterRequestRef.current = false;
+        window.setTimeout(() => void fetchAgentData(false), 0);
+      }
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchAgentData();
-  }, []);
+    void fetchAgentData();
+  }, [fetchAgentData]);
 
   useEffect(() => {
     const TRACKING_ELIGIBLE_STATUSES = [
@@ -158,68 +190,91 @@ export default function AgentDashboardPage() {
       'WASTE_VERIFICATION',
     ];
 
-    if (!activeOrder?.id || !isOnline || !agent?.id) return;
+    if (!activeOrder?.id || !isOnline || !agent?.id || !locationSharing) return;
     if (!TRACKING_ELIGIBLE_STATUSES.includes(activeOrder.status)) return;
 
+    if (!navigator.geolocation) {
+      setLocationSharing(false);
+      setStatusNotice('This device or browser does not support location sharing.');
+      return;
+    }
+
+    let watchId: number | null = null;
+    let controller: AbortController | null = null;
     let cancelled = false;
-    let locationTimer: ReturnType<typeof setTimeout> | undefined;
-    let inFlightController: AbortController | null = null;
 
-    const sendLocation = async () => {
-      // Defer GPS heartbeat if an agent button action is currently in flight
-      // to prevent database lock contention and network pipe saturation
-      if (
-        actionRequestRef.current ||
-        statusRequestRef.current ||
-        weighingRequestRef.current ||
-        acceptingPickupRef.current
-      ) {
-        if (!cancelled) {
-          locationTimer = setTimeout(sendLocation, 3000);
-        }
-        return;
-      }
-
-      const simulatedLat = (activeOrder.address?.lat || 12.9077) + (Math.random() - 0.5) * 0.005;
-      const simulatedLng = (activeOrder.address?.lng || 77.5854) + (Math.random() - 0.5) * 0.005;
-
-      try {
-        inFlightController = new AbortController();
-        const response = await fetch('/api/agent/location', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            agentId: agent.id,
-            orderId: activeOrder.id,
-            lat: simulatedLat,
-            lng: simulatedLng,
-            speed: 22.4,
-          }),
-          signal: inFlightController.signal,
-        });
-        if (!response.ok) {
-          console.warn('[AGENT_LOCATION_UPDATE_FAILED]', response.status);
-        }
-      } catch (error) {
-        if (!(error instanceof DOMException && error.name === 'AbortError')) {
-          console.warn('[AGENT_LOCATION_UPDATE_FAILED]', error);
-        }
-      } finally {
-        inFlightController = null;
-        if (!cancelled) {
-          locationTimer = setTimeout(sendLocation, 8000);
-        }
-      }
+    const stopWatching = () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      watchId = null;
     };
 
-    locationTimer = setTimeout(sendLocation, 8000);
+    watchId = navigator.geolocation.watchPosition(
+      async (position) => {
+        const coordinates = getFreshAgentCoordinates(position);
+        if (!coordinates) {
+          setStatusNotice('A stale or invalid location reading was ignored. Waiting for a fresh device location.');
+          return;
+        }
+        if (
+          cancelled ||
+          locationUpdateRequestRef.current ||
+          actionRequestRef.current ||
+          statusRequestRef.current ||
+          weighingRequestRef.current ||
+          acceptingPickupRef.current
+        ) return;
+
+        locationUpdateRequestRef.current = true;
+        controller = new AbortController();
+        try {
+          const response = await fetch('/api/agent/location', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              orderId: activeOrder.id,
+              ...coordinates,
+            }),
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            setStatusNotice('Location update failed. Your assignment is unchanged; retry location sharing when ready.');
+          }
+        } catch (error) {
+          if (!(error instanceof DOMException && error.name === 'AbortError')) {
+            console.warn('[AGENT_LOCATION_UPDATE_FAILED]', error);
+            setStatusNotice('Network error while sharing location. Retry when your connection is available.');
+          }
+        } finally {
+          controller = null;
+          locationUpdateRequestRef.current = false;
+        }
+      },
+      (error) => {
+        if (cancelled) return;
+        stopWatching();
+        setLocationSharing(false);
+        setStatusNotice(getAgentGeolocationErrorMessage(error.code));
+      },
+      { enableHighAccuracy: true, maximumAge: 15_000, timeout: 15_000 },
+    );
 
     return () => {
       cancelled = true;
-      if (locationTimer) clearTimeout(locationTimer);
-      if (inFlightController) inFlightController.abort();
+      stopWatching();
+      controller?.abort();
     };
-  }, [activeOrder?.id, activeOrder?.status, isOnline, agent?.id]);
+  }, [activeOrder?.id, activeOrder?.status, isOnline, agent?.id, locationSharing]);
+
+  useEffect(() => {
+    setGeolocationSupported(typeof navigator !== 'undefined' && Boolean(navigator.geolocation));
+  }, []);
+
+  useEffect(() => {
+    const trackingStatuses = ['AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WEIGHING', 'WASTE_VERIFICATION'];
+    if (!isOnline || !trackingStatuses.includes(activeOrder?.status)) {
+      setLocationSharing(false);
+    }
+  }, [isOnline, activeOrder?.status]);
 
   // Authenticated Agent SSE Stream Connection for NEW_PICKUP_AVAILABLE Notifications
   useEffect(() => {
@@ -239,6 +294,33 @@ export default function AgentDashboardPage() {
         }
       });
 
+      eventSource.addEventListener('AGENT_BOOKING_ASSIGNED', (e: MessageEvent) => {
+        try {
+          const payload = JSON.parse(e.data);
+          void fetchAgentData(false);
+          const notificationId = payload?.notificationId;
+          if (typeof notificationId !== 'string' || seenBookingNotificationIdsRef.current.has(notificationId)) return;
+
+          const storageKey = `junkitout:agent-booking-notifications:${agent.id}`;
+          try {
+            const storedIds = JSON.parse(localStorage.getItem(storageKey) || '[]');
+            if (Array.isArray(storedIds) && storedIds.includes(notificationId)) {
+              seenBookingNotificationIdsRef.current.add(notificationId);
+              return;
+            }
+            const recentIds = Array.isArray(storedIds) ? storedIds.filter((id) => typeof id === 'string') : [];
+            localStorage.setItem(storageKey, JSON.stringify([...recentIds, notificationId].slice(-100)));
+          } catch {
+            // The in-memory guard still prevents duplicate display for this page session.
+          }
+
+          seenBookingNotificationIdsRef.current.add(notificationId);
+          setStatusNotice(payload.message || `New booking assigned: Order #${payload.orderNumber || ''}.`);
+        } catch (err) {
+          console.error('[AGENT SSE] Error parsing assignment notification:', err);
+        }
+      });
+
       eventSource.onerror = () => {
         // EventSource will automatically handle reconnection safely
       };
@@ -251,20 +333,54 @@ export default function AgentDashboardPage() {
         eventSource.close();
       }
     };
-  }, [agent?.id, isOnline]);
+  }, [agent?.id, isOnline, fetchAgentData]);
 
-  // Keyboard accessibility: dismiss active modal with Escape key
   useEffect(() => {
     if (!showWeighModal && !viewPickupModal) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (showWeighModal && !submittingWeigh) setShowWeighModal(false);
-        if (viewPickupModal) setViewPickupModal(null);
-      }
+      if (e.key !== 'Escape') return;
+      if (showWeighModal && !submittingWeigh) setShowWeighModal(false);
+      if (viewPickupModal) setViewPickupModal(null);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showWeighModal, viewPickupModal, submittingWeigh]);
+
+  useEffect(() => {
+    if (!showWeighModal && !viewPickupModal) return;
+
+    const previousFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const frame = window.requestAnimationFrame(() => dialogRef.current?.focus());
+    const handleTab = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', handleTab);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('keydown', handleTab);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [showWeighModal, Boolean(viewPickupModal)]);
 
   const fetchOrderDetails = async (orderId: string) => {
     const controller = new AbortController();
@@ -436,7 +552,8 @@ export default function AgentDashboardPage() {
     if (loggingOut) return;
     setLoggingOut(true);
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      const response = await fetch('/api/auth/logout', { method: 'POST' });
+      if (!response.ok) throw new Error('Logout request failed.');
       setAgent(null);
       setOrders([]);
       setActiveOrder(null);
@@ -444,6 +561,7 @@ export default function AgentDashboardPage() {
       setLoginOtp('');
     } catch (e) {
       console.error('Agent logout error:', e);
+      setStatusNotice('Unable to log out. Check your connection and try again.');
     } finally {
       setLoggingOut(false);
     }
@@ -475,7 +593,7 @@ export default function AgentDashboardPage() {
         setStatusNotice(`Status updated to ${newStatus}`);
         setTimeout(() => setStatusNotice(null), 3000);
         if (nowOnline) {
-          fetchAgentData();
+            void fetchAgentData(false);
         }
       } else {
         setStatusNotice(data.error?.message || data.message || 'Failed to update status.');
@@ -621,7 +739,7 @@ export default function AgentDashboardPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           actualWeights: payloadActualWeights,
-          scalePhotoUrl,
+          scalePhotoUrl: null,
           notes: weighNotes || 'Digital scale weight recorded at doorstep.',
         }),
         signal: controller.signal,
@@ -633,13 +751,15 @@ export default function AgentDashboardPage() {
         setStatusNotice(`Order #${activeOrder.orderNumber} successfully COMPLETED! Weights persisted & invoice generated.`);
         setTimeout(() => setStatusNotice(null), 6000);
         if (completeData.data?.id) {
-          setActiveOrder(completeData.data);
           setOrders((currentOrders) =>
             currentOrders.map((order) =>
               order.id === completeData.data.id ? completeData.data : order
             )
           );
         }
+        setActiveOrder(null);
+        setActualWeightsInput([]);
+        void fetchAgentData(false);
       } else {
         setWeighModalError(completeData.error?.message || completeData.message || 'Failed to complete pickup order.');
       }
@@ -685,6 +805,14 @@ export default function AgentDashboardPage() {
             <div role="alert" className="p-3 bg-rose-950/60 border border-rose-800/80 text-rose-300 rounded-2xl text-xs font-bold flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
               <span>{loginError}</span>
+            </div>
+          )}
+          {dashboardError && (
+            <div role="alert" className="p-3 bg-amber-950/60 border border-amber-800/80 text-amber-200 rounded-2xl text-xs font-bold">
+              {dashboardError}
+              <button type="button" onClick={() => void fetchAgentData()} className="ml-2 underline">
+                Retry
+              </button>
             </div>
           )}
 
@@ -770,8 +898,23 @@ export default function AgentDashboardPage() {
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-900 text-white pb-24">
-      {authError && (
-        <div className="p-4 text-xs text-amber-200 bg-amber-500/10 border-b border-amber-500/30">{authError}</div>
+      {dashboardError && (
+        <div role="alert" className="p-3 text-xs text-amber-200 bg-amber-500/10 border-b border-amber-500/30 flex items-center justify-between gap-3">
+          <span>{dashboardError}</span>
+          <button
+            type="button"
+            onClick={() => void fetchAgentData(false)}
+            disabled={isRefreshing}
+            className="shrink-0 underline disabled:opacity-50"
+          >
+            {isRefreshing ? 'Refreshing…' : 'Retry'}
+          </button>
+        </div>
+      )}
+      {multipleActiveWarning && (
+        <div role="alert" className="p-3 text-xs font-bold text-amber-200 bg-amber-950/80 border-b border-amber-800 flex items-center justify-between gap-3">
+          <span>{multipleActiveWarning}</span>
+        </div>
       )}
       {statusNotice && (
         <div className="p-3 text-xs font-bold text-center text-emerald-300 bg-emerald-950/60 border-b border-emerald-800 animate-scale-in">
@@ -792,6 +935,15 @@ export default function AgentDashboardPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void fetchAgentData(false)}
+            disabled={isRefreshing}
+            aria-label="Refresh pickup assignments"
+            className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-full border border-slate-700 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+          </button>
           <button
             type="button"
             onClick={toggleAgentStatus}
@@ -879,7 +1031,7 @@ export default function AgentDashboardPage() {
       <div className="p-4 grid grid-cols-3 gap-2">
         <div className="bg-slate-800/80 p-3 rounded-2xl border border-slate-700/50 text-center">
           <span className="text-xl font-black text-white block">{todayPickups}</span>
-          <span className="text-[10px] text-slate-400 uppercase font-semibold">Today Total</span>
+          <span className="text-[10px] text-slate-400 uppercase font-semibold">Recent Total</span>
         </div>
         <div className="bg-slate-800/80 p-3 rounded-2xl border border-slate-700/50 text-center">
           <span className="text-xl font-black text-amber-400 block">{pendingCount}</span>
@@ -924,6 +1076,30 @@ export default function AgentDashboardPage() {
                 <Phone className="w-5 h-5 shrink-0" />
               </a>
             </div>
+
+            {isOnline && ['AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WEIGHING', 'WASTE_VERIFICATION'].includes(activeOrder.status) && (
+              <div className="rounded-2xl border border-slate-700 bg-slate-800/70 p-3 space-y-2">
+                <p className="text-xs text-slate-300">
+                  Location is shared only while this pickup is active and only after you enable it.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatusNotice(null);
+                    setLocationSharing((sharing) => !sharing);
+                  }}
+                  disabled={!geolocationSupported}
+                  aria-pressed={locationSharing}
+                  className="w-full rounded-full border border-emerald-700 px-4 py-3 text-xs font-bold text-emerald-300 disabled:opacity-50"
+                >
+                  {locationSharing
+                    ? 'STOP SHARING LOCATION'
+                    : geolocationSupported
+                      ? 'ENABLE LOCATION SHARING'
+                      : 'LOCATION IS NOT SUPPORTED ON THIS DEVICE'}
+                </button>
+              </div>
+            )}
 
             {/* Waste Items Summary */}
             <div className="pt-2 border-t border-slate-700">
@@ -1029,6 +1205,10 @@ export default function AgentDashboardPage() {
             )}
           </div>
         </div>
+      ) : dashboardError ? (
+        <div role="status" className="mx-4 rounded-2xl border border-amber-800/60 bg-amber-950/40 p-5 text-center text-xs text-amber-200">
+          Pickup assignments could not be confirmed. Retry to check your current work.
+        </div>
       ) : (
         <div className="p-8 text-center text-slate-400 space-y-3">
           <Truck className="w-12 h-12 text-slate-600 mx-auto" />
@@ -1043,6 +1223,8 @@ export default function AgentDashboardPage() {
           role="dialog"
           aria-modal="true"
           aria-label="Record Digital Scale Weights"
+          ref={dialogRef}
+          tabIndex={-1}
           className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
         >
           <div className="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -1079,7 +1261,11 @@ export default function AgentDashboardPage() {
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
+                    <label className="sr-only" htmlFor={`actual-weight-${item.itemId || idx}`}>
+                      Actual weight in kilograms for {item.categoryName}
+                    </label>
                     <input
+                      id={`actual-weight-${item.itemId || idx}`}
                       type="text"
                       inputMode="decimal"
                       value={item.weightStr}
@@ -1101,27 +1287,9 @@ export default function AgentDashboardPage() {
               ))}
             </div>
 
-            {/* Photo Scale Proof */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-slate-400">Scale Photo Proof URL:</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={scalePhotoUrl}
-                  onChange={(e) => setScalePhotoUrl(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-300"
-                />
-                <button
-                  type="button"
-                  onClick={() =>
-                    setScalePhotoUrl('https://images.unsplash.com/photo-1589939705384-5185137a7f0f?q=80&w=600')
-                  }
-                  className="bg-slate-800 border border-slate-700 text-emerald-400 p-2.5 rounded-xl shrink-0 hover:bg-slate-700 transition-colors"
-                >
-                  <Camera className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
+            <p className="rounded-xl border border-slate-700 bg-slate-800/70 p-3 text-xs text-slate-400">
+              Scale-photo upload is not available in this portal. No photo evidence will be attached.
+            </p>
 
             {/* Doorstep Weighing Notes */}
             <div className="space-y-1.5">
@@ -1163,6 +1331,8 @@ export default function AgentDashboardPage() {
           role="dialog"
           aria-modal="true"
           aria-label="Pickup Details"
+          ref={dialogRef}
+          tabIndex={-1}
           className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
         >
           <div className="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -1202,11 +1372,9 @@ export default function AgentDashboardPage() {
                 <p className="font-bold text-white">
                   📍 {viewPickupModal.address?.area || viewPickupModal.serviceArea?.name || 'Bengaluru Zone'}
                 </p>
-                {viewPickupModal.address && (
-                  <p className="text-slate-400 text-[11px] leading-relaxed">
-                    {viewPickupModal.address.houseNo}, {viewPickupModal.address.street}, {viewPickupModal.address.area}
-                  </p>
-                )}
+                <p className="text-slate-400 text-[11px] leading-relaxed">
+                  Exact pickup details are shown after the assignment is accepted.
+                </p>
               </div>
 
               {viewPickupModal.items && viewPickupModal.items.length > 0 && (

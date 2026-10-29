@@ -93,6 +93,8 @@ async function runTests() {
   const originalWasteCategoryFindMany = (db as any).wasteCategory.findMany;
   const originalCouponFindUnique = (db as any).coupon.findUnique;
   const originalOrderFindFirst = (db as any).order.findFirst;
+  const originalOrderFindUnique = (db as any).order.findUnique;
+  const originalOrderIdempotency = (db as any).orderIdempotency;
   const originalTransaction = (db as any).$transaction;
 
   let orderCounter = 1;
@@ -123,8 +125,20 @@ async function runTests() {
   ];
   (db as any).coupon.findUnique = async () => null;
   (db as any).order.findFirst = async () => null;
+  const idempotencyRecords = new Map<string, any>();
+  (db as any).order.findUnique = async ({ where }: any) =>
+    createdOrders.find((o) => o.id === where.id) || null;
+  (db as any).orderIdempotency = {
+    findUnique: async ({ where }: any) => {
+      const key = `${where.customerId_key.customerId}:${where.customerId_key.key}`;
+      return idempotencyRecords.get(key) || null;
+    },
+  };
 
   (db as any).$transaction = async (callback: (tx: any) => Promise<any>) => {
+    let pendingKey: string | null = null;
+    let pendingRecord: any = null;
+
     const tx = {
       order: {
         create: async ({ data }: any) => {
@@ -143,8 +157,25 @@ async function runTests() {
           return order;
         },
       },
+      orderIdempotency: {
+        create: async ({ data }: any) => {
+          const key = `${data.customerId}:${data.key}`;
+          if (idempotencyRecords.has(key)) {
+            const err: any = new Error('Unique constraint failed on the fields: (`customerId`,`key`)');
+            err.code = 'P2002';
+            throw err;
+          }
+          pendingKey = key;
+          pendingRecord = data;
+          return data;
+        },
+      },
     };
-    return callback(tx);
+    const result = await callback(tx);
+    if (pendingKey && pendingRecord) {
+      idempotencyRecords.set(pendingKey, pendingRecord);
+    }
+    return result;
   };
 
   try {
@@ -214,6 +245,8 @@ async function runTests() {
     (db as any).wasteCategory.findMany = originalWasteCategoryFindMany;
     (db as any).coupon.findUnique = originalCouponFindUnique;
     (db as any).order.findFirst = originalOrderFindFirst;
+    (db as any).order.findUnique = originalOrderFindUnique;
+    (db as any).orderIdempotency = originalOrderIdempotency;
     (db as any).$transaction = originalTransaction;
   }
 }

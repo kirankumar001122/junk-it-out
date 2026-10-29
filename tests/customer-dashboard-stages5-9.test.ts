@@ -257,6 +257,9 @@ async function testStages5Through9() {
     customer: { id: 'cust-p1' },
     role: 'CUSTOMER',
   });
+  (db as any).orderIdempotency = {
+    findUnique: async () => null,
+  };
 
   (db as any).$transaction = async (callback: (tx: any) => Promise<any>, options?: any) => {
     txCallCount += 1;
@@ -284,6 +287,9 @@ async function testStages5Through9() {
             statusHistory: data.statusHistory?.create ? [data.statusHistory.create] : [],
           };
         },
+      },
+      orderIdempotency: {
+        create: async () => ({}),
       },
     };
     return callback(tx);

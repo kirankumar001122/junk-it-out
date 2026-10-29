@@ -1,0 +1,32 @@
+name: junkitout-agent-test
+
+services:
+  postgres-agent-test:
+    image: postgres:16
+    profiles:
+      - agent-test
+    environment:
+      POSTGRES_DB: junkitout_agent_test
+      POSTGRES_USER: junkitout_test
+      POSTGRES_PASSWORD: "${JUNKITOUT_AGENT_TEST_PASSWORD:?Set a local-only JUNKITOUT_AGENT_TEST_PASSWORD in the invoking shell}"
+    ports:
+      - target: 5432
+        published: "5433"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    volumes:
+      - agent_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: "no"
+
+volumes:
+  agent_test_data:
+    name: junkitout_agent_test_data
+    driver: local

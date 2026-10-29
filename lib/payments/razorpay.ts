@@ -170,8 +170,16 @@ export async function createRazorpayOrder(input: {
       notes: input.notes,
     });
 
+    if (typeof data?.id !== "string" || !data.id.trim()) {
+      throw new RazorpayOrderCreationError(
+        "Invalid response received from Razorpay gateway.",
+        false,
+        502,
+      );
+    }
+
     return {
-      id: data.id as string,
+      id: data.id,
       amount: data.amount as number,
       currency: data.currency as string,
       keyId,

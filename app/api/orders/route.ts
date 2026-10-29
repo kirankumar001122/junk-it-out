@@ -248,44 +248,94 @@ export async function GET(req: NextRequest) {
     //
     // =====================================================
 
-    const orders = authUser.role === 'AGENT'
-      ? await db.order.findMany({
-        where: whereClause,
-        select: {
-          id: true,
-          orderNumber: true,
-          agentId: true,
-          status: true,
-          customer: {
-            select: {
-              user: { select: { id: true, name: true, phone: true } },
-            },
-          },
-          address: {
-            select: {
-              name: true,
-              houseNo: true,
-              street: true,
-              area: true,
-              lat: true,
-              lng: true,
-              pickupInstructions: true,
-            },
-          },
-          items: {
-            select: {
-              id: true,
-              categoryId: true,
-              estimatedWeight: true,
-              actualWeight: true,
-              category: { select: { id: true, name: true } },
-            },
+    const AGENT_ACTIVE_STATUSES = [
+      'AGENT_ASSIGNED',
+      'AGENT_ACCEPTED',
+      'AGENT_ON_WAY',
+      'AGENT_ARRIVED',
+      'WASTE_VERIFICATION',
+      'WEIGHING',
+    ];
+
+    let orders: any[] = [];
+
+    if (authUser.role === 'AGENT') {
+      const agentOrderSelect = {
+        id: true,
+        orderNumber: true,
+        agentId: true,
+        status: true,
+        customer: {
+          select: {
+            user: { select: { id: true, name: true, phone: true } },
           },
         },
+        address: {
+          select: {
+            name: true,
+            houseNo: true,
+            street: true,
+            area: true,
+            lat: true,
+            lng: true,
+            pickupInstructions: true,
+          },
+        },
+        items: {
+          select: {
+            id: true,
+            categoryId: true,
+            estimatedWeight: true,
+            actualWeight: true,
+            category: { select: { id: true, name: true } },
+          },
+        },
+      };
+
+      // 1. Fetch active assignments for the agent
+      const activeOrders = await db.order.findMany({
+        where: {
+          ...whereClause,
+          status: { in: AGENT_ACTIVE_STATUSES },
+        },
+        select: agentOrderSelect,
         orderBy: { createdAt: 'desc' },
-        take: limit,
-      })
-      : await db.order.findMany({
+      });
+
+      // 2. Anomaly detection: log if agent has multiple active assignments
+      if (activeOrders.length > 1) {
+        console.error(
+          JSON.stringify({
+            timestamp: new Date().toISOString(),
+            severity: 'error',
+            event: 'agent.data_integrity.multiple_active_orders',
+            agentId: authUser.agentId,
+            activeOrderIds: activeOrders.map((o) => o.id),
+            count: activeOrders.length,
+            message: 'Agent has multiple active assignments; returning all active assignments.',
+          })
+        );
+      }
+
+      // 3. Retrieve historical orders excluding active order IDs up to remaining requested limit
+      const activeIds = activeOrders.map((o) => o.id);
+      const remainingLimit = Math.max(0, limit - activeOrders.length);
+
+      const historicalOrders = remainingLimit > 0
+        ? await db.order.findMany({
+            where: {
+              ...whereClause,
+              ...(activeIds.length > 0 ? { id: { notIn: activeIds } } : {}),
+            },
+            select: agentOrderSelect,
+            orderBy: { createdAt: 'desc' },
+            take: remainingLimit,
+          })
+        : [];
+
+      orders = [...activeOrders, ...historicalOrders];
+    } else {
+      orders = await db.order.findMany({
         where: whereClause,
 
         include: {
@@ -342,9 +392,9 @@ export async function GET(req: NextRequest) {
         orderBy: {
           createdAt: 'desc',
         },
-
         take: limit,
       });
+    }
 
     return successResponse(
       orders

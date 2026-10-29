@@ -11,17 +11,12 @@ export async function findOrCreateUserCustomer(phone: string, name = 'Customer',
   const rawDigits = phone.replace(/^\+91/, '').replace(/\D/g, '');
   const phoneVariants = Array.from(new Set([phone, rawDigits, `+91${rawDigits}`, `0${rawDigits}`]));
 
-  console.log('[CUSTOMER_SERVICE] Finding/creating user for phone:', phone, 'variants:', phoneVariants, 'with name:', name);
-  
   let user = await db.user.findFirst({
     where: { phone: { in: phoneVariants } },
     include: { customer: true, agent: true, admin: true },
   });
 
-  console.log('[CUSTOMER_SERVICE] Found user:', user ? user.id : null, 'current name:', user?.name);
-
   if (!user) {
-    console.log('[CUSTOMER_SERVICE] Creating new user with name:', name);
     user = await db.user.create({
       data: {
         phone,
@@ -36,7 +31,6 @@ export async function findOrCreateUserCustomer(phone: string, name = 'Customer',
       },
       include: { customer: true, agent: true, admin: true },
     });
-    console.log('[CUSTOMER_SERVICE] Created user with name:', user.name);
   } else if (user.role !== 'CUSTOMER') {
     throw new CustomerRoleConflictError();
   } else if (!user.customer) {
@@ -49,21 +43,15 @@ export async function findOrCreateUserCustomer(phone: string, name = 'Customer',
     user.customer = customer;
   } else {
     // Update the user's name if a new name is provided and it's different from the current name
-    console.log('[CUSTOMER_SERVICE] Checking name update - current:', user.name, 'new:', name);
     if (name && name !== user.name) {
-      console.log('[CUSTOMER_SERVICE] Updating user name from', user.name, 'to', name);
       user = await db.user.update({
         where: { id: user.id },
         data: { name },
         include: { customer: true, agent: true, admin: true },
       });
-      console.log('[CUSTOMER_SERVICE] Updated user name to:', user.name);
-    } else {
-      console.log('[CUSTOMER_SERVICE] No name update needed');
     }
   }
 
-  console.log('[CUSTOMER_SERVICE] Returning user with name:', user.name);
   return user;
 }
 

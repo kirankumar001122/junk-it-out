@@ -10,7 +10,7 @@ export interface JwtPayload {
   agentId?: string | null;
   adminId?: string | null;
   iat?: number;
-  exp?: number;
+  exp: number;
 }
 
 function base64UrlDecode(str: string): string {
@@ -42,9 +42,9 @@ export function verifyToken(token: string): JwtPayload | null {
     if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null;
 
     const payload: JwtPayload = JSON.parse(base64UrlDecode(encodedPayload));
-    const now = Math.floor(Date.now() / 1000);
-
-    if (payload.exp && payload.exp < now) return null;
+    const expiresAt = payload.exp;
+    if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return null;
+    if (expiresAt <= Date.now() / 1000) return null;
 
     return payload;
   } catch (err) {

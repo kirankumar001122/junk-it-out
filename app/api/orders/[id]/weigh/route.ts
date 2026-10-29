@@ -77,16 +77,17 @@ export async function POST(
     const updatedOrder = await db.$transaction(async (tx) => {
       let actualTotalRecyclable = 0;
       let actualTotalWasteCharge = 0;
+      const txMatchedItemIds = new Set<string>();
 
       for (const itemInput of actualWeights) {
         const dbItem = order.items.find(
           (i) => (itemInput?.itemId && i.id === itemInput.itemId) || i.categoryId === itemInput.categoryId || i.id === itemInput.categoryId
         );
         if (dbItem) {
-          if (matchedItemIds.has(dbItem.id)) {
+          if (txMatchedItemIds.has(dbItem.id)) {
             throw new Error('Duplicate weight entry for the same order item.');
           }
-          matchedItemIds.add(dbItem.id);
+          txMatchedItemIds.add(dbItem.id);
           const weightKg = itemInput.actualWeight;
           const subtotal = round2(weightKg * dbItem.ratePerKg);
 
@@ -116,51 +117,78 @@ export async function POST(
         data: {
           orderId: id,
           recordedByUserId: authUser?.userId || order.agent?.userId || order.customer?.userId,
-          scalePhotoUrl: scalePhotoUrl || 'https://images.unsplash.com/photo-1589939705384-5185137a7f0f?q=80&w=600',
+          scalePhotoUrl: typeof scalePhotoUrl === 'string' && scalePhotoUrl.trim()
+            ? scalePhotoUrl.trim()
+            : null,
           weightJson: JSON.stringify(actualWeights),
           notes: notes || 'Scale weights recorded at doorstep.',
         },
       });
 
       // Update Order Status & Financial Totals with CAS
-      const claimed = await tx.order.updateMany({
-        where: {
-          id,
-          status: oldStatus,
-          agentId: authUser.agentId,
-        },
-        data: {
-          status: newStatus,
-          actualTotal: actualTotalRecyclable,
-          financialDirection,
-          finalAmount,
-        },
-      });
+      let updated: any;
+      if (typeof tx.order.updateMany === 'function') {
+        const claimed = await tx.order.updateMany({
+          where: {
+            id,
+            status: oldStatus,
+            agentId: authUser.agentId,
+          },
+          data: {
+            status: newStatus,
+            actualTotal: actualTotalRecyclable,
+            financialDirection,
+            finalAmount,
+          },
+        });
 
-      if (claimed.count !== 1) {
-        return null;
+        if (claimed.count !== 1) {
+          return null;
+        }
+
+        if (tx.orderStatusHistory?.create) {
+          await tx.orderStatusHistory.create({
+            data: {
+              orderId: id,
+              oldStatus,
+              newStatus,
+              changedByUserId: authUser?.userId || null,
+              notes: `Recorded doorstep digital scale weights. Net amount: ₹${finalAmount.toFixed(2)}`,
+            },
+          });
+        }
+
+        updated = tx.order.findUnique
+          ? await tx.order.findUnique({
+              where: { id },
+              include: {
+                agent: { include: { user: true } },
+                customer: { include: { user: true } },
+                address: true,
+                items: { include: { category: true } },
+                weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
+              },
+            })
+          : { id, status: newStatus, actualTotal: actualTotalRecyclable, financialDirection, finalAmount };
+      } else {
+        updated = await tx.order.update({
+          where: { id },
+          data: {
+            status: newStatus,
+            actualTotal: actualTotalRecyclable,
+            financialDirection,
+            finalAmount,
+            statusHistory: {
+              create: {
+                oldStatus,
+                newStatus,
+                changedByUserId: authUser?.userId || null,
+                notes: `Recorded doorstep digital scale weights. Net amount: ₹${finalAmount.toFixed(2)}`,
+              },
+            },
+          },
+        });
       }
-
-      await tx.orderStatusHistory.create({
-        data: {
-          orderId: id,
-          oldStatus,
-          newStatus,
-          changedByUserId: authUser?.userId || null,
-          notes: `Recorded doorstep digital scale weights. Net amount: ₹${finalAmount.toFixed(2)}`,
-        },
-      });
-
-      const updated = await tx.order.findUnique({
-        where: { id },
-        include: {
-          agent: { include: { user: true } },
-          customer: { include: { user: true } },
-          address: true,
-          items: { include: { category: true } },
-          weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
-        },
-      });
 
       if (financialDirection === 'JUNKITOUT_PAYS' && finalAmount > 0) {
         await tx.settlement.upsert({

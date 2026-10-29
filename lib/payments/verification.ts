@@ -1,5 +1,10 @@
 import { db } from '@/lib/db';
 import {
+  getSafeErrorDependency,
+  getSafeErrorType,
+  logStructured,
+} from '@/lib/observability/structuredLogger';
+import {
   fetchRazorpayPayment,
   fetchRazorpayOrderPayments,
   verifyRazorpayPaymentSignature,
@@ -7,10 +12,19 @@ import {
 
 import {
   findEligibleAgentsForServiceArea,
+  selectNearestEligibleAgent,
 } from '@/lib/services/agentService';
 
 import { broadcaster } from '@/lib/realtime';
 import { transitionOrder } from '@/lib/services/orderLifecycle';
+import {
+  broadcastAgentBookingNotification,
+  deliverAgentPickupNotifications,
+  getAgentPickupNotificationId,
+  persistAgentPickupNotificationsOnce,
+  persistAgentBookingNotificationOnce,
+} from '@/lib/services/agentBookingNotification';
+import { sendAgentPickupOffer } from '@/lib/services/whatsappService';
 
 export class PaymentVerificationError extends Error {
   statusCode: number;
@@ -105,9 +119,7 @@ export async function dispatchPaidOrderToAgents(
     // -------------------------------------------------------
 
     if (!order) {
-      console.warn(
-        `[DISPATCH] Order ${orderId} not found.`
-      );
+      logStructured('warn', 'payment.dispatch.order_not_found', { dependency: 'database' });
 
       return;
     }
@@ -119,9 +131,7 @@ export async function dispatchPaidOrderToAgents(
     if (
       order.paymentStatus !== 'CAPTURED'
     ) {
-      console.log(
-        `[DISPATCH] Order #${order.orderNumber} not dispatched because paymentStatus is ${order.paymentStatus}.`
-      );
+      logStructured('info', 'payment.dispatch.skipped');
 
       return;
     }
@@ -134,9 +144,7 @@ export async function dispatchPaidOrderToAgents(
       order.financialDirection !==
       'CUSTOMER_PAYS'
     ) {
-      console.log(
-        `[DISPATCH] Order #${order.orderNumber} is not a CUSTOMER_PAYS order.`
-      );
+      logStructured('info', 'payment.dispatch.skipped');
 
       return;
     }
@@ -147,6 +155,7 @@ export async function dispatchPaidOrderToAgents(
 
     if (order.agentId) {
       if (['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED'].includes(order.status)) {
+        let notificationCreated = false;
         const transition = await transitionOrder<any>({
           orderId: order.id,
           expectedStatus: order.status,
@@ -165,6 +174,15 @@ export async function dispatchPaidOrderToAgents(
               where: { id: order.agentId! },
               data: { status: 'ASSIGNED' },
             });
+            if (order.agent?.userId) {
+              notificationCreated = await persistAgentBookingNotificationOnce(tx, {
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                agentId: order.agentId!,
+                agentUserId: order.agent.userId,
+                status: 'AGENT_ASSIGNED',
+              });
+            }
           },
         });
         if (transition.changed) {
@@ -188,12 +206,37 @@ export async function dispatchPaidOrderToAgents(
             status: 'AGENT_ASSIGNED',
             assignedAt: new Date().toISOString(),
           });
+          if (notificationCreated && order.agent?.userId) {
+            broadcastAgentBookingNotification({
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              agentId: order.agentId,
+              agentUserId: order.agent.userId,
+              status: 'AGENT_ASSIGNED',
+            }, notificationCreated, (event, payload) => broadcaster.broadcast(event, payload));
+          }
         }
+      } else if (['AGENT_ASSIGNED', 'AGENT_ACCEPTED'].includes(order.status) && order.agent?.userId) {
+        // Assignment can predate payment capture. Queue the agent notification
+        // once payment is verified, without changing the lifecycle status.
+        const assignment = {
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          agentId: order.agentId,
+          agentUserId: order.agent.userId,
+          status: order.status,
+        };
+        const notificationCreated = await db.$transaction((tx) =>
+          persistAgentBookingNotificationOnce(tx, assignment),
+        );
+        broadcastAgentBookingNotification(assignment, notificationCreated, (event, payload) =>
+          broadcaster.broadcast(event, payload),
+        );
       }
       return;
     }
 
-    if (!['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'].includes(order.status)) {
+    if (!['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED', 'AGENT_ACCEPTED'].includes(order.status)) {
       return;
     }
 
@@ -209,26 +252,36 @@ export async function dispatchPaidOrderToAgents(
         targetServiceArea
       );
 
-    const availableEligibleAgents =
-      (eligibleAgents || []).filter(
-        (agent: any) =>
-          agent.status === 'AVAILABLE'
-      );
+    // Keep retries pinned to the agent originally offered this order. If that
+    // agent is no longer eligible, stop instead of silently falling back.
+    const priorPickupOffer = await db.notification.findFirst({
+      where: { orderId: order.id, type: 'AGENT_PICKUP_AVAILABLE', provider: 'FAST2SMS' },
+      orderBy: { sentAt: 'asc' },
+      select: { id: true, userId: true, recipient: true },
+    });
 
-    console.log(
-      `[DISPATCH] Paid order #${order.orderNumber} for service area '${targetServiceArea}'. Available eligible agents count: ${availableEligibleAgents.length}`
-    );
+    const pickupLat = order.address?.lat;
+    const pickupLng = order.address?.lng;
+    const pickupCoordinates = typeof pickupLat === 'number' && typeof pickupLng === 'number'
+      ? { lat: pickupLat, lng: pickupLng }
+      : null;
+    if (!pickupCoordinates || !Number.isFinite(pickupCoordinates.lat) || pickupCoordinates.lat < -90 || pickupCoordinates.lat > 90 ||
+      !Number.isFinite(pickupCoordinates.lng) || pickupCoordinates.lng < -180 || pickupCoordinates.lng > 180) {
+      logStructured('info', 'payment.dispatch.no_pickup_coordinates');
+      return;
+    }
+    const selectedAgent = priorPickupOffer
+      ? (eligibleAgents || []).find((agent: any) =>
+          agent.userId === priorPickupOffer.userId || agent.user.phone === priorPickupOffer.recipient,
+        ) || null
+      : selectNearestEligibleAgent(eligibleAgents || [], pickupCoordinates, targetServiceArea);
 
     // -------------------------------------------------------
     // 7. NO AVAILABLE AGENTS
     // -------------------------------------------------------
 
-    if (
-      availableEligibleAgents.length === 0
-    ) {
-      console.log(
-        `[DISPATCH] No available eligible agents for paid order #${order.orderNumber}.`
-      );
+    if (!selectedAgent) {
+      logStructured('info', 'payment.dispatch.no_agents_available');
 
       return;
     }
@@ -236,11 +289,6 @@ export async function dispatchPaidOrderToAgents(
     // -------------------------------------------------------
     // 8. NOTIFY AVAILABLE AGENTS VIA NEW_PICKUP_AVAILABLE
     // -------------------------------------------------------
-
-    const targetAgentIds =
-      availableEligibleAgents.map(
-        (agent: any) => agent.id
-      );
 
     const estimatedTotalWeight =
       order.items.reduce(
@@ -255,35 +303,141 @@ export async function dispatchPaidOrderToAgents(
         0
       );
 
-    const notificationPayload = {
-      type: 'NEW_PICKUP_AVAILABLE',
-      targetAgentIds,
+    const pickupAddress = [
+      order.address?.houseNo,
+      order.address?.building,
+      order.address?.street,
+      order.address?.landmark,
+      targetServiceArea,
+      order.address?.city,
+      order.address?.pincode,
+    ].filter((part) => typeof part === 'string' && part.trim()).join(', ');
+    const mapsLink = `https://www.google.com/maps?q=${encodeURIComponent(`${pickupLat},${pickupLng}`)}`;
+    let notificationCreated = false;
+    let pickupNotificationId = priorPickupOffer?.id;
+    if (!priorPickupOffer) {
+      notificationCreated = await db.$transaction((tx) =>
+        persistAgentPickupNotificationsOnce(tx, [{
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          agentId: selectedAgent.id,
+          agentUserId: selectedAgent.userId,
+          agentPhone: selectedAgent.user.phone,
+          pickupAddress: pickupAddress || targetServiceArea || 'Pickup address unavailable',
+          latitude: pickupLat!,
+          longitude: pickupLng!,
+          mapsLink,
+        }]),
+      ) === 1;
+      pickupNotificationId = getAgentPickupNotificationId(order.id, selectedAgent.id);
+    }
+
+    // A concurrent dispatch may have won the order-scoped notification key
+    // with a different candidate. Always deliver to the persisted winner.
+    const persistedPickupOffer = pickupNotificationId
+      ? await db.notification.findUnique({
+          where: { id: pickupNotificationId },
+          select: { userId: true, recipient: true },
+        })
+      : null;
+    const deliveryAgent = persistedPickupOffer
+      ? (eligibleAgents || []).find((agent: any) =>
+          agent.userId === persistedPickupOffer.userId || agent.user.phone === persistedPickupOffer.recipient,
+        ) || null
+      : null;
+    if (!deliveryAgent || !pickupNotificationId) return;
+
+    const pickupOffers = [{
+      notificationId: pickupNotificationId,
       orderId: order.id,
-      orderNumber:
-        order.orderNumber,
-      serviceArea:
-        targetServiceArea,
-      estimatedQuantity:
-        `${estimatedTotalWeight.toFixed(1)} kg`,
-      itemsSummary:
-        `${order.items.length} category item(s)`,
-      createdAt:
-        order.createdAt.toISOString(),
-    };
+      orderNumber: order.orderNumber,
+      agentId: deliveryAgent.id,
+      agentUserId: deliveryAgent.userId,
+      agentPhone: deliveryAgent.user.phone,
+      pickupAddress: pickupAddress || targetServiceArea || 'Pickup address unavailable',
+      latitude: pickupLat!,
+      longitude: pickupLng!,
+      mapsLink,
+    }];
 
-    broadcaster.broadcast(
-      'NEW_PICKUP_AVAILABLE',
-      notificationPayload
-    );
+    try {
+      if (notificationCreated) {
+        broadcaster.broadcast('NEW_PICKUP_AVAILABLE', {
+          type: 'NEW_PICKUP_AVAILABLE',
+          targetAgentIds: [deliveryAgent.id],
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          serviceArea: targetServiceArea,
+          estimatedQuantity: `${estimatedTotalWeight.toFixed(1)} kg`,
+          itemsSummary: `${order.items.length} category item(s)`,
+          createdAt: order.createdAt.toISOString(),
+        });
+      }
 
-    console.log(
-      `[DISPATCH] NEW_PICKUP_AVAILABLE sent for paid order #${order.orderNumber}.`
-    );
+      await deliverAgentPickupNotifications(pickupOffers, {
+        claim: async (notificationId) => {
+          const staleSendingCutoff = new Date(Date.now() - 2 * 60_000);
+          const claimed = await db.notification.updateMany({
+            where: {
+              id: notificationId,
+              OR: [
+                { status: { in: ['QUEUED', 'FAILED'] } },
+                { status: 'SENDING', sentAt: { lt: staleSendingCutoff } },
+              ],
+            },
+            data: {
+              status: 'SENDING',
+              deliveryStatus: 'sending',
+              statusDescription: 'Sending agent pickup alert.',
+              sentAt: new Date(),
+            },
+          });
+          return claimed.count === 1;
+        },
+        send: (offer) => sendAgentPickupOffer({
+          agentPhone: offer.agentPhone,
+          orderNumber: offer.orderNumber,
+          pickupAddress: offer.pickupAddress,
+          latitude: offer.latitude,
+          longitude: offer.longitude,
+          mapsLink: offer.mapsLink,
+        }),
+        markSent: async (notificationId, requestId) => {
+          await db.notification.updateMany({
+            where: { id: notificationId, status: 'SENDING' },
+            data: {
+              status: 'SENT',
+              deliveryStatus: 'sent',
+              statusDescription: 'Accepted by Fast2SMS WhatsApp API.',
+              providerRequestId: requestId ?? null,
+              sentAt: new Date(),
+            },
+          });
+        },
+        markFailed: async (notificationId) => {
+          await db.notification.updateMany({
+            where: { id: notificationId, status: 'SENDING' },
+            data: {
+              status: 'FAILED',
+              deliveryStatus: 'failed',
+              statusDescription: 'Fast2SMS WhatsApp request failed; retry is available.',
+            },
+          });
+        },
+      });
+    } catch (error) {
+      logStructured('error', 'payment.dispatch.agent_notifications_failed', {
+        dependency: getSafeErrorDependency(error) || 'database',
+        errorType: getSafeErrorType(error),
+      });
+    }
+
+    logStructured('info', 'payment.dispatch.notification_queued');
   } catch (error) {
-    console.error(
-      `[DISPATCH ERROR] Failed to notify agents for paid order ${orderId}:`,
-      error
-    );
+    logStructured('error', 'payment.dispatch.failed', {
+      dependency: getSafeErrorDependency(error),
+      errorType: getSafeErrorType(error),
+    });
   }
 }
 
@@ -767,7 +921,10 @@ export async function reconcilePaymentForOrder(
         };
       }
     } catch (err) {
-      console.warn('[RECONCILE] Provider lookup by payment ID failed:', { errorType: err instanceof Error ? err.name : 'UnknownError' });
+      logStructured('warn', 'payment.reconcile.provider_lookup_failed', {
+        dependency: 'razorpay',
+        errorType: getSafeErrorType(err),
+      });
     }
   }
 
@@ -816,8 +973,9 @@ export async function reconcilePaymentForOrder(
         };
       }
     } catch (err) {
-      console.warn('[RECONCILE] Provider lookup by gateway order failed:', {
-        errorType: err instanceof Error ? err.name : 'UnknownError',
+      logStructured('warn', 'payment.reconcile.provider_lookup_failed', {
+        dependency: 'razorpay',
+        errorType: getSafeErrorType(err),
       });
     }
   }
