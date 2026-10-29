@@ -80,7 +80,7 @@ export async function POST(
     // 2. Load Agent Profile & Check Availability Status
     const agent = await db.agent.findUnique({
       where: { id: agentId },
-      include: { user: true },
+      include: { user: { select: { id: true, name: true, phone: true } } },
     });
 
     if (!agent) {

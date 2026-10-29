@@ -18,7 +18,9 @@ export async function GET(req: NextRequest) {
     const pageSize = Math.min(100, Math.max(1, Number(searchParams.get('pageSize') || 25) || 25));
     const admins = await db.admin.findMany({
       include: {
-        user: true,
+        user: {
+          select: { id: true, name: true, phone: true, email: true, role: true },
+        },
       },
       orderBy: { createdAt: 'desc' },
       skip: (page - 1) * pageSize,

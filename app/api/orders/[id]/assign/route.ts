@@ -28,7 +28,7 @@ export async function POST(
 
     const order = await db.order.findUnique({
       where: { id },
-      include: { agent: { include: { user: true } }, customer: { include: { user: true } } },
+      include: { agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } }, customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } } },
     });
 
     if (!order) {
@@ -37,7 +37,7 @@ export async function POST(
 
     const agent = await db.agent.findUnique({
       where: { id: agentId },
-      include: { user: true },
+      include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } },
     });
 
     if (!agent) {
@@ -76,7 +76,7 @@ export async function POST(
       if (updated.count !== 1) {
         const currentOrder = await tx.order.findUnique({
           where: { id },
-          include: { agent: { include: { user: true } }, customer: { include: { user: true } } },
+          include: { agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } }, customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } } },
         });
         return { changed: false as const, notificationCreated: false, order: currentOrder };
       }
@@ -124,8 +124,8 @@ export async function POST(
       const assignedOrder = await tx.order.findUnique({
         where: { id },
         include: {
-          agent: { include: { user: true } },
-          customer: { include: { user: true } },
+          agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
+          customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
           address: true,
           items: { include: { category: true } },
         },
