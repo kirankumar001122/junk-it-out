@@ -29,11 +29,8 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     include: [
       'tests/security-route-handlers.test.ts',
-<<<<<<< HEAD
       'tests/admin-jwt-config.test.ts',
-=======
       'tests/admin-security-hardening.test.ts',
->>>>>>> origin/main
       'tests/payment-idempotency.test.ts',
       'tests/razorpay-order-creation.test.ts',
       'tests/health-routes.test.ts',
