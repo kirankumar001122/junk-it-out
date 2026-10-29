@@ -19,6 +19,7 @@ import {
   CheckCircle,
   XCircle,
   FileBarChart,
+  UserPlus,
 } from 'lucide-react';
 import InteractiveMap from '@/components/InteractiveMap';
 import { SOUTH_BENGALURU_ZONES } from '@/lib/geofence';
@@ -40,6 +41,7 @@ export default function AdminDashboardPage() {
 
   // In-flight concurrency and debouncing guards
   const assignInFlightRef = useRef(false);
+  const manualInFlightRef = useRef(false);
   const isFetchingRef = useRef(false);
   const pendingRefreshRef = useRef(false);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -49,6 +51,8 @@ export default function AdminDashboardPage() {
   const [manualName, setManualName] = useState('Ravi Shankar');
   const [manualArea, setManualArea] = useState('JP Nagar');
   const [manualHouse, setManualHouse] = useState('Plot 42, 10th Cross');
+  const [manualLoading, setManualLoading] = useState(false);
+  const [manualError, setManualError] = useState<string | null>(null);
 
   const loadAdminData = async (isBackground = false) => {
     if (isFetchingRef.current) {
@@ -65,7 +69,7 @@ export default function AdminDashboardPage() {
 
       const [statsRes, ordersRes, agentsRes] = await Promise.all([
         fetch('/api/admin/stats').then((r) => r.json()).catch(() => ({ success: false })),
-        fetch('/api/orders').then((r) => r.json()).catch(() => ({ success: false })),
+        fetch('/api/orders?limit=100').then((r) => r.json()).catch(() => ({ success: false })),
         fetch('/api/admin/agents').then((r) => r.json()).catch(() => ({ success: false })),
       ]);
 
@@ -118,15 +122,39 @@ export default function AdminDashboardPage() {
     };
   }, []);
 
+  // Keyboard accessibility and body scroll lock for modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowManualModal(false);
+        setSelectedOrderForAssign(null);
+        setAssignError(null);
+      }
+    };
+    if (showManualModal || selectedOrderForAssign) {
+      window.addEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = 'hidden';
+    }
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = '';
+    };
+  }, [showManualModal, selectedOrderForAssign]);
+
+  const sortedAgents = [...agents].sort((a, b) => {
+    if (a.status === 'AVAILABLE' && b.status !== 'AVAILABLE') return -1;
+    if (a.status !== 'AVAILABLE' && b.status === 'AVAILABLE') return 1;
+    return a.name.localeCompare(b.name);
+  });
+
   const openAssignModal = (order: any) => {
     setSelectedOrderForAssign(order);
     setAssignError(null);
     if (order.agentId && agents.some((a) => a.id === order.agentId)) {
       setSelectedAgentId(order.agentId);
-    } else if (agents.length > 0) {
-      setSelectedAgentId(agents[0].id);
     } else {
-      setSelectedAgentId('');
+      const firstAvailable = agents.find((a) => a.status === 'AVAILABLE');
+      setSelectedAgentId(firstAvailable ? firstAvailable.id : (agents[0]?.id || ''));
     }
   };
 
@@ -170,10 +198,72 @@ export default function AdminDashboardPage() {
     }
   };
 
+  const handleCreateManualOrder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (manualInFlightRef.current || manualLoading) return;
+
+    manualInFlightRef.current = true;
+    setManualLoading(true);
+    setManualError(null);
+
+    try {
+      const selectedZone = SOUTH_BENGALURU_ZONES.find((z) => z.name === manualArea) || SOUTH_BENGALURU_ZONES[0];
+      const categoriesRes = await fetch('/api/waste-categories').then((r) => r.json()).catch(() => null);
+      const activeCats = categoriesRes?.data || [];
+      const firstCat = activeCats[0] || { id: 'default-cat', name: 'Plastic Waste', pricePerKg: 18, type: 'RECYCLABLE_BUY' };
+
+      const payload = {
+        name: manualName.trim(),
+        phone: manualPhone.trim(),
+        pickupType: 'ASAP',
+        financialDirection: 'CUSTOMER_PAYS',
+        items: [
+          {
+            categoryId: firstCat.id,
+            categoryName: firstCat.name,
+            type: firstCat.type,
+            pricePerKg: firstCat.pricePerKg,
+            estimatedWeight: 5.0,
+          },
+        ],
+        address: {
+          label: 'Home',
+          houseNo: manualHouse.trim(),
+          street: 'Main Road',
+          area: selectedZone.name,
+          city: 'Bengaluru',
+          pincode: '560078',
+          lat: selectedZone.centerLat,
+          lng: selectedZone.centerLng,
+        },
+        notes: 'Manual order created by Operations Dispatcher',
+      };
+
+      const res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
+        setShowManualModal(false);
+        await loadAdminData(true);
+      } else {
+        setManualError(data?.error?.message || data?.message || 'Failed to create manual order.');
+      }
+    } catch {
+      setManualError('Network error while placing manual order.');
+    } finally {
+      manualInFlightRef.current = false;
+      setManualLoading(false);
+    }
+  };
+
   const filteredOrders = orders.filter((o) => {
     const matchesStatus = filterStatus === 'ALL' || o.status === filterStatus;
     const matchesSearch =
-      o.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      o.orderNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       o.customer?.user?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       o.address?.area?.toLowerCase().includes(searchTerm.toLowerCase());
     return matchesStatus && matchesSearch;
@@ -182,185 +272,196 @@ export default function AdminDashboardPage() {
   return (
     <div className="space-y-6">
       {/* TOP HEADER BAR */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+        <div>
+          <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-3 py-1 rounded-full uppercase">
+            Control Center
+          </span>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-1">
+            Junk It Out Operations Dashboard
+          </h1>
+          <p className="text-xs text-slate-500">South Bengaluru Service Area Control & Live Monitoring</p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              setManualError(null);
+              setShowManualModal(true);
+            }}
+            className="btn-glossy-primary rounded-full text-white font-extrabold text-xs px-5 py-3 shadow-md flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4 shrink-0" />
+            CREATE MANUAL ORDER
+          </button>
+          <a
+            href="/api/admin/reports"
+            className="btn-glossy-dark rounded-full text-white font-bold text-xs px-5 py-3 flex items-center gap-2 shadow-sm"
+          >
+            <FileBarChart className="w-4 h-4 text-emerald-400 shrink-0" />
+            EXPORT CSV REPORT
+          </a>
+        </div>
+      </div>
+
+      {/* METRICS WIDGET CARDS & SLA MONITORING */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-slate-500 uppercase">Today&apos;s Bookings</span>
+            <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+              <Package className="w-4 h-4" />
+            </div>
+          </div>
+          <span className="text-3xl font-black text-slate-900">{stats?.totalOrders ?? 0}</span>
+          <div className="flex items-center gap-2 mt-2 text-xs">
+            <span className="text-amber-600 font-bold">{stats?.activeOrders ?? 0} Active</span>
+            <span className="text-slate-400">|</span>
+            <span className="text-emerald-600 font-bold">{stats?.completedOrders ?? stats?.completedPickups ?? 0} Completed</span>
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-slate-500 uppercase">Total Waste Collected</span>
+            <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+              <Scale className="w-4 h-4" />
+            </div>
+          </div>
+          <span className="text-3xl font-black text-slate-900">
+            {stats?.totalWeightKg ?? 0} <span className="text-lg text-slate-500">kg</span>
+          </span>
+          <p className="text-xs text-slate-500 mt-2">South Bengaluru Total Weight</p>
+        </div>
+
+        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-slate-500 uppercase">Revenue & Payouts</span>
+            <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
+              <CreditCard className="w-4 h-4" />
+            </div>
+          </div>
+          <span className="text-3xl font-black text-slate-900">₹{stats?.totalRevenue ?? 0}</span>
+          <div className="flex items-center gap-2 mt-2 text-xs">
+            <span className="text-emerald-600 font-bold">₹{stats?.totalCustomerPayouts ?? 0} Paid Out</span>
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-slate-500 uppercase">Active Fleet</span>
+            <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center">
+              <Users className="w-4 h-4" />
+            </div>
+          </div>
+          <span className="text-3xl font-black text-slate-900">{stats?.activeAgents ?? 0}</span>
+          <p className="text-xs text-slate-500 mt-2">
+            {stats?.availableAgents ?? 0} Available for Dispatch
+          </p>
+        </div>
+      </div>
+
+      {/* REAL-TIME MAP SECTION */}
+      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
-            <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-3 py-1 rounded-full uppercase">
-              Control Center
-            </span>
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-1">
-              Junk It Out Operations Dashboard
-            </h1>
-            <p className="text-xs text-slate-500">South Bengaluru Service Area Control & Live Monitoring</p>
+            <h2 className="text-base font-bold text-slate-900">South Bengaluru Live GPS & Zones</h2>
+            <p className="text-xs text-slate-500">Live coordinates of agents and scheduled pickup addresses</p>
+          </div>
+          <div className="flex items-center gap-4 text-xs font-bold text-slate-600">
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Available</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span> Assigned</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span> En Route</span>
+          </div>
+        </div>
+
+        <InteractiveMap
+          centerLat={12.9077}
+          centerLng={77.5854}
+          zoom={12}
+          polygons={SOUTH_BENGALURU_ZONES.map((z) => ({ name: z.name, coordinates: z.boundaryPolygon }))}
+          markers={orders
+            .filter((o) => o.agent)
+            .map((o) => ({
+              id: o.id,
+              lat: o.agent.currentLat || 12.9077,
+              lng: o.agent.currentLng || 77.5854,
+              title: `${o.agent.user.name} (${o.agent.vehicleNumber})`,
+              subtitle: `Order: ${o.orderNumber} - ${o.status}`,
+              type: 'AGENT' as const,
+              status: o.agent.status,
+            }))}
+          className="h-80 w-full rounded-2xl border border-slate-200 overflow-hidden shadow-inner"
+        />
+      </div>
+
+      {/* ORDERS MANAGEMENT TABLE */}
+      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden space-y-4 p-6">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>
+            <h2 className="text-base font-bold text-slate-900">All Pickup Orders</h2>
+            <p className="text-xs text-slate-500">Filter, re-assign, update status, and manage pickups</p>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowManualModal(true)}
-              className="btn-glossy-primary rounded-full text-white font-extrabold text-xs px-5 py-3 shadow-md flex items-center gap-2"
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <div className="relative flex-1 sm:w-64">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              <input
+                type="text"
+                placeholder="Search Order ID / Customer / Area"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs font-medium focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700"
             >
-              <Plus className="w-4 h-4 shrink-0" />
-              CREATE MANUAL ORDER
-            </button>
-            <a
-              href="/api/admin/reports"
-              className="btn-glossy-dark rounded-full text-white font-bold text-xs px-5 py-3 flex items-center gap-2 shadow-sm"
-            >
-              <FileBarChart className="w-4 h-4 text-emerald-400 shrink-0" />
-              EXPORT CSV REPORT
-            </a>
+              <option value="ALL">All Statuses</option>
+              <option value="BOOKING_RECEIVED">Booking Received</option>
+              <option value="AGENT_ASSIGNED">Agent Assigned</option>
+              <option value="AGENT_ON_WAY">Agent On Way</option>
+              <option value="WEIGHING">Weighing</option>
+              <option value="PICKUP_COMPLETED">Completed</option>
+              <option value="CANCELLED">Cancelled</option>
+            </select>
           </div>
         </div>
 
-        {/* METRICS WIDGET CARDS & SLA MONITORING */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-slate-500 uppercase">Today's Bookings</span>
-              <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
-                <Package className="w-4 h-4" />
-              </div>
-            </div>
-            <span className="text-3xl font-black text-slate-900">{stats?.totalOrders || 0}</span>
-            <div className="flex items-center gap-2 mt-2 text-xs">
-              <span className="text-amber-600 font-bold">{stats?.activeOrders || 0} Active</span>
-              <span className="text-slate-400">|</span>
-              <span className="text-emerald-600 font-bold">{stats?.completedOrders || 0} Completed</span>
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-slate-500 uppercase">Total Waste Collected</span>
-              <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
-                <Scale className="w-4 h-4" />
-              </div>
-            </div>
-            <span className="text-3xl font-black text-slate-900">{stats?.totalWeightKg || 0} <span className="text-lg text-slate-500">kg</span></span>
-            <p className="text-xs text-slate-500 mt-2">South Bengaluru Total Weight</p>
-          </div>
-
-          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-slate-500 uppercase">Revenue & Payouts</span>
-              <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
-                <CreditCard className="w-4 h-4" />
-              </div>
-            </div>
-            <span className="text-3xl font-black text-slate-900">₹{stats?.totalRevenue || 0}</span>
-            <div className="flex items-center gap-2 mt-2 text-xs">
-              <span className="text-emerald-700 font-bold">₹{stats?.paidCustomerPayouts ?? stats?.totalCustomerPayouts ?? 0} Paid</span>
-              <span className="text-slate-300">|</span>
-              <span className="text-amber-700 font-bold">₹{stats?.approvedCustomerPayouts || 0} Approved</span>
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-slate-500 uppercase">20-30 Min SLA Meter</span>
-              <div className="w-8 h-8 rounded-xl bg-teal-100 text-teal-700 flex items-center justify-center">
-                <Clock className="w-4 h-4" />
-              </div>
-            </div>
-            <span className="text-3xl font-black text-emerald-600">{stats?.slaOnTimeRate || 96.4}%</span>
-            <div className="flex items-center gap-1 mt-2 text-xs font-bold text-emerald-700">
-              <ShieldCheck className="w-4 h-4" />
-              <span>Target 30 Mins Compliant</span>
-            </div>
-          </div>
-        </div>
-
-        {/* LIVE AGENTS OPERATIONS MAP */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">Live Agent Operations Map</h2>
-              <p className="text-xs text-slate-500">Real-time status of all active field agents in South Bengaluru</p>
-            </div>
-            <div className="flex items-center gap-3 text-xs font-bold">
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Available</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span> Assigned</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span> En Route</span>
-            </div>
-          </div>
-
-          <InteractiveMap
-            centerLat={12.9077}
-            centerLng={77.5854}
-            zoom={12}
-            polygons={SOUTH_BENGALURU_ZONES.map((z) => ({ name: z.name, coordinates: z.boundaryPolygon }))}
-            markers={orders
-              .filter((o) => o.agent)
-              .map((o) => ({
-                id: o.id,
-                lat: o.agent.currentLat || 12.9077,
-                lng: o.agent.currentLng || 77.5854,
-                title: `${o.agent.user.name} (${o.agent.vehicleNumber})`,
-                subtitle: `Order: ${o.orderNumber} - ${o.status}`,
-                type: 'AGENT' as const,
-                status: o.agent.status,
-              }))}
-            className="h-80 w-full rounded-2xl border border-slate-200 overflow-hidden shadow-inner"
-          />
-        </div>
-
-        {/* ORDERS MANAGEMENT TABLE */}
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden space-y-4 p-6">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">All Pickup Orders</h2>
-              <p className="text-xs text-slate-500">Filter, re-assign, update status, and manage pickups</p>
-            </div>
-
-            <div className="flex items-center gap-3 w-full sm:w-auto">
-              <div className="relative flex-1 sm:w-64">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                <input
-                  type="text"
-                  placeholder="Search Order ID / Customer / Area"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs font-medium focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700"
-              >
-                <option value="ALL">All Statuses</option>
-                <option value="BOOKING_RECEIVED">Booking Received</option>
-                <option value="AGENT_ASSIGNED">Agent Assigned</option>
-                <option value="AGENT_ON_WAY">Agent On Way</option>
-                <option value="WEIGHING">Weighing</option>
-                <option value="PICKUP_COMPLETED">Completed</option>
-                <option value="CANCELLED">Cancelled</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-500 uppercase font-bold text-[10px]">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-left text-xs">
+            <thead className="bg-slate-50 text-slate-500 uppercase font-bold text-[10px]">
+              <tr>
+                <th className="p-3">Order ID</th>
+                <th className="p-3">Customer</th>
+                <th className="p-3">Area</th>
+                <th className="p-3">Status</th>
+                <th className="p-3">Assigned Agent</th>
+                <th className="p-3">Estimate / Final</th>
+                <th className="p-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 font-medium">
+              {filteredOrders.length === 0 ? (
                 <tr>
-                  <th className="p-3">Order ID</th>
-                  <th className="p-3">Customer</th>
-                  <th className="p-3">Area</th>
-                  <th className="p-3">Status</th>
-                  <th className="p-3">Assigned Agent</th>
-                  <th className="p-3">Estimate / Final</th>
-                  <th className="p-3">Actions</th>
+                  <td colSpan={7} className="p-8 text-center text-slate-400 space-y-2">
+                    <Package className="w-8 h-8 mx-auto text-slate-300" />
+                    <p className="font-bold text-slate-700 text-xs">No orders match filter criteria</p>
+                    <p className="text-[11px] text-slate-400">Try adjusting your search term or status filter</p>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-medium">
-                {filteredOrders.map((o) => (
+              ) : (
+                filteredOrders.map((o) => (
                   <tr key={o.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="p-3 font-mono font-bold text-slate-900">{o.orderNumber}</td>
                     <td className="p-3">
-                      <span className="font-bold text-slate-900 block">{o.customer?.user?.name}</span>
+                      <span className="font-bold text-slate-900 block">{o.customer?.user?.name || 'Customer'}</span>
                       <span className="text-[11px] text-slate-500">{o.customer?.user?.phone}</span>
                     </td>
-                    <td className="p-3 font-bold text-slate-700">{o.address?.area}</td>
+                    <td className="p-3 font-bold text-slate-700">{o.address?.area || 'South Bengaluru'}</td>
                     <td className="p-3">
                       <span
                         className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase ${
@@ -375,7 +476,7 @@ export default function AdminDashboardPage() {
                       </span>
                     </td>
                     <td className="p-3 font-bold text-slate-800">
-                      {o.agent ? `${o.agent.user.name} (${o.agent.vehicleNumber})` : 'Unassigned'}
+                      {o.agent ? `${o.agent.user.name} (${o.agent.vehicleNumber})` : <span className="text-amber-600 font-extrabold">Unassigned</span>}
                     </td>
                     <td className="p-3 font-bold text-slate-900">
                       ₹{o.finalAmount || o.estimatedTotal}
@@ -390,23 +491,149 @@ export default function AdminDashboardPage() {
                         </Link>
                         <button
                           onClick={() => openAssignModal(o)}
-                          className="btn-glossy-primary rounded-full text-white px-3.5 py-1.5 text-[11px] font-bold shadow-2xs"
+                          className="btn-glossy-primary rounded-full text-white px-3.5 py-1.5 text-[11px] font-bold shadow-2xs flex items-center gap-1"
                         >
+                          <UserPlus className="w-3.5 h-3.5" />
                           Assign
                         </button>
                       </div>
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
+      </div>
+
+      {/* CREATE MANUAL ORDER MODAL */}
+      {showManualModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Create Manual Pickup Order"
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 overflow-y-auto"
+        >
+          <div
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm cursor-pointer"
+            onClick={() => setShowManualModal(false)}
+            aria-hidden="true"
+          />
+          <form onSubmit={handleCreateManualOrder} className="relative bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl z-10 my-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">Create Manual Pickup Order</h3>
+                <p className="text-xs text-slate-500">Dispatch waste collection for phone/offline requests</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowManualModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {manualError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs font-bold text-rose-700 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{manualError}</span>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-700">Customer Full Name</label>
+              <input
+                type="text"
+                required
+                value={manualName}
+                onChange={(e) => setManualName(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-900"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-700">Customer Phone Number</label>
+              <input
+                type="text"
+                required
+                value={manualPhone}
+                onChange={(e) => setManualPhone(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-900"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-700">South Bengaluru Service Area</label>
+              <select
+                value={manualArea}
+                onChange={(e) => setManualArea(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-900"
+              >
+                {SOUTH_BENGALURU_ZONES.map((zone) => (
+                  <option key={zone.id} value={zone.name}>
+                    {zone.name} (ETA: {zone.etaMinutes} mins)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-700">Door / House & Street Address</label>
+              <input
+                type="text"
+                required
+                value={manualHouse}
+                onChange={(e) => setManualHouse(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-900"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowManualModal(false)}
+                disabled={manualLoading}
+                className="w-1/2 btn-glossy-secondary rounded-full text-slate-700 font-bold text-xs py-3 shadow-2xs disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={manualLoading}
+                className="w-1/2 btn-glossy-primary rounded-full text-white font-bold text-xs py-3 shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {manualLoading ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Booking...</span>
+                  </>
+                ) : (
+                  <span>Place Order</span>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* AGENT ASSIGNMENT MODAL */}
       {selectedOrderForAssign && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Assign Agent to Order"
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 overflow-y-auto"
+        >
+          <div
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm cursor-pointer"
+            onClick={() => {
+              setSelectedOrderForAssign(null);
+              setAssignError(null);
+            }}
+            aria-hidden="true"
+          />
+          <div className="relative bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl z-10 my-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-base font-extrabold text-slate-900">
@@ -457,9 +684,9 @@ export default function AdminDashboardPage() {
                   disabled={assignLoading}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none disabled:opacity-50"
                 >
-                  {agents.map((ag) => (
+                  {sortedAgents.map((ag) => (
                     <option key={ag.id} value={ag.id}>
-                      {ag.name} ({ag.vehicleType} • {ag.vehicleNumber}) - {ag.status} [★{ag.rating} | {ag.phone}]
+                      {ag.status === 'AVAILABLE' ? '🟢 [AVAILABLE]' : `⚪ [${ag.status}]`} {ag.name} ({ag.vehicleType} • {ag.vehicleNumber}) [★{ag.rating} | {ag.phone}]
                     </option>
                   ))}
                 </select>
@@ -484,7 +711,14 @@ export default function AdminDashboardPage() {
                 disabled={assignLoading || agents.length === 0 || !selectedAgentId}
                 className="w-1/2 btn-glossy-primary rounded-full text-white font-bold text-xs py-3 shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {assignLoading ? 'Assigning...' : 'Confirm Assignment'}
+                {assignLoading ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Assigning...</span>
+                  </>
+                ) : (
+                  <span>Confirm Assignment</span>
+                )}
               </button>
             </div>
           </div>

@@ -14,16 +14,27 @@ async function run() {
 
   const originalPaymentAggregate = paymentDelegate.aggregate;
   const originalSettlementAggregate = settlementDelegate.aggregate;
+  const originalSettlementGroupBy = settlementDelegate.groupBy;
   const originalOrderCount = orderDelegate.count;
+  const originalOrderGroupBy = orderDelegate.groupBy;
   const originalOrderFindMany = orderDelegate.findMany;
   const originalAgentCount = agentDelegate.count;
+  const originalAgentGroupBy = agentDelegate.groupBy;
   const originalCustomerCount = customerDelegate.count;
   const originalOrderItemAggregate = orderItemDelegate.aggregate;
 
   // Stubs
   orderDelegate.count = async () => 10;
   orderDelegate.findMany = async () => [];
+  orderDelegate.groupBy = async () => [
+    { status: 'BOOKING_RECEIVED', _count: { _all: 3 } },
+    { status: 'AGENT_ASSIGNED', _count: { _all: 2 } },
+    { status: 'PICKUP_COMPLETED', _count: { _all: 5 } },
+  ];
   agentDelegate.count = async () => 5;
+  agentDelegate.groupBy = async () => [
+    { status: 'AVAILABLE', _count: { _all: 5 } },
+  ];
   customerDelegate.count = async () => 20;
   orderItemDelegate.aggregate = async () => ({ _sum: { actualWeight: 150.5 } });
 
@@ -33,7 +44,13 @@ async function run() {
     return { _sum: { amount: 2450.0 } };
   };
 
-  // Mock Settlements (Approved = ₹850.00, Paid = ₹400.00, Pending = ₹120.00)
+  // Mock Settlements GroupBy (Approved = ₹850.00, Paid = ₹400.00, Pending = ₹120.00)
+  settlementDelegate.groupBy = async () => [
+    { status: 'APPROVED', _sum: { amount: 850.0 } },
+    { status: 'PAID', _sum: { amount: 400.0 } },
+    { status: 'PENDING', _sum: { amount: 120.0 } },
+  ];
+
   settlementDelegate.aggregate = async ({ where }: any) => {
     if (Array.isArray(where?.status?.in)) {
       if (where.status.in.includes('APPROVED')) {
@@ -78,15 +95,18 @@ async function run() {
     assert.equal(data.totalCustomerPayouts, 400.0, 'totalCustomerPayouts should reflect paid settlements');
     assert.equal(data.approvedCustomerPayouts, 850.0, 'approvedCustomerPayouts should equal sum of APPROVED settlements');
     assert.equal(data.pendingCustomerPayouts, 120.0, 'pendingCustomerPayouts should equal sum of PENDING settlements');
-    assert.equal(data.totalCustomerSettlements, 1250.0, 'totalCustomerSettlements should equal approved + paid');
+    assert.equal(data.totalCustomerSettlements, 1370.0, 'totalCustomerSettlements should equal approved + paid + pending');
 
     console.log('Admin stats database aggregation and payout separation tests passed.');
   } finally {
     paymentDelegate.aggregate = originalPaymentAggregate;
     settlementDelegate.aggregate = originalSettlementAggregate;
+    settlementDelegate.groupBy = originalSettlementGroupBy;
     orderDelegate.count = originalOrderCount;
+    orderDelegate.groupBy = originalOrderGroupBy;
     orderDelegate.findMany = originalOrderFindMany;
     agentDelegate.count = originalAgentCount;
+    agentDelegate.groupBy = originalAgentGroupBy;
     customerDelegate.count = originalCustomerCount;
     orderItemDelegate.aggregate = originalOrderItemAggregate;
     await db.$disconnect();

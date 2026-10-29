@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser } from '@/lib/auth/middleware';
+import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 import {
   getSafeErrorDependency,
   getSafeErrorType,
@@ -306,7 +306,11 @@ async function reconcileFromProvider(payment: any, attemptId: string) {
 async function handlePost(req: NextRequest, context: ApiRequestContext) {
   try {
     const authUser = await getAuthUser(req);
-    if (!authUser || !['ADMIN', 'SUPER_ADMIN'].includes(authUser.role)) {
+    const authorizationStatus = getAdminAuthorizationStatus(authUser);
+    if (authorizationStatus === 401) {
+      return NextResponse.json({ success: false, message: 'Authentication is required.' }, { status: 401 });
+    }
+    if (authorizationStatus === 403) {
       return NextResponse.json({ success: false, message: 'Admin access required.' }, { status: 403 });
     }
 
@@ -432,6 +436,16 @@ async function handlePost(req: NextRequest, context: ApiRequestContext) {
           skipDuplicates: true,
         });
       });
+
+      await db.auditLog.create({
+        data: {
+          userId: authUser?.userId || null,
+          userName: authUser?.name || 'Admin Operations',
+          action: 'PAYMENT_REFUND_RESET',
+          oldValue: `Payment ${payment.id} status: REFUND_FAILED`,
+          newValue: `Payment ${payment.id} safely reset to ${resetTargetStatus} after Razorpay lookup verified no provider record exists.`,
+        },
+      }).catch(() => null);
 
       return NextResponse.json({
         success: true,
@@ -635,6 +649,17 @@ async function handlePost(req: NextRequest, context: ApiRequestContext) {
     if (workflowResult.kind === 'processed') {
       const remainingAfterRefund = Math.max(0, totals.remainingPaise - requestedPaise) / 100;
       const targetStatus = remainingAfterRefund === 0 ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
+
+      await db.auditLog.create({
+        data: {
+          userId: authUser?.userId || null,
+          userName: authUser?.name || 'Admin Operations',
+          action: 'PAYMENT_REFUND',
+          oldValue: `Payment ${payment.id} status: ${payment.status}, amount: ₹${payment.amount}`,
+          newValue: `Refunded ₹${requestedPaise / 100} (${targetStatus}) via Razorpay ID: ${workflowResult.refund.id}. Reason: ${reason || 'Admin initiated'}`,
+        },
+      }).catch(() => null);
+
       return responseForRefund(targetStatus, payment.id, String(workflowResult.refund.id), {
         amountRefunded: requestedPaise / 100,
         remainingRefundableAmount: remainingAfterRefund,

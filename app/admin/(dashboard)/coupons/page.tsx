@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Ticket, Plus, RefreshCw, AlertCircle } from 'lucide-react';
 
 export default function AdminCouponsPage() {
@@ -12,6 +12,13 @@ export default function AdminCouponsPage() {
   const [newCode, setNewCode] = useState('');
   const [newVal, setNewVal] = useState(50);
   const [minOrder, setMinOrder] = useState(100);
+  const [addLoading, setAddLoading] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+
+  // In-flight concurrency guards
+  const addInFlightRef = useRef(false);
+  const isTogglingRef = useRef<string | null>(null);
+  const [togglingCouponId, setTogglingCouponId] = useState<string | null>(null);
 
   const loadCoupons = async () => {
     setLoading(true);
@@ -35,44 +42,82 @@ export default function AdminCouponsPage() {
     loadCoupons();
   }, []);
 
+  // Keyboard accessibility and body scroll lock for modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowAddModal(false);
+      }
+    };
+    if (showAddModal) {
+      window.addEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = 'hidden';
+    }
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = '';
+    };
+  }, [showAddModal]);
+
   const toggleCoupon = async (id: string, currentActive: boolean) => {
+    if (isTogglingRef.current) return;
+    isTogglingRef.current = id;
+    setTogglingCouponId(id);
+
     try {
       const res = await fetch('/api/admin/coupons', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, active: !currentActive }),
       });
-      const data = await res.json();
-      if (data.success) {
-        loadCoupons();
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
+        await loadCoupons();
+      } else {
+        alert(data?.message || 'Failed to update coupon status.');
       }
     } catch (e) {
       console.error(e);
+      alert('Network error while updating coupon status.');
+    } finally {
+      isTogglingRef.current = null;
+      setTogglingCouponId(null);
     }
   };
 
   const handleAddCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCode) return;
+    if (addInFlightRef.current || addLoading || !newCode.trim()) return;
+
+    addInFlightRef.current = true;
+    setAddLoading(true);
+    setAddError(null);
+
     try {
       const res = await fetch('/api/admin/coupons', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          code: newCode,
+          code: newCode.trim().toUpperCase(),
           discountType: 'FLAT',
           discountValue: newVal,
           minOrderValue: minOrder,
         }),
       });
-      const data = await res.json();
-      if (data.success) {
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
         setNewCode('');
         setShowAddModal(false);
-        loadCoupons();
+        await loadCoupons();
+      } else {
+        setAddError(data?.error?.message || data?.message || 'Failed to create coupon.');
       }
     } catch (e) {
       console.error(e);
+      setAddError('Network error while creating coupon.');
+    } finally {
+      addInFlightRef.current = false;
+      setAddLoading(false);
     }
   };
 
@@ -90,7 +135,8 @@ export default function AdminCouponsPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={loadCoupons}
-            className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 flex items-center gap-1.5"
+            disabled={loading}
+            className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 flex items-center gap-1.5 disabled:opacity-50"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
@@ -126,7 +172,7 @@ export default function AdminCouponsPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="w-full min-w-[700px] text-left text-xs">
               <thead className="bg-slate-50 text-slate-500 uppercase font-bold text-[10px]">
                 <tr>
                   <th className="p-3">Coupon Code</th>
@@ -160,13 +206,15 @@ export default function AdminCouponsPage() {
                     <td className="p-3">
                       <button
                         onClick={() => toggleCoupon(c.id, c.active)}
-                        className={`text-xs font-bold px-3 py-1 rounded-lg border ${
+                        disabled={togglingCouponId === c.id}
+                        className={`text-xs font-bold px-3 py-1.5 rounded-lg border inline-flex items-center gap-1.5 disabled:opacity-50 transition-colors ${
                           c.active
-                            ? 'border-rose-200 text-rose-700 bg-rose-50'
-                            : 'border-emerald-200 text-emerald-700 bg-emerald-50'
+                            ? 'border-rose-200 text-rose-700 bg-rose-50 hover:bg-rose-100'
+                            : 'border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
                         }`}
                       >
-                        {c.active ? 'Deactivate' : 'Activate'}
+                        {togglingCouponId === c.id && <RefreshCw className="w-3 h-3 animate-spin shrink-0" />}
+                        <span>{c.active ? 'Deactivate' : 'Activate'}</span>
                       </button>
                     </td>
                   </tr>
@@ -178,9 +226,26 @@ export default function AdminCouponsPage() {
       </div>
 
       {showAddModal && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <form onSubmit={handleAddCoupon} className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Create Promo Coupon"
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 overflow-y-auto"
+        >
+          <div
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm cursor-pointer"
+            onClick={() => setShowAddModal(false)}
+            aria-hidden="true"
+          />
+          <form onSubmit={handleAddCoupon} className="relative bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl z-10 my-auto">
             <h3 className="text-base font-extrabold text-slate-900">Create Promo Coupon</h3>
+
+            {addError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs font-bold text-rose-700 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{addError}</span>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <label className="block text-xs font-bold text-slate-700">Coupon Code</label>
@@ -226,15 +291,24 @@ export default function AdminCouponsPage() {
               <button
                 type="button"
                 onClick={() => setShowAddModal(false)}
-                className="w-1/2 bg-slate-100 text-slate-700 font-bold text-xs py-3 rounded-xl"
+                disabled={addLoading}
+                className="w-1/2 bg-slate-100 text-slate-700 font-bold text-xs py-3 rounded-xl disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="w-1/2 bg-emerald-600 text-white font-bold text-xs py-3 rounded-xl shadow-md"
+                disabled={addLoading}
+                className="w-1/2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 rounded-xl shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                Create Coupon
+                {addLoading ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Creating...</span>
+                  </>
+                ) : (
+                  <span>Create Coupon</span>
+                )}
               </button>
             </div>
           </form>
