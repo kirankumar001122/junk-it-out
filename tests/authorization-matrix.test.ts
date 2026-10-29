@@ -52,6 +52,7 @@ async function run() {
     orderFindUnique: (db.order as any).findUnique,
     agentFindUnique: (db.agent as any).findUnique,
     auditLogCreate: (db.auditLog as any).create,
+    agentLocationFindMany: (db.agentLocation as any).findMany,
     transaction: (db as any).$transaction,
   };
 
@@ -91,6 +92,7 @@ async function run() {
   };
   (db.auditLog as any).create = async () => ({ id: 'audit-1' });
   (db.notification as any).create = async () => ({ id: 'notif-1' });
+  (db.agentLocation as any).findMany = async () => [];
   (db as any).$transaction = async (cb: any) => {
     const tx = {
       order: {
@@ -98,7 +100,7 @@ async function run() {
         findUnique: async () => ({ ...mockOrder }),
       },
       orderStatusHistory: { create: async () => ({ id: 'h1' }) },
-      notification: { create: async () => ({ id: 'n1' }) },
+      notification: { create: async () => ({ id: 'n1' }), createMany: async () => ({ count: 1 }) },
       agent: { update: async () => ({}) },
       invoice: { create: async () => ({ id: 'inv-1' }) },
       auditLog: { create: async () => ({}) },
@@ -200,6 +202,7 @@ async function run() {
     (db.order as any).findUnique = original.orderFindUnique;
     (db.agent as any).findUnique = original.agentFindUnique;
     (db.auditLog as any).create = original.auditLogCreate;
+    (db.agentLocation as any).findMany = original.agentLocationFindMany;
     (db as any).$transaction = original.transaction;
   }
 }

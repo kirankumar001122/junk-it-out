@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (user.agent.status === 'OFFLINE' || user.agent.status === 'SUSPENDED' || user.agent.status === 'DEACTIVATED') {
+    if (user.agent.status === 'SUSPENDED' || user.agent.status === 'DEACTIVATED') {
       return errorResponse(
         'FORBIDDEN',
         'Agent account is inactive. Please contact the administrator.',

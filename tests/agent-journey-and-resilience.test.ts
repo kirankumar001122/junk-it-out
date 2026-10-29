@@ -67,9 +67,11 @@ async function runTests() {
   const origOrderFindUnique = database.order.findUnique;
   const origOrderUpdate = database.order.update;
   const origTransaction = database.$transaction;
+  const origOrderStatusHistoryCreate = database.orderStatusHistory.create;
   const origNotificationFindFirst = database.notification.findFirst;
   const origNotificationCreate = database.notification.create;
 
+  database.orderStatusHistory.create = async ({ data }: any) => ({ id: 'history-1', ...data });
   database.notification.findFirst = async () => null;
   database.notification.create = async ({ data }: any) => ({ id: 'notif-1', ...data });
 
@@ -150,13 +152,19 @@ async function runTests() {
       let agentStatusSet = '';
       database.order.findUnique = async () => sampleOrder;
       database.$transaction = async (fn: any) => {
+        let updatedOrder = { ...sampleOrder, status: 'AGENT_ON_WAY' };
         return fn({
           order: {
-            update: async ({ data }: any) => {
+            updateMany: async ({ where, data }: any) => {
+              assert.equal(where.id, sampleOrder.id);
+              assert.equal(where.agentId, 'agent-123');
+              assert.equal(where.status, 'AGENT_ACCEPTED');
               assert.equal(data.status, 'AGENT_ON_WAY');
-              return { ...sampleOrder, status: 'AGENT_ON_WAY' };
+              return { count: 1 };
             },
+            findUnique: async () => updatedOrder,
           },
+          orderStatusHistory: { create: async () => ({ id: 'history-1' }) },
           agent: {
             update: async ({ data }: any) => {
               agentStatusSet = data.status;
@@ -177,13 +185,25 @@ async function runTests() {
       assert.equal(body.data.customer.user.passwordHash, undefined, 'No passwordHash exposed');
     }
 
-    console.log('Test 5: Start journey is idempotent when order is already in AGENT_ON_WAY...');
+    console.log('Test 5: Start journey rejects a stale concurrent transition...');
+    {
+      database.order.findUnique = async () => sampleOrder;
+      database.$transaction = async (fn: any) => fn({
+        order: {
+          updateMany: async () => ({ count: 0 }),
+          findUnique: async () => ({ ...sampleOrder, status: 'CANCELLED' }),
+        },
+      });
+
+      const staleRequest = makeRequest('http://localhost:3000/api/orders/ord-journey-1/start', createAgentToken('agent-123'));
+      const staleResponse = await startOrder(staleRequest, { params: Promise.resolve({ id: 'ord-journey-1' }) });
+      assert.equal(staleResponse.status, 409, 'a concurrent status change must not be overwritten');
+    }
+
+    console.log('Test 6: Start journey is idempotent when order is already in AGENT_ON_WAY...');
     {
       let txCalled = false;
-      database.order.findUnique = async () => ({
-        ...sampleOrder,
-        status: 'AGENT_ON_WAY',
-      });
+      database.order.findUnique = async () => ({ ...sampleOrder, status: 'AGENT_ON_WAY' });
       database.$transaction = async () => {
         txCalled = true;
       };
@@ -228,13 +248,19 @@ async function runTests() {
         status: 'AGENT_ON_WAY',
       });
       database.$transaction = async (fn: any) => {
+        const updatedOrder = { ...sampleOrder, status: 'AGENT_ARRIVED' };
         return fn({
           order: {
-            update: async ({ data }: any) => {
+            updateMany: async ({ where, data }: any) => {
+              assert.equal(where.id, sampleOrder.id);
+              assert.equal(where.agentId, 'agent-123');
+              assert.equal(where.status, 'AGENT_ON_WAY');
               assert.equal(data.status, 'AGENT_ARRIVED');
-              return { ...sampleOrder, status: 'AGENT_ARRIVED' };
+              return { count: 1 };
             },
+            findUnique: async () => updatedOrder,
           },
+          orderStatusHistory: { create: async () => ({ id: 'history-2' }) },
           agent: {
             update: async ({ data }: any) => {
               agentStatusSet = data.status;
@@ -252,6 +278,24 @@ async function runTests() {
       assert.equal(body.data.status, 'AGENT_ARRIVED');
       assert.equal(body.data.orderId, 'ord-journey-1');
       assert.equal(body.data.customer.user.passwordHash, undefined, 'No passwordHash exposed');
+    }
+
+    console.log('Test 9a: Arrival rejects a stale concurrent transition...');
+    {
+      database.order.findUnique = async () => ({
+        ...sampleOrder,
+        status: 'AGENT_ON_WAY',
+      });
+      database.$transaction = async (fn: any) => fn({
+        order: {
+          updateMany: async () => ({ count: 0 }),
+          findUnique: async () => ({ ...sampleOrder, status: 'CANCELLED' }),
+        },
+      });
+      const req = makeRequest('http://localhost:3000/api/orders/ord-journey-1/arrive', createAgentToken('agent-123'));
+      const res = await arriveOrder(req, { params: Promise.resolve({ id: 'ord-journey-1' }) });
+      assert.equal(res.status, 409);
+      assert.equal((await res.json()).error?.code, 'ORDER_STATE_CHANGED');
     }
 
     console.log('Test 9: Mark arrived is idempotent when order is already in AGENT_ARRIVED...');
@@ -362,6 +406,7 @@ async function runTests() {
     database.order.findUnique = origOrderFindUnique;
     database.order.update = origOrderUpdate;
     database.$transaction = origTransaction;
+    database.orderStatusHistory.create = origOrderStatusHistoryCreate;
     database.notification.findFirst = origNotificationFindFirst;
     database.notification.create = origNotificationCreate;
   }

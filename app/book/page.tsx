@@ -106,6 +106,7 @@ export default function BookingPage() {
   const [categoryNotice, setCategoryNotice] = useState<string | null>(null);
   const [successOrder, setSuccessOrder] = useState<any>(null);
   const [pendingOrder, setPendingOrder] = useState<any | null>(null);
+  const [bookingStatusText, setBookingStatusText] = useState('Opening secure payment...');
 
   // Coupon State
   const [couponInput, setCouponInput] = useState('');
@@ -126,6 +127,7 @@ export default function BookingPage() {
   const idempotencyKeyRef = useRef<string>('');
   const lastPayloadSignatureRef = useRef<string>('');
   const isRetryingRef = useRef(false);
+  const isSubmittingRef = useRef(false);
 
   // Generate 4 available dates dynamically starting today
   const availableDates = [0, 1, 2, 3].map((offset) => {
@@ -521,6 +523,7 @@ export default function BookingPage() {
     if (isRetryingRef.current || loading) return;
     isRetryingRef.current = true;
     setLoading(true);
+    setBookingStatusText('Re-connecting to secure payment...');
     setErrorMsg('');
 
     const scriptPromise = loadRazorpayScript();
@@ -621,6 +624,7 @@ export default function BookingPage() {
         modal: {
           ondismiss: function () {
             setLoading(false);
+            isSubmittingRef.current = false;
             isRetryingRef.current = false;
             setErrorMsg(`Checkout was cancelled or dismissed. Order #${targetOrder.orderNumber} is saved. You can retry payment whenever ready.`);
           },
@@ -630,6 +634,7 @@ export default function BookingPage() {
       const rzp = new (window as any).Razorpay(options);
       rzp.on('payment.failed', function (response: any) {
         setLoading(false);
+        isSubmittingRef.current = false;
         isRetryingRef.current = false;
         const reason = response?.error?.description || response?.error?.reason || 'Transaction declined.';
         setErrorMsg(`Payment failed: ${reason} Order #${targetOrder.orderNumber} is saved. You can retry payment whenever ready.`);
@@ -645,6 +650,7 @@ export default function BookingPage() {
 
   // Master Customer Booking & Razorpay Payment Handler
   const handleConfirmOrder = async () => {
+    if (isSubmittingRef.current || loading) return;
     if (!isCustomer) {
       setLoginOpen(true);
       setErrorMsg('Authentication is required. Please log in with mobile OTP to complete your booking.');
@@ -717,8 +723,10 @@ export default function BookingPage() {
       lastPayloadSignatureRef.current = currentPayloadSignature;
     }
 
+    isSubmittingRef.current = true;
     setLoading(true);
     setErrorMsg('');
+    setBookingStatusText('Securing your booking slot...');
 
     // Preload / load SDK in parallel with API calls
     const scriptPromise = loadRazorpayScript();
@@ -748,51 +756,62 @@ export default function BookingPage() {
           setCouponError(errorMsg);
         }
         setLoading(false);
+        isSubmittingRef.current = false;
         setErrorMsg(errorMsg);
         return;
       }
 
       const orderData = data.data;
 
-      // 2. Initialize Razorpay Payment Order
-      const payRes = await fetch('/api/payments/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId: orderData.id }),
-      });
+      // 2. Check if paymentConfig was already provided in single round-trip by /api/orders
+      let razorpayConfig = orderData.paymentConfig;
 
-      const payData = await payRes.json();
-      if (!payRes.ok || !payData.success) {
-        setPendingOrder(orderData);
-        if (typeof window !== 'undefined') {
-          sessionStorage.setItem('jio_pending_order', JSON.stringify({
-            id: orderData.id,
-            orderNumber: orderData.orderNumber,
-            finalAmount: orderData.finalAmount,
-            area: orderData.address?.area || area,
-          }));
-        }
-        setLoading(false);
-        setErrorMsg(payData.message || 'Failed to initialize Razorpay payment order. Your order is saved and you can retry payment.');
-        return;
-      }
-
-      if (payData.alreadyPaid) {
-        idempotencyKeyRef.current = '';
-        lastPayloadSignatureRef.current = '';
-        setPendingOrder(null);
-        if (typeof window !== 'undefined') {
-          sessionStorage.removeItem('jio_pending_order');
-        }
-        setLoading(false);
-        setSuccessOrder({
-          ...orderData,
-          paymentStatus: 'CAPTURED',
-          status: 'BOOKING_RECEIVED',
+      if (!razorpayConfig) {
+        setBookingStatusText('Connecting to secure payment...');
+        const payRes = await fetch('/api/payments/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: orderData.id }),
         });
-        return;
+
+        const payData = await payRes.json();
+        if (!payRes.ok || !payData.success) {
+          setPendingOrder(orderData);
+          if (typeof window !== 'undefined') {
+            sessionStorage.setItem('jio_pending_order', JSON.stringify({
+              id: orderData.id,
+              orderNumber: orderData.orderNumber,
+              finalAmount: orderData.finalAmount,
+              area: orderData.address?.area || area,
+            }));
+          }
+          setLoading(false);
+          isSubmittingRef.current = false;
+          setErrorMsg(payData.message || 'Failed to initialize Razorpay payment order. Your order is saved and you can retry payment.');
+          return;
+        }
+
+        if (payData.alreadyPaid) {
+          idempotencyKeyRef.current = '';
+          lastPayloadSignatureRef.current = '';
+          setPendingOrder(null);
+          if (typeof window !== 'undefined') {
+            sessionStorage.removeItem('jio_pending_order');
+          }
+          setLoading(false);
+          isSubmittingRef.current = false;
+          setSuccessOrder({
+            ...orderData,
+            paymentStatus: 'CAPTURED',
+            status: 'BOOKING_RECEIVED',
+          });
+          return;
+        }
+
+        razorpayConfig = payData.data;
       }
 
+      setBookingStatusText('Opening Razorpay checkout...');
       const scriptLoaded = await scriptPromise;
       if (!scriptLoaded) {
         setPendingOrder(orderData);
@@ -805,11 +824,10 @@ export default function BookingPage() {
           }));
         }
         setLoading(false);
+        isSubmittingRef.current = false;
         setErrorMsg('Failed to load Razorpay payment SDK. Please check your network connection and retry payment below.');
         return;
       }
-
-      const razorpayConfig = payData.data;
 
       const options = {
         key: razorpayConfig.key,
@@ -918,6 +936,7 @@ export default function BookingPage() {
       rzp.open();
     } catch (err: any) {
       setLoading(false);
+      isSubmittingRef.current = false;
       setErrorMsg('Network error while processing booking request. Please try again.');
     }
   };
@@ -1683,7 +1702,7 @@ export default function BookingPage() {
                   {loading ? (
                     <>
                       <Clock className="w-4 h-4 animate-spin text-white" />
-                      Opening secure payment...
+                      {bookingStatusText || 'Opening secure payment...'}
                     </>
                   ) : (
                     <>
@@ -1728,7 +1747,7 @@ export default function BookingPage() {
                   {loading ? (
                     <>
                       <Clock className="w-4 h-4 animate-spin text-white" />
-                      Opening secure payment...
+                      {bookingStatusText || 'Opening secure payment...'}
                     </>
                   ) : (
                     <>

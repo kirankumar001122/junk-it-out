@@ -495,7 +495,7 @@ async function run() {
   setupFixtures();
   {
     const unauthenticated = await adminRefundRoute(makeAdminRequest({ paymentRecordId: 'pay_rec_1' }, 'NONE'));
-    assert.equal(unauthenticated.status, 403, 'unauthenticated refund requests must return 403');
+    assert.equal(unauthenticated.status, 401, 'unauthenticated refund requests must return 401');
 
     const customerReq = await adminRefundRoute(makeAdminRequest({ paymentRecordId: 'pay_rec_1' }, 'CUSTOMER'));
     assert.equal(customerReq.status, 403, 'customer role cannot access admin refund route');

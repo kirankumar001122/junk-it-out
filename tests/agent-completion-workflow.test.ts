@@ -4,6 +4,7 @@ import { POST as completeOrder } from '../app/api/orders/[id]/complete/route';
 import { POST as weighOrder } from '../app/api/orders/[id]/weigh/route';
 import { db } from '../lib/db';
 import { signToken } from '../lib/auth/jwt';
+import { broadcaster } from '../lib/realtime';
 
 process.env.JWT_SECRET = 'test-agent-completion-secret-key-2026';
 
@@ -50,6 +51,110 @@ function makeRequest(
     },
     ...(options.body ? { body: JSON.stringify(options.body) } : {}),
   });
+}
+
+async function completeOrderWithWeights(actualWeights: unknown[]) {
+  const writes = {
+    transactions: 0,
+    itemUpdates: [] as Array<{ id: string; actualWeight: number }>,
+    weightRecords: 0,
+    settlements: 0,
+    invoices: 0,
+    orderUpdates: 0,
+    agentUpdates: 0,
+  };
+  const orderItems = [
+    { id: 'item-1', categoryId: 'cat-shared', ratePerKg: 20, estimatedWeight: 5, category: { type: 'RECYCLABLE' } },
+    { id: 'item-2', categoryId: 'cat-shared', ratePerKg: 20, estimatedWeight: 5, category: { type: 'RECYCLABLE' } },
+  ];
+
+  database.order.findUnique = async () => ({
+    id: 'order-weight-validation',
+    orderNumber: 'JIO-WEIGHT-VALIDATION',
+    agentId: 'agent-123',
+    customerId: 'cust-123',
+    status: 'AGENT_ARRIVED',
+    pickupCharge: 0,
+    discountAmount: 0,
+    actualTotal: 0,
+    finalAmount: 0,
+    financialDirection: 'CUSTOMER_PAYS',
+    paymentStatus: 'PENDING',
+    weightRecords: [],
+    invoices: [],
+    items: orderItems,
+    customer: { user: { name: 'Customer A', phone: '9999999991' } },
+    agent: { userId: 'user-agent-123', user: { name: 'Agent X' } },
+    address: { houseNo: '12', street: 'MG Road', area: 'Bengaluru' },
+  });
+  database.$transaction = async (callback: any) => {
+    writes.transactions += 1;
+    const transactionOrder = {
+      id: 'order-weight-validation',
+      orderNumber: 'JIO-WEIGHT-VALIDATION',
+      agentId: 'agent-123',
+      customerId: 'cust-123',
+      status: 'AGENT_ARRIVED',
+      paymentStatus: 'PENDING',
+      invoices: [],
+      items: orderItems,
+    };
+    return callback({
+      $queryRaw: async () => [{ id: transactionOrder.id }],
+      orderItem: {
+        update: async ({ where, data }: any) => {
+          writes.itemUpdates.push({ id: where.id, actualWeight: data.actualWeight });
+          return { id: where.id, ...data };
+        },
+      },
+      weightRecord: {
+        create: async ({ data }: any) => {
+          writes.weightRecords += 1;
+          return { id: 'weight-record-1', ...data };
+        },
+      },
+      settlement: {
+        upsert: async ({ create }: any) => {
+          writes.settlements += 1;
+          return { id: 'settlement-1', ...create };
+        },
+      },
+      order: {
+        findUnique: async () => transactionOrder,
+        update: async ({ data }: any) => {
+          writes.orderUpdates += 1;
+          writes.invoices += Number(Boolean(data.invoices?.create));
+          Object.assign(transactionOrder, data);
+          return {
+            id: 'order-weight-validation',
+            orderNumber: 'JIO-WEIGHT-VALIDATION',
+            agentId: 'agent-123',
+            status: data.status,
+            actualTotal: data.actualTotal,
+            financialDirection: data.financialDirection,
+            finalAmount: data.finalAmount,
+            paymentStatus: data.paymentStatus,
+          };
+        },
+      },
+      agent: {
+        update: async ({ data }: any) => {
+          writes.agentUpdates += 1;
+          return { id: 'agent-123', status: data.status };
+        },
+      },
+    });
+  };
+
+  const response = await completeOrder(
+    makeRequest('http://localhost:3000/api/orders/order-weight-validation/complete', {
+      token: createAgentToken('agent-123'),
+      body: { actualWeights },
+    }),
+    { params: Promise.resolve({ id: 'order-weight-validation' }) },
+  );
+
+  return { response, writes };
 }
 
 async function runTests() {
@@ -140,38 +245,75 @@ async function runTests() {
       assert.equal(body.error?.code, 'WEIGHING_REQUIRED');
     }
 
-    // TEST 5: Reject duplicate item measurements
-    console.log('Test 5: Rejects duplicate item measurements...');
+    // TEST 5: Reject duplicate, missing, and unknown order item IDs before any writes
+    console.log('Test 5: Rejects incomplete or duplicate item weight mappings without writes...');
     {
-      database.order.findUnique = async () => ({
-        id: 'order-duplicate-1',
-        agentId: 'agent-123',
-        status: 'AGENT_ARRIVED',
-        weightRecords: [],
-        invoices: [],
-        items: [{ id: 'item-1', categoryId: 'cat-1', ratePerKg: 15, category: { type: 'RECYCLABLE' } }],
+      const itemWeight = (itemId: string, actualWeight: number) => ({
+        itemId,
+        categoryId: 'cat-shared',
+        actualWeight,
       });
+      const invalidPayloads = [
+        [itemWeight('item-1', 4), itemWeight('item-1', 6)],
+        [itemWeight('item-1', 4)],
+        [itemWeight('item-1', 4), itemWeight('unknown-item', 6)],
+      ];
 
-      const req = makeRequest('http://localhost:3000/api/orders/order-duplicate-1/complete', {
-        token: createAgentToken('agent-123'),
-        body: {
-          actualWeights: [
-            { itemId: 'item-1', actualWeight: 5 },
-            { itemId: 'item-1', actualWeight: 10 },
-          ],
-        },
-      });
-      const res = await completeOrder(req, { params: Promise.resolve({ id: 'order-duplicate-1' }) });
-      assert.equal(res.status, 400, 'Should reject duplicate measurements for one order item');
-      const body = await res.json();
-      assert.equal(body.error?.code, 'INVALID_WEIGH_DATA');
+      for (const actualWeights of invalidPayloads) {
+        const { response, writes } = await completeOrderWithWeights(actualWeights);
+        assert.equal(response.status, 400);
+        const body = await response.json();
+        assert.equal(body.error?.code, 'INVALID_WEIGH_DATA');
+        assert.deepEqual(writes, {
+          transactions: 0,
+          itemUpdates: [],
+          weightRecords: 0,
+          settlements: 0,
+          invoices: 0,
+          orderUpdates: 0,
+          agentUpdates: 0,
+        });
+      }
     }
 
-    // TEST 6: Atomic single-request weighing and completion (JUNKITOUT_PAYS payout)
-    console.log('Test 6: Atomic single-request weighing and completion (JUNKITOUT_PAYS)...');
+    // TEST 6: Valid payload maps every item exactly once, including duplicate categories
+    console.log('Test 6: Completes a valid one-to-one item weight payload...');
+    {
+      const { response, writes } = await completeOrderWithWeights([
+        { itemId: 'item-1', categoryId: 'cat-shared', actualWeight: 4 },
+        { itemId: 'item-2', categoryId: 'cat-shared', actualWeight: 6 },
+      ]);
+      assert.equal(response.status, 200);
+      assert.deepEqual(writes.itemUpdates, [
+        { id: 'item-1', actualWeight: 4 },
+        { id: 'item-2', actualWeight: 6 },
+      ]);
+      assert.deepEqual(
+        {
+          transactions: writes.transactions,
+          weightRecords: writes.weightRecords,
+          settlements: writes.settlements,
+          invoices: writes.invoices,
+          orderUpdates: writes.orderUpdates,
+          agentUpdates: writes.agentUpdates,
+        },
+        {
+          transactions: 1,
+          weightRecords: 1,
+          settlements: 1,
+          invoices: 1,
+          orderUpdates: 1,
+          agentUpdates: 1,
+        },
+      );
+    }
+
+    // TEST 7: Atomic single-request weighing and completion (JUNKITOUT_PAYS payout)
+    console.log('Test 7: Atomic single-request weighing and completion (JUNKITOUT_PAYS)...');
     {
       let transactionExecuted = false;
       let recordedWeight = 0;
+      let recordedScalePhoto: string | null = 'not-checked';
       let settlementCreated = false;
       let invoiceCreated = false;
       let orderStatusUpdated = '';
@@ -202,6 +344,7 @@ async function runTests() {
       database.$transaction = async (callback: any) => {
         transactionExecuted = true;
         const tx = {
+          $queryRaw: async () => [{ id: 'order-atomic-1' }],
           orderItem: {
             update: async ({ where, data }: any) => {
               recordedWeight = data.actualWeight;
@@ -210,6 +353,7 @@ async function runTests() {
           },
           weightRecord: {
             create: async ({ data }: any) => {
+              recordedScalePhoto = data.scalePhotoUrl;
               return { id: 'w-rec-1', ...data };
             },
           },
@@ -221,10 +365,13 @@ async function runTests() {
             },
           },
           order: {
-            updateMany: async ({ data }: any) => {
-              orderStatusUpdated = data.status;
-              return { count: 1 };
-            },
+            findUnique: async () => ({
+              id: 'order-atomic-1',
+              agentId: 'agent-123',
+              status: 'AGENT_ARRIVED',
+              paymentStatus: 'PENDING',
+              invoices: [],
+            }),
             update: async ({ data }: any) => {
               orderStatusUpdated = data.status;
               if (data.invoices?.create) {
@@ -242,29 +389,6 @@ async function runTests() {
                 paymentStatus: data.paymentStatus,
               };
             },
-            findUnique: async () => ({
-              id: 'order-atomic-1',
-              orderNumber: 'JIO-ATOMIC-01',
-              agentId: 'agent-123',
-              status: 'PICKUP_COMPLETED',
-              actualTotal: 200,
-              financialDirection: 'JUNKITOUT_PAYS',
-              finalAmount: 200,
-              paymentStatus: 'SETTLEMENT_PENDING',
-              items: [{ id: 'item-1', actualWeight: 10, subtotal: 200 }],
-              weightRecords: [{ id: 'w-rec-1' }],
-              invoices: [{ invoiceNumber: 'INV-ATOMIC-01' }],
-            }),
-          },
-          orderStatusHistory: {
-            create: async () => ({ id: 'history-1' }),
-          },
-          invoice: {
-            create: async ({ data }: any) => {
-              invoiceCreated = true;
-              assert.equal(data.totalAmount, 200);
-              return { id: 'invoice-1', ...data };
-            },
           },
           agent: {
             update: async ({ data }: any) => {
@@ -280,7 +404,6 @@ async function runTests() {
         token: createAgentToken('agent-123'),
         body: {
           actualWeights: [{ itemId: 'item-1', categoryId: 'cat-metal', actualWeight: 10 }],
-          scalePhotoUrl: 'https://example.com/scale.jpg',
           notes: 'Doorstep weighing verified',
         },
       });
@@ -291,14 +414,232 @@ async function runTests() {
       assert.equal(body.success, true);
       assert.equal(transactionExecuted, true, 'Must execute within a single transaction');
       assert.equal(recordedWeight, 10, 'Actual weight should be 10kg');
+      assert.equal(recordedScalePhoto, null, 'missing scale-photo evidence must not be replaced by a stock image');
       assert.equal(settlementCreated, true, 'Settlement should be created for JUNKITOUT_PAYS');
       assert.equal(invoiceCreated, true, 'Invoice should be created');
       assert.equal(orderStatusUpdated, 'PICKUP_COMPLETED');
       assert.equal(agentStatusUpdated, 'AVAILABLE', 'Agent status must be updated to AVAILABLE');
     }
 
-    // TEST 7: Idempotent repeat call on completed order
-    console.log('Test 7: Idempotency check on already completed order...');
+    console.log('Test 7a: Weighing stores no stock-image URL when photo evidence is absent...');
+    {
+      let recordedScalePhoto: string | null = 'not-checked';
+      database.order.findUnique = async () => ({
+        id: 'order-weigh-no-photo',
+        orderNumber: 'JIO-WEIGH-NO-PHOTO',
+        agentId: 'agent-123',
+        customerId: 'cust-123',
+        status: 'AGENT_ARRIVED',
+        pickupCharge: 0,
+        discountAmount: 0,
+        actualTotal: 0,
+        finalAmount: 0,
+        financialDirection: 'JUNKITOUT_PAYS',
+        weightRecords: [],
+        items: [{
+          id: 'item-no-photo',
+          categoryId: 'category-no-photo',
+          ratePerKg: 0,
+          category: { type: 'RECYCLABLE' },
+        }],
+        customer: { userId: 'user-customer' },
+        agent: { userId: 'user-agent-123' },
+      });
+      database.$transaction = async (callback: any) => callback({
+        orderItem: { update: async () => ({}) },
+        weightRecord: {
+          create: async ({ data }: any) => {
+            recordedScalePhoto = data.scalePhotoUrl;
+            return { id: 'weight-no-photo', ...data };
+          },
+        },
+        order: {
+          update: async ({ data }: any) => ({
+            id: 'order-weigh-no-photo',
+            status: data.status,
+            actualTotal: data.actualTotal,
+            financialDirection: data.financialDirection,
+            finalAmount: data.finalAmount,
+          }),
+        },
+      });
+      const response = await weighOrder(
+        makeRequest('http://localhost:3000/api/orders/order-weigh-no-photo/weigh', {
+          token: createAgentToken('agent-123'),
+          body: {
+            actualWeights: [{ itemId: 'item-no-photo', categoryId: 'category-no-photo', actualWeight: 5 }],
+          },
+        }),
+        { params: Promise.resolve({ id: 'order-weigh-no-photo' }) },
+      );
+      assert.equal(response.status, 200);
+      assert.equal(recordedScalePhoto, null);
+    }
+
+    // TEST 8: Concurrent completion requests serialize on the order row
+    console.log('Test 8: Serializes concurrent completions without duplicate records...');
+    {
+      let orderState: any = {
+        id: 'order-concurrent-complete',
+        orderNumber: 'JIO-CONCURRENT-COMPLETE',
+        agentId: 'agent-123',
+        customerId: 'cust-123',
+        status: 'AGENT_ARRIVED',
+        pickupCharge: 0,
+        discountAmount: 0,
+        actualTotal: 0,
+        finalAmount: 0,
+        financialDirection: 'CUSTOMER_PAYS',
+        paymentStatus: 'PENDING',
+        weightRecords: [],
+        invoices: [],
+        items: [
+          { id: 'item-1', categoryId: 'cat-shared', ratePerKg: 20, category: { type: 'RECYCLABLE' } },
+          { id: 'item-2', categoryId: 'cat-shared', ratePerKg: 20, category: { type: 'RECYCLABLE' } },
+        ],
+        customer: { user: { name: 'Customer A' } },
+        agent: { userId: 'user-agent-123', user: { name: 'Agent X' } },
+        address: {},
+      };
+      const writes = {
+        lockQueries: 0,
+        transactionOrderReads: 0,
+        itemUpdates: 0,
+        weightRecords: 0,
+        settlements: 0,
+        invoices: 0,
+        orderUpdates: 0,
+        agentUpdates: 0,
+      };
+      let initialReads = 0;
+      let releaseInitialReads!: () => void;
+      const bothInitialReads = new Promise<void>((resolve) => {
+        releaseInitialReads = resolve;
+      });
+      let lockTail = Promise.resolve();
+
+      database.order.findUnique = async () => {
+        const snapshot = {
+          ...orderState,
+          status: 'AGENT_ARRIVED',
+          weightRecords: [],
+          invoices: [],
+        };
+        initialReads += 1;
+        if (initialReads === 2) releaseInitialReads();
+        await bothInitialReads;
+        return snapshot;
+      };
+
+      database.$transaction = async (callback: any) => {
+        let releaseLock: (() => void) | undefined;
+        const tx = {
+          $queryRaw: async (strings: TemplateStringsArray) => {
+            assert.match(strings.join('?'), /FOR UPDATE/);
+            writes.lockQueries += 1;
+            const previous = lockTail;
+            lockTail = new Promise<void>((resolve) => {
+              releaseLock = resolve;
+            });
+            await previous;
+            return [{ id: orderState.id }];
+          },
+          orderItem: {
+            update: async () => {
+              writes.itemUpdates += 1;
+              return {};
+            },
+          },
+          weightRecord: {
+            create: async () => {
+              writes.weightRecords += 1;
+              return {};
+            },
+          },
+          settlement: {
+            upsert: async ({ create }: any) => {
+              writes.settlements += 1;
+              return create;
+            },
+          },
+          order: {
+            findUnique: async () => {
+              writes.transactionOrderReads += 1;
+              return {
+                ...orderState,
+                weightRecords: [...orderState.weightRecords],
+                invoices: [...orderState.invoices],
+              };
+            },
+            update: async ({ data }: any) => {
+              writes.orderUpdates += 1;
+              orderState = {
+                ...orderState,
+                ...data,
+                invoices: data.invoices?.create
+                  ? [...orderState.invoices, data.invoices.create]
+                  : orderState.invoices,
+              };
+              writes.invoices += Number(Boolean(data.invoices?.create));
+              orderState.weightRecords = writes.weightRecords
+                ? [{ id: 'weight-record-1' }]
+                : orderState.weightRecords;
+              return { ...orderState };
+            },
+          },
+          agent: {
+            update: async () => {
+              writes.agentUpdates += 1;
+              return {};
+            },
+          },
+        };
+
+        try {
+          return await callback(tx);
+        } finally {
+          releaseLock?.();
+        }
+      };
+
+      const request = () => makeRequest(
+        'http://localhost:3000/api/orders/order-concurrent-complete/complete',
+        {
+          token: createAgentToken('agent-123'),
+          body: {
+            actualWeights: [
+              { itemId: 'item-1', categoryId: 'cat-shared', actualWeight: 4 },
+              { itemId: 'item-2', categoryId: 'cat-shared', actualWeight: 6 },
+            ],
+          },
+        },
+      );
+      const completionEvents: string[] = [];
+      const unsubscribe = broadcaster.subscribe((message) => {
+        if (message.payload?.id === orderState.id || message.payload?.orderId === orderState.id) {
+          completionEvents.push(message.event);
+        }
+      });
+      const responses = await Promise.all([
+        completeOrder(request(), { params: Promise.resolve({ id: orderState.id }) }),
+        completeOrder(request(), { params: Promise.resolve({ id: orderState.id }) }),
+      ]).finally(unsubscribe);
+
+      assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+      assert.equal(writes.lockQueries, 2);
+      assert.equal(writes.transactionOrderReads, 2);
+      assert.equal(writes.itemUpdates, 2);
+      assert.equal(writes.weightRecords, 1);
+      assert.equal(writes.settlements, 1);
+      assert.equal(writes.invoices, 1);
+      assert.equal(writes.orderUpdates, 1);
+      assert.equal(writes.agentUpdates, 1);
+      assert.equal(orderState.status, 'PICKUP_COMPLETED');
+      assert.deepEqual(completionEvents, ['ORDER_UPDATED', 'ORDER_COMPLETED', 'WEIGHING_STARTED']);
+    }
+
+    // TEST 9: Idempotent repeat call on completed order
+    console.log('Test 9: Idempotency check on already completed order...');
     {
       database.order.findUnique = async () => ({
         id: 'order-completed-1',
@@ -319,8 +660,8 @@ async function runTests() {
       assert.equal(body.meta?.message, 'Order was already completed.');
     }
 
-    // TEST 8: Legacy completion (pre-weighed order completing with empty body)
-    console.log('Test 8: Legacy completion flow (order pre-weighed, completing with empty body)...');
+    // TEST 10: Legacy completion (pre-weighed order completing with empty body)
+    console.log('Test 10: Legacy completion flow (order pre-weighed, completing with empty body)...');
     {
       let invoiceCreated = false;
       let orderStatusUpdated = '';
@@ -346,24 +687,19 @@ async function runTests() {
 
       database.$transaction = async (callback: any) => {
         const tx = {
+          $queryRaw: async () => [{ id: 'order-preweighed-1' }],
           order: {
-            updateMany: async ({ data }: any) => {
-              orderStatusUpdated = data.status;
-              return { count: 1 };
-            },
             findUnique: async () => ({
               id: 'order-preweighed-1',
-              status: 'PICKUP_COMPLETED',
-              invoices: [{ invoiceNumber: 'INV-PREWEIGHED-01' }],
+              agentId: 'agent-123',
+              status: 'WEIGHING',
+              paymentStatus: 'SETTLEMENT_PENDING',
+              invoices: [],
             }),
-          },
-          orderStatusHistory: {
-            create: async () => ({ id: 'history-preweighed-1' }),
-          },
-          invoice: {
-            create: async ({ data }: any) => {
-              invoiceCreated = true;
-              return { id: 'invoice-preweighed-1', ...data };
+            update: async ({ data }: any) => {
+              orderStatusUpdated = data.status;
+              invoiceCreated = Boolean(data.invoices?.create);
+              return { id: 'order-preweighed-1', status: data.status };
             },
           },
           agent: {

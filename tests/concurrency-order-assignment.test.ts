@@ -11,7 +11,7 @@ import { db } from '../lib/db';
 import { signToken } from '../lib/auth/jwt';
 import { validateStatusTransition } from '../lib/validations/schemas';
 
-process.env.JWT_SECRET = 'concurrency-test-secret';
+process.env.JWT_SECRET = 'concurrency-test-secret-at-least-32-bytes';
 
 function createMockToken(role: 'ADMIN' | 'AGENT' | 'CUSTOMER' | 'SUPER_ADMIN', extra: Record<string, unknown> = {}) {
   return signToken({
@@ -106,7 +106,14 @@ async function run() {
     try {
       const workingOrder = { ...orderState };
       const tx = {
+        $queryRaw: async () => [],
         order: {
+          findFirst: async () => null,
+          update: async ({ data }: any) => {
+            Object.assign(workingOrder, data);
+            Object.assign(orderState, data);
+            return { ...orderState, ...data };
+          },
           updateMany: async ({ where, data }: any) => {
             if (where.id !== workingOrder.id) return { count: 0 };
 
@@ -133,8 +140,14 @@ async function run() {
         },
         notification: {
           create: async () => ({ id: 'notif-1' }),
+          createMany: async () => ({ count: 1 }),
         },
         agent: {
+          findUnique: async ({ where }: any) => {
+            if (where.id === 'agent-1') return agent1;
+            if (where.id === 'agent-2') return agent2;
+            return null;
+          },
           update: async ({ where, data }: any) => {
             if (where.id === 'agent-1') Object.assign(agent1, data);
             if (where.id === 'agent-2') Object.assign(agent2, data);

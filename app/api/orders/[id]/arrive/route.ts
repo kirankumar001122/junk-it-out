@@ -2,7 +2,6 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { validateStatusTransition } from '@/lib/validations/schemas';
-import { transitionOrder } from '@/lib/services/orderLifecycle';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { SAFE_HYDRATED_ORDER_INCLUDE, formatOrderResponse } from '@/lib/orders/orderFormat';
@@ -56,32 +55,50 @@ export async function POST(
       return errorResponse('INVALID_STATUS_TRANSITION', `Cannot transition order status from ${oldStatus} to ${newStatus}.`, 400);
     }
 
-    const transition = await transitionOrder<any>({
-      orderId: id,
-      expectedStatus: oldStatus,
-      expectedAgentId: authUser.agentId,
-      newStatus,
-      changedByUserId: authUser?.userId || null,
-      notes: `Agent arrived at customer doorstep.`,
-      include: SAFE_HYDRATED_ORDER_INCLUDE,
-      afterHistory: async (tx) => {
-        if (order.agentId) {
-          await tx.agent.update({
-            where: { id: order.agentId },
-            data: { status: 'ARRIVED' },
-          });
-        }
-      },
-    });
-
-    if (!transition.changed || !transition.order) {
-      const recheck = await db.order.findUnique({
-        where: { id },
-        include: SAFE_HYDRATED_ORDER_INCLUDE,
+    const transition = await db.$transaction(async (tx) => {
+      const result = await tx.order.updateMany({
+        where: { id, agentId: authUser.agentId, status: oldStatus },
+        data: { status: newStatus },
       });
-      if (recheck?.status === newStatus && recheck?.agentId === authUser.agentId) {
+
+      if (result.count !== 1) {
+        return {
+          kind: 'conflict' as const,
+          order: await tx.order.findUnique({
+            where: { id },
+            include: SAFE_HYDRATED_ORDER_INCLUDE,
+          }),
+        };
+      }
+
+      await tx.orderStatusHistory.create({
+        data: {
+          orderId: id,
+          oldStatus,
+          newStatus,
+          changedByUserId: authUser.userId || null,
+          notes: 'Agent arrived at customer doorstep.',
+        },
+      });
+
+      await tx.agent.update({
+        where: { id: authUser.agentId },
+        data: { status: 'ARRIVED' },
+      });
+
+      return {
+        kind: 'updated' as const,
+        order: await tx.order.findUnique({
+          where: { id },
+          include: SAFE_HYDRATED_ORDER_INCLUDE,
+        }),
+      };
+    }, { isolationLevel: 'ReadCommitted', maxWait: 5000, timeout: 5000 });
+
+    if (transition.kind === 'conflict') {
+      if (transition.order?.agentId === authUser.agentId && transition.order.status === newStatus) {
         return successResponse(
-          formatOrderResponse(recheck, {
+          formatOrderResponse(transition.order, {
             id: order.id,
             orderNumber: order.orderNumber,
             agentId: order.agentId,
@@ -89,14 +106,13 @@ export async function POST(
           })
         );
       }
-      return errorResponse(
-        'CONFLICT',
-        'Order state has changed or was cancelled before arrival.',
-        409
-      );
+      return errorResponse('ORDER_STATE_CHANGED', 'The order changed while recording arrival. Refresh and try again.', 409);
     }
 
     const updatedOrder = transition.order;
+    if (!updatedOrder) {
+      return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
+    }
     logTiming('order update complete');
 
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);

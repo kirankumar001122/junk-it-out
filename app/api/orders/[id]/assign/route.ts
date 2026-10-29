@@ -2,10 +2,12 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser, requireAdminUser } from '@/lib/auth/middleware';
 import { validateStatusTransition } from '@/lib/validations/schemas';
-import { transitionOrder } from '@/lib/services/orderLifecycle';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
-import { runBackgroundTask } from '@/lib/utils/backgroundTask';
+import {
+  broadcastAgentBookingNotification,
+  persistAgentBookingNotificationOnce,
+} from '@/lib/services/agentBookingNotification';
 
 export async function POST(
   req: NextRequest,
@@ -26,7 +28,7 @@ export async function POST(
 
     const order = await db.order.findUnique({
       where: { id },
-      include: { agent: { include: { user: true } }, customer: { include: { user: true } } },
+      include: { agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } }, customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } } },
     });
 
     if (!order) {
@@ -35,7 +37,7 @@ export async function POST(
 
     const agent = await db.agent.findUnique({
       where: { id: agentId },
-      include: { user: true },
+      include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } },
     });
 
     if (!agent) {
@@ -57,50 +59,59 @@ export async function POST(
       return errorResponse('INVALID_STATUS_TRANSITION', `Cannot assign agent from order status ${oldStatus}.`, 400);
     }
 
-    const transition = await transitionOrder<any>({
-      orderId: id,
-      expectedStatus: oldStatus,
-      expectedAgentId: order.agentId,
-      newStatus,
-      changedByUserId: authUser?.userId || null,
-      notes: `Assigned agent ${agent.user.name} (${agent.vehicleNumber})`,
-      orderData: {
-        agentId,
-      },
-      include: {
-        agent: { include: { user: true } },
-        customer: { include: { user: true } },
-        address: true,
-        items: { include: { category: true } },
-      },
-      afterHistory: async (tx) => {
-        await tx.agent.update({
-          where: { id: agentId },
-          data: { status: 'ASSIGNED' },
-        });
-      },
-    });
+    const assignmentNotification = {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      agentId,
+      agentUserId: agent.userId,
+      status: newStatus,
+    };
 
-    if (!transition.changed || !transition.order) {
-      const recheck = await db.order.findUnique({
-        where: { id },
-        include: {
-          agent: { include: { user: true } },
-          customer: { include: { user: true } },
-          address: true,
-          items: { include: { category: true } },
+    const result = await db.$transaction(async (tx) => {
+      const updated = await tx.order.updateMany({
+        where: { id, agentId: order.agentId, status: oldStatus },
+        data: { agentId, status: newStatus },
+      });
+
+      if (updated.count !== 1) {
+        const currentOrder = await tx.order.findUnique({
+          where: { id },
+          include: { agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } }, customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } } },
+        });
+        return { changed: false as const, notificationCreated: false, order: currentOrder };
+      }
+
+      await tx.orderStatusHistory.create({
+        data: {
+          orderId: order.id,
+          oldStatus,
+          newStatus,
+          changedByUserId: authUser?.userId || null,
+          notes: `Assigned agent ${agent.user.name} (${agent.vehicleNumber})`,
         },
       });
-      if (recheck?.agentId === agentId && recheck?.status === 'AGENT_ASSIGNED') {
-        return successResponse(recheck, 200, { message: 'Agent is already assigned to this order.' });
-      }
-      return errorResponse('CONFLICT', 'The order state changed or it has already been assigned/cancelled.', 409);
-    }
 
-    const updatedOrder = transition.order;
+      await tx.notification.create({
+        data: {
+          userId: order.customer.userId,
+          orderId: order.id,
+          type: 'WHATSAPP',
+          recipient: order.customer.user.phone,
+          content: `Agent ${agent.user.name} (${agent.vehicleNumber}) has been assigned to your Junk It Out pickup ${order.orderNumber}.`,
+          status: 'SENT',
+        },
+      });
 
-    try {
-      await db.auditLog.create({
+      const notificationCreated = order.financialDirection !== 'CUSTOMER_PAYS' || order.paymentStatus === 'CAPTURED'
+        ? await persistAgentBookingNotificationOnce(tx, assignmentNotification)
+        : false;
+
+      await tx.agent.update({
+        where: { id: agentId },
+        data: { status: 'ASSIGNED' },
+      });
+
+      await tx.auditLog.create({
         data: {
           userId: authUser?.userId || null,
           userName: authUser ? authUser.phone : 'Admin',
@@ -109,35 +120,36 @@ export async function POST(
           newValue: agent.user.name,
         },
       });
-    } catch (auditErr: any) {
-      console.warn('Audit log write notice:', auditErr?.message);
-    }
 
-    broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
-    broadcaster.broadcast('ORDER_ASSIGNED', { orderId: id, agentId, agentName: agent.user.name });
+      const assignedOrder = await tx.order.findUnique({
+        where: { id },
+        include: {
+          agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
+          customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
+          address: true,
+          items: { include: { category: true } },
+        },
+      });
 
-    runBackgroundTask(async () => {
-      try {
-        const customerUserId = updatedOrder.customer?.userId || order.customer?.userId;
-        const customerPhone = updatedOrder.customer?.user?.phone || order.customer?.user?.phone;
-        if (!customerUserId || !customerPhone) return;
-
-        await db.notification.create({
-          data: {
-            userId: customerUserId,
-            orderId: id,
-            type: 'WHATSAPP',
-            recipient: customerPhone,
-            content: `Agent ${agent.user.name} (${agent.vehicleNumber}) has been assigned to your Junk It Out pickup ${order.orderNumber}.`,
-            status: 'SENT',
-          },
-        });
-      } catch (notifErr: any) {
-        console.warn('[ASSIGN NOTIFICATION NOTICE] Safe notification error:', notifErr?.message);
-      }
+      return { changed: true as const, notificationCreated, order: assignedOrder };
     });
 
-    return successResponse(updatedOrder);
+    if (!result.changed) {
+      if (result.order?.agentId === agentId && result.order.status === 'AGENT_ASSIGNED') {
+        return successResponse(result.order, 200, { message: 'Agent is already assigned to this order.' });
+      }
+      return errorResponse('CONFLICT', 'Order assignment changed before this request completed.', 409);
+    }
+
+    if (result.order) {
+      broadcaster.broadcast('ORDER_UPDATED', result.order);
+    }
+    broadcaster.broadcast('ORDER_ASSIGNED', { orderId: id, agentId, agentName: agent.user.name });
+    broadcastAgentBookingNotification(assignmentNotification, result.notificationCreated, (event, payload) =>
+      broadcaster.broadcast(event, payload),
+    );
+
+    return successResponse(result.order);
   } catch (err: any) {
     console.error('Assign agent error:', err);
     return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to assign agent.', 500);

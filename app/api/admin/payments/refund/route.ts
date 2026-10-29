@@ -4,6 +4,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 import {
+  getSafeErrorDependency,
+  getSafeErrorType,
+  logStructured,
+  withApiRequestLogging,
+  type ApiRequestContext,
+} from '@/lib/observability/structuredLogger';
+import {
   fetchRazorpayPaymentRefunds,
   RazorpayApiError,
   refundRazorpayPayment,
@@ -296,7 +303,7 @@ async function reconcileFromProvider(payment: any, attemptId: string) {
   return responseForRefund('REFUND_PENDING_RECONCILIATION', payment.id);
 }
 
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest, context: ApiRequestContext) {
   try {
     const authUser = await getAuthUser(req);
     const authorizationStatus = getAdminAuthorizationStatus(authUser);
@@ -675,7 +682,13 @@ export async function POST(req: NextRequest) {
     }
     return responseForRefund('REFUND_PENDING_RECONCILIATION', payment.id);
   } catch (error) {
-    console.error('[ADMIN_REFUND_ERROR]', { errorType: error instanceof Error ? error.name : 'UnknownError' });
+    logStructured('error', 'payment.refund.failed', {
+      ...context,
+      dependency: getSafeErrorDependency(error),
+      errorType: getSafeErrorType(error),
+    });
     return NextResponse.json({ success: false, message: 'Refund request could not be completed safely.' }, { status: 500 });
   }
 }
+
+export const POST = withApiRequestLogging('/api/admin/payments/refund', handlePost);

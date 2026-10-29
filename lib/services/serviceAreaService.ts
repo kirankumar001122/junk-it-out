@@ -1,39 +1,21 @@
 import { db } from '../db';
-import {
-  BENGALURU_ZONES,
-  BENGALURU_MASTER_POLYGON,
-  isPointInPolygon,
-  calculateDistanceKm,
-} from '../geofence';
 
-let cachedDbAreas: { data: any[]; timestamp: number } | null = null;
-const CACHE_TTL_MS = 60_000;
-
-/**
- * Returns cached active/inactive service areas with 60s in-memory TTL.
- * Avoids saturating the PostgreSQL connection pool during autocomplete or map pin changes.
- */
-async function getCachedServiceAreas(): Promise<any[]> {
-  const now = Date.now();
-  if (cachedDbAreas && now - cachedDbAreas.timestamp < CACHE_TTL_MS) {
-    return cachedDbAreas.data;
-  }
-
-  try {
-    const dbAreas = await db.serviceArea.findMany({
-      where: { status: { in: ['ACTIVE', 'INACTIVE'] } },
-      take: 1000,
-    });
-    cachedDbAreas = { data: dbAreas, timestamp: now };
-    return dbAreas;
-  } catch (err) {
-    console.warn(
-      '[SERVICE_AREA_DB_FALLBACK] Database service area query failed. Falling back to preset zones:',
-      err
-    );
-    return cachedDbAreas ? cachedDbAreas.data : [];
-  }
+interface CachedServiceArea {
+  id: string;
+  name: string;
+  etaMinutes: number;
+  basePickupCharge: number;
+  status: string;
+  parsedPolygon: [number, number][];
 }
+
+let serviceAreaCache: { areas: CachedServiceArea[]; expiresAt: number } | null = null;
+
+export function invalidateServiceAreaCache(): void {
+  serviceAreaCache = null;
+}
+
+import { BENGALURU_ZONES, BENGALURU_MASTER_POLYGON, isPointInPolygon, calculateDistanceKm } from '../geofence';
 
 export async function checkGeofenceServiceability(
   lat: number,
@@ -46,39 +28,59 @@ export async function checkGeofenceServiceability(
 }> {
   const point: [number, number] = [lat, lng];
 
-  // 1. Check cached database service area boundary polygons
-  try {
-    const dbAreas = await getCachedServiceAreas();
-    if (dbAreas.length > 0) {
+  // 1. Check database service area boundary polygons (cached in-memory for 60s)
+  const now = Date.now();
+  let cachedAreas = serviceAreaCache && serviceAreaCache.expiresAt > now ? serviceAreaCache.areas : null;
+  if (!cachedAreas) {
+    try {
+      const dbAreas = await db.serviceArea.findMany({
+        where: { status: { in: ['ACTIVE', 'INACTIVE'] } },
+        take: 1000,
+      });
+      cachedAreas = [];
       for (const area of dbAreas) {
         try {
           const polygon: [number, number][] = JSON.parse(area.boundaryPolygon);
-          if (isPointInPolygon(point, polygon)) {
-            if (area.status === 'ACTIVE') {
-              return {
-                serviceable: true,
-                message: `Location is inside active Junk It Out service zone: ${area.name}`,
-                zone: {
-                  id: area.id,
-                  name: area.name,
-                  etaMinutes: area.etaMinutes,
-                  basePickupCharge: area.basePickupCharge,
-                },
-              };
-            } else {
-              return {
-                serviceable: false,
-                message: `Service is currently disabled/inactive in ${area.name}.`,
-              };
-            }
-          }
+          cachedAreas.push({
+            id: area.id,
+            name: area.name,
+            etaMinutes: area.etaMinutes,
+            basePickupCharge: area.basePickupCharge,
+            status: area.status,
+            parsedPolygon: polygon,
+          });
         } catch (err) {
           console.error(`Failed to parse polygon for zone ${area.name}`, err);
         }
       }
+      serviceAreaCache = { areas: cachedAreas, expiresAt: now + 60_000 };
+    } catch (err) {
+      console.error('Database service area check error:', err);
     }
-  } catch (err) {
-    console.error('Service area lookup error:', err);
+  }
+
+  if (cachedAreas && cachedAreas.length > 0) {
+    for (const area of cachedAreas) {
+      if (isPointInPolygon(point, area.parsedPolygon)) {
+        if (area.status === 'ACTIVE') {
+          return {
+            serviceable: true,
+            message: `Location is inside active Junk It Out service zone: ${area.name}`,
+            zone: {
+              id: area.id,
+              name: area.name,
+              etaMinutes: area.etaMinutes,
+              basePickupCharge: area.basePickupCharge,
+            },
+          };
+        } else {
+          return {
+            serviceable: false,
+            message: `Service is currently disabled/inactive in ${area.name}.`,
+          };
+        }
+      }
+    }
   }
 
   // 2. Check preset Bengaluru zone polygons

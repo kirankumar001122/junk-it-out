@@ -18,6 +18,10 @@ export async function GET(req: NextRequest) {
       whereClause = { customerId: authUser.customerId || 'unmatched' };
     } else if (authUser.role === 'AGENT') {
       whereClause = { order: { agentId: authUser.agentId || 'unmatched' } };
+    } else if (authUser.role === 'ADMIN' || authUser.role === 'SUPER_ADMIN') {
+      whereClause = {};
+    } else {
+      return NextResponse.json({ success: false, message: 'Forbidden.' }, { status: 403 });
     }
 
     const complaints = await db.complaint.findMany({

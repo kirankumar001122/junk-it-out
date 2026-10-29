@@ -7,6 +7,13 @@ import {
 import { dispatchPaidOrderToAgents } from '@/lib/payments/verification';
 import { dispatchCapturedPayment } from '@/lib/payments/webhookDispatch';
 import {
+  getSafeErrorDependency,
+  getSafeErrorType,
+  logStructured,
+  withApiRequestLogging,
+  type ApiRequestContext,
+} from '@/lib/observability/structuredLogger';
+import {
   applyRefundEventOnce,
   refundAttemptId,
   refundEventId,
@@ -90,7 +97,7 @@ async function refundLateCapturedPayment(payment: {
   return nextStatus;
 }
 
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest, context: ApiRequestContext) {
   try {
     const rawBody = await req.text();
     const signature = req.headers.get('x-razorpay-signature') || '';
@@ -159,6 +166,12 @@ export async function POST(req: NextRequest) {
                 })]
               : []),
           ]);
+          if (refundFailed) {
+            logStructured('warn', 'payment.provider.refund_failed', {
+              ...context,
+              dependency: 'razorpay',
+            });
+          }
           return NextResponse.json({ success: true, status: 'Refund webhook processed.' });
         }
       }
@@ -341,6 +354,12 @@ export async function POST(req: NextRequest) {
         });
         return NextResponse.json({ success: true, status: 'Refund event processed.' });
       });
+      if (refundStatus === 'REFUND_FAILED') {
+        logStructured('warn', 'payment.provider.refund_failed', {
+          ...context,
+          dependency: 'razorpay',
+        });
+      }
       return webhookResponse;
     }
 
@@ -454,6 +473,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, status: 'Already processed' });
     }
 
+    if (failed) {
+      logStructured('warn', 'payment.provider.failed', {
+        ...context,
+        dependency: 'razorpay',
+      });
+    }
+
     if (claimed.lateCapture) {
       const lateRefundStatus = await refundLateCapturedPayment({
         id: payment.id,
@@ -468,13 +494,16 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, status: 'Webhook processed' });
   } catch (error: any) {
-    console.error(
-      '[PAYMENT_WEBHOOK_ERROR]',
-      error?.message || error,
-    );
+    logStructured('error', 'payment.webhook.failed', {
+      ...context,
+      dependency: getSafeErrorDependency(error),
+      errorType: getSafeErrorType(error),
+    });
     return NextResponse.json(
       { success: false, message: 'Webhook processing failed.' },
       { status: 500 },
     );
   }
 }
+
+export const POST = withApiRequestLogging('/api/payments/webhook', handlePost);

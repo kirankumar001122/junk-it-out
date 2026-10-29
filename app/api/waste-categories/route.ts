@@ -4,19 +4,13 @@ import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware'
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
 
-let cachedCategories: any = null;
-let cacheExpiry = 0;
-const CACHE_TTL_MS = 60_000;
-
-export function invalidateCategoriesCache() {
-  cachedCategories = null;
-  cacheExpiry = 0;
-}
+import { getCachedWasteCategories, setCachedWasteCategories, invalidateCategoriesCache } from '@/lib/cache/wasteCategoriesCache';
 
 export async function GET(req: NextRequest) {
   try {
     const customerOnly = req.nextUrl.searchParams.get('customer') === 'true';
-    if (cachedCategories && Date.now() < cacheExpiry) {
+    const cachedCategories = getCachedWasteCategories();
+    if (cachedCategories) {
       const visibleCategories = customerOnly
         ? cachedCategories.filter((c: any) => c.active && isCustomerWasteCategory(c))
         : cachedCategories;
@@ -68,8 +62,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    cachedCategories = categories;
-    cacheExpiry = Date.now() + CACHE_TTL_MS;
+    setCachedWasteCategories(categories);
 
     const visibleCategories = customerOnly
       ? categories.filter((c: any) => c.active && isCustomerWasteCategory(c))

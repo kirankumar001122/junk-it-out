@@ -21,6 +21,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(projectRoot, aliasTarget.replace(/\/\*$/, '')),
+      'server-only': resolve(projectRoot, 'node_modules/server-only/empty.js'),
     },
   },
   test: {
@@ -28,11 +29,20 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     include: [
       'tests/security-route-handlers.test.ts',
+      'tests/admin-jwt-config.test.ts',
       'tests/admin-security-hardening.test.ts',
       'tests/payment-idempotency.test.ts',
+      'tests/razorpay-order-creation.test.ts',
+      'tests/health-routes.test.ts',
+      'tests/structured-logger.test.ts',
+      'tests/instrumentation.test.ts',
       'tests/payment-retry-and-feedback.test.ts',
       'tests/booking-coupon-support.test.ts',
       'tests/health-route.test.ts',
+      'tests/security-hardening.test.ts',
+      'tests/response-shape-security.test.ts',
+      'tests/realtime-admin-stream.test.ts',
+      'tests/payment-delay-diagnostics.test.ts',
     ],
   },
 });

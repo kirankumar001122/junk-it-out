@@ -24,8 +24,8 @@ export async function POST(
     const order = await db.order.findUnique({
       where: { id },
       include: {
-        agent: { include: { user: true } },
-        customer: { include: { user: true } },
+        agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
+        customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
         items: { include: { category: true } },
         weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
         invoices: { take: 1 },
@@ -54,14 +54,31 @@ export async function POST(
       return errorResponse('WEIGHING_REQUIRED', 'Digital scale weights must be recorded before completing pickup.', 400);
     }
 
+    const orderItemsById = new Map(order.items.map((item) => [item.id, item]));
+
     if (hasWeightPayload) {
+      const submittedItemIds = new Set<string>();
       for (const itemInput of actualWeights) {
-        const dbItem = order.items.find(
-          (i) => (itemInput?.itemId && i.id === itemInput.itemId) || i.categoryId === itemInput?.categoryId || i.id === itemInput?.categoryId
-        );
-        if (!dbItem || typeof itemInput.actualWeight !== 'number' || !Number.isFinite(itemInput.actualWeight) || itemInput.actualWeight <= 0) {
+        const itemId = itemInput?.itemId;
+        const dbItem = typeof itemId === 'string' ? orderItemsById.get(itemId) : undefined;
+
+        if (!dbItem) {
+          return errorResponse('INVALID_WEIGH_DATA', 'Each actual weight must reference a valid order item ID.', 400);
+        }
+
+        if (submittedItemIds.has(itemId)) {
+          return errorResponse('INVALID_WEIGH_DATA', 'Each order item must have exactly one actual weight.', 400);
+        }
+
+        if (typeof itemInput.actualWeight !== 'number' || !Number.isFinite(itemInput.actualWeight) || itemInput.actualWeight <= 0) {
           return errorResponse('INVALID_WEIGH_DATA', 'Each actual weight must be a positive number for a valid order item.', 400);
         }
+
+        submittedItemIds.add(itemId);
+      }
+
+      if (submittedItemIds.size !== orderItemsById.size) {
+        return errorResponse('INVALID_WEIGH_DATA', 'Each order item must have exactly one actual weight.', 400);
       }
     }
 
@@ -81,18 +98,11 @@ export async function POST(
     const itemUpdates: Array<{ id: string; actualWeight: number; subtotal: number }> = [];
 
     if (hasWeightPayload) {
-      const matchedItemIds = new Set<string>();
       let calcRecyclable = 0;
       let calcWasteCharge = 0;
       for (const itemInput of actualWeights) {
-        const dbItem = order.items.find(
-          (i) => (itemInput?.itemId && i.id === itemInput.itemId) || i.categoryId === itemInput.categoryId || i.id === itemInput.categoryId
-        );
+        const dbItem = orderItemsById.get(itemInput.itemId);
         if (dbItem) {
-          if (matchedItemIds.has(dbItem.id)) {
-            return errorResponse('INVALID_WEIGH_DATA', 'Each order item may only have one actual weight entry.', 400);
-          }
-          matchedItemIds.add(dbItem.id);
           const weightKg = itemInput.actualWeight;
           const subtotal = round2(weightKg * dbItem.ratePerKg);
           if (dbItem.category.type === 'WASTE_CHARGE') {
@@ -112,8 +122,42 @@ export async function POST(
 
     const invoiceNumber = `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
-    // Execute completion (and optional weighing) in transaction with CAS
-    const completedOrder = await db.$transaction(async (tx) => {
+    // Execute completion (and optional weighing) in transaction
+    const completionResult = await db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "id" = ${id} FOR UPDATE`;
+
+      const currentOrder = await tx.order.findUnique({
+        where: { id },
+        include: {
+          agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
+          customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
+          items: { include: { category: true } },
+          weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
+          invoices: { take: 1 },
+        },
+      });
+
+      if (!currentOrder) {
+        return { kind: 'notFound' as const };
+      }
+
+      if (!currentOrder.agentId || currentOrder.agentId !== authUser.agentId) {
+        return { kind: 'forbidden' as const };
+      }
+
+      if (currentOrder.status === 'PICKUP_COMPLETED' || currentOrder.status === 'SETTLEMENT_COMPLETED') {
+        return { kind: 'alreadyCompleted' as const, order: currentOrder };
+      }
+
+      const currentStatusIsCompletable =
+        validateStatusTransition(currentOrder.status, newStatus) ||
+        currentOrder.status === 'WEIGHING' ||
+        currentOrder.status === 'AGENT_ARRIVED' ||
+        currentOrder.status === 'WASTE_VERIFICATION';
+      if (!currentStatusIsCompletable) {
+        return { kind: 'invalidTransition' as const, status: currentOrder.status };
+      }
+
       // 1. If weights are supplied directly in this request, update order items and persist WeightRecord
       if (hasWeightPayload) {
         for (const update of itemUpdates) {
@@ -130,7 +174,9 @@ export async function POST(
           data: {
             orderId: id,
             recordedByUserId: authUser?.userId || order.agent?.userId || order.customer?.userId,
-            scalePhotoUrl: scalePhotoUrl || 'https://images.unsplash.com/photo-1589939705384-5185137a7f0f?q=80&w=600',
+            scalePhotoUrl: typeof scalePhotoUrl === 'string' && scalePhotoUrl.trim()
+              ? scalePhotoUrl.trim()
+              : null,
             weightJson: JSON.stringify(actualWeights),
             notes: notes || 'Scale weights recorded at doorstep.',
           },
@@ -141,7 +187,7 @@ export async function POST(
             where: { orderId: id },
             create: {
               orderId: id,
-              customerId: order.customerId,
+              customerId: currentOrder.customerId,
               totalWeightKg,
               amount: finalAmount,
               breakdownJson: JSON.stringify({ items: actualWeights, calculatedAt: new Date().toISOString() }),
@@ -163,103 +209,114 @@ export async function POST(
           })
         : order.items;
 
-      const claimed = await tx.order.updateMany({
-        where: {
-          id,
-          status: oldStatus,
-          agentId: authUser.agentId,
-        },
-        data: {
-          status: newStatus,
-          paymentStatus: financialDirection === 'JUNKITOUT_PAYS' ? 'SETTLEMENT_PENDING' : order.paymentStatus,
-          ...(hasWeightPayload ? {
-            actualTotal: actualTotalRecyclable,
-            financialDirection: financialDirection,
-            finalAmount: finalAmount,
-          } : {}),
-        },
-      });
-
-      if (claimed.count !== 1) {
-        return null;
-      }
-
-      await tx.orderStatusHistory.create({
-        data: {
-          orderId: id,
-          oldStatus,
-          newStatus,
-          changedByUserId: authUser?.userId || null,
-          notes: hasWeightPayload
-            ? `Doorstep scale weights recorded and pickup completed. Net amount: ₹${finalAmount.toFixed(2)}`
-            : `Pickup completed at doorstep by agent.`,
-        },
-      });
-
-      if (!order.invoices || order.invoices.length === 0) {
-        await tx.invoice.create({
-          data: {
-            orderId: id,
-            invoiceNumber,
-            totalAmount: finalAmount,
-            pdfDataJson: JSON.stringify({
-              orderNumber: order.orderNumber,
-              invoiceNumber,
-              items: invoiceItems,
-              finalAmount: finalAmount,
-              financialDirection: financialDirection,
-            }),
+      const orderUpdateData: any = {
+        status: newStatus,
+        paymentStatus: financialDirection === 'JUNKITOUT_PAYS' ? 'SETTLEMENT_PENDING' : currentOrder.paymentStatus,
+        statusHistory: {
+          create: {
+            oldStatus: currentOrder.status,
+            newStatus,
+            changedByUserId: authUser?.userId || null,
+            notes: hasWeightPayload
+              ? `Doorstep scale weights recorded and pickup completed. Net amount: ₹${finalAmount.toFixed(2)}`
+              : `Pickup completed at doorstep by agent.`,
           },
-        });
+        },
+      };
+
+      if (hasWeightPayload) {
+        orderUpdateData.actualTotal = actualTotalRecyclable;
+        orderUpdateData.financialDirection = financialDirection;
+        orderUpdateData.finalAmount = finalAmount;
       }
 
-      if (order.agentId) {
+      if (!currentOrder.invoices || currentOrder.invoices.length === 0) {
+        if (typeof (tx as any).invoice?.create === 'function') {
+          await (tx as any).invoice.create({
+            data: {
+              orderId: id,
+              invoiceNumber,
+              totalAmount: finalAmount,
+              pdfDataJson: JSON.stringify({
+                orderNumber: order.orderNumber,
+                invoiceNumber,
+                items: invoiceItems,
+                finalAmount: finalAmount,
+                financialDirection: financialDirection,
+              }),
+            },
+          });
+        } else {
+          orderUpdateData.invoices = {
+            create: {
+              invoiceNumber,
+              totalAmount: finalAmount,
+              pdfDataJson: JSON.stringify({
+                orderNumber: order.orderNumber,
+                invoiceNumber,
+                items: invoiceItems,
+                finalAmount: finalAmount,
+                financialDirection: financialDirection,
+              }),
+            },
+          };
+        }
+      }
+
+      const updated = await tx.order.update({
+        where: { id },
+        data: orderUpdateData,
+        include: {
+          agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
+          customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
+          address: true,
+          items: { include: { category: true } },
+          weightRecords: true,
+          invoices: true,
+        },
+      });
+      logTiming('completion transaction complete');
+
+      if (currentOrder.agentId) {
         await tx.agent.update({
-          where: { id: order.agentId },
+          where: { id: currentOrder.agentId },
           data: { status: 'AVAILABLE' },
         });
       }
 
-      return tx.order.findUnique({
-        where: { id },
-        include: {
-          agent: { include: { user: true } },
-          customer: { include: { user: true } },
-          address: true,
-          items: { include: { category: true } },
-          weightRecords: true,
-          invoices: true,
-        },
-      });
+      return { kind: 'completed' as const, order: updated };
     }, {
-      isolationLevel: 'Serializable',
       maxWait: 10000,
       timeout: 15000,
     });
 
-    if (!completedOrder) {
-      const recheck = await db.order.findUnique({
-        where: { id },
-        include: {
-          agent: { include: { user: true } },
-          customer: { include: { user: true } },
-          address: true,
-          items: { include: { category: true } },
-          weightRecords: true,
-          invoices: true,
-        },
-      });
-      if (recheck?.status === 'PICKUP_COMPLETED' || recheck?.status === 'SETTLEMENT_COMPLETED') {
-        return successResponse(recheck, 200, { message: 'Order was already completed.' });
-      }
-      return errorResponse('CONFLICT', 'The order state changed or was cancelled before completion.', 409);
+    if (completionResult.kind === 'notFound') {
+      return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
     }
+
+    if (completionResult.kind === 'forbidden') {
+      return errorResponse('FORBIDDEN', 'Order is assigned to another agent.', 403);
+    }
+
+    if (completionResult.kind === 'alreadyCompleted') {
+      return successResponse(completionResult.order, 200, { message: 'Order was already completed.' });
+    }
+
+    if (completionResult.kind === 'invalidTransition') {
+      return errorResponse(
+        'INVALID_STATUS_TRANSITION',
+        `Cannot complete order from current status (${completionResult.status}). Please complete weighing first.`,
+        400,
+      );
+    }
+
+    const completedOrder = completionResult.order;
 
     broadcaster.broadcast('ORDER_UPDATED', completedOrder);
     broadcaster.broadcast('ORDER_COMPLETED', {
       orderId: id,
       agentId: completedOrder.agentId,
-      invoiceNumber: completedOrder.invoices?.[0]?.invoiceNumber || invoiceNumber,
+      invoiceNumber,
     });
     if (hasWeightPayload) {
       broadcaster.broadcast('WEIGHING_STARTED', {
