@@ -190,6 +190,8 @@ model Order {
 
   @@index([customerId, createdAt])
   @@index([agentId, status, createdAt])
+  @@index([status, createdAt])
+  @@index([paymentStatus, createdAt])
 }
 
 model OrderIdempotency {
@@ -317,6 +319,9 @@ model Settlement {
   paidAt        DateTime?
   customer      Customer  @relation(fields: [customerId], references: [id])
   order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([customerId, createdAt])
 }
 
 model AgentLocation {
@@ -424,4 +429,7 @@ model AuditLog {
   ipAddress String?  @default("127.0.0.1")
   timestamp DateTime @default(now())
   user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([timestamp])
+  @@index([action, timestamp])
 }

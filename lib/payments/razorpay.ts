@@ -74,8 +74,7 @@ function isValidSignature(payload: string, signature: string, secret: string) {
   }
 }
 
-// Low-level HTTPS helper that bypasses Node's fetch issues and works with tests
-function razorpayRequest(
+function executeSingleRazorpayRequest(
   method: string,
   path: string,
   bodyData?: any,
@@ -98,7 +97,7 @@ function razorpayRequest(
           "Content-Length": Buffer.byteLength(payload),
           ...additionalHeaders,
         },
-        timeout: 15000,
+        timeout: 10000,
       },
       (res) => {
         let raw = "";
@@ -141,6 +140,47 @@ function razorpayRequest(
     }
     req.end();
   });
+}
+
+// Low-level HTTPS helper with timeout and transient retry support
+async function razorpayRequest(
+  method: string,
+  path: string,
+  bodyData?: any,
+  additionalHeaders: Record<string, string> = {},
+): Promise<any> {
+  const isIdempotent =
+    method === "GET" ||
+    Boolean(
+      additionalHeaders["X-Refund-Idempotency"] ||
+        additionalHeaders["X-Razorpay-Idempotency-Key"] ||
+        additionalHeaders["X-Idempotency-Key"]
+    );
+  const maxAttempts = isIdempotent ? 2 : 1;
+
+  let lastError: any = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      if (attempt > 1) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+      return await executeSingleRazorpayRequest(
+        method,
+        path,
+        bodyData,
+        additionalHeaders
+      );
+    } catch (err: any) {
+      lastError = err;
+      if (err instanceof RazorpayApiError && err.statusCode < 500) {
+        throw err;
+      }
+      if (attempt >= maxAttempts) {
+        throw err;
+      }
+    }
+  }
+  throw lastError;
 }
 
 // ---------------------------------------------------------

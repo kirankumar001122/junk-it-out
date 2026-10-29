@@ -11,7 +11,7 @@ Module._resolveFilename = function (request: string, parent: any, isMain: boolea
   return originalResolve.call(this, request, parent, isMain, options);
 };
 
-process.env.JWT_SECRET = 'admin-functional-fixes-secret';
+process.env.JWT_SECRET = 'admin-functional-fixes-secret-min32bytes';
 
 async function run() {
   const { NextRequest } = await import('next/server');

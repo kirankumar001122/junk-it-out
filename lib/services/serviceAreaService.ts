@@ -1,5 +1,39 @@
 import { db } from '../db';
-import { BENGALURU_ZONES, BENGALURU_MASTER_POLYGON, isPointInPolygon, calculateDistanceKm } from '../geofence';
+import {
+  BENGALURU_ZONES,
+  BENGALURU_MASTER_POLYGON,
+  isPointInPolygon,
+  calculateDistanceKm,
+} from '../geofence';
+
+let cachedDbAreas: { data: any[]; timestamp: number } | null = null;
+const CACHE_TTL_MS = 60_000;
+
+/**
+ * Returns cached active/inactive service areas with 60s in-memory TTL.
+ * Avoids saturating the PostgreSQL connection pool during autocomplete or map pin changes.
+ */
+async function getCachedServiceAreas(): Promise<any[]> {
+  const now = Date.now();
+  if (cachedDbAreas && now - cachedDbAreas.timestamp < CACHE_TTL_MS) {
+    return cachedDbAreas.data;
+  }
+
+  try {
+    const dbAreas = await db.serviceArea.findMany({
+      where: { status: { in: ['ACTIVE', 'INACTIVE'] } },
+      take: 1000,
+    });
+    cachedDbAreas = { data: dbAreas, timestamp: now };
+    return dbAreas;
+  } catch (err) {
+    console.warn(
+      '[SERVICE_AREA_DB_FALLBACK] Database service area query failed. Falling back to preset zones:',
+      err
+    );
+    return cachedDbAreas ? cachedDbAreas.data : [];
+  }
+}
 
 export async function checkGeofenceServiceability(
   lat: number,
@@ -12,12 +46,9 @@ export async function checkGeofenceServiceability(
 }> {
   const point: [number, number] = [lat, lng];
 
-  // 1. Check database service area boundary polygons
+  // 1. Check cached database service area boundary polygons
   try {
-    const dbAreas = await db.serviceArea.findMany({
-      where: { status: { in: ['ACTIVE', 'INACTIVE'] } },
-      take: 1000,
-    });
+    const dbAreas = await getCachedServiceAreas();
     if (dbAreas.length > 0) {
       for (const area of dbAreas) {
         try {
@@ -47,12 +78,12 @@ export async function checkGeofenceServiceability(
       }
     }
   } catch (err) {
-    console.error('Database service area check error:', err);
+    console.error('Service area lookup error:', err);
   }
 
   // 2. Check preset Bengaluru zone polygons
-  const matchedZone = BENGALURU_ZONES.find((z) =>
-    z.status === 'ACTIVE' && isPointInPolygon(point, z.boundaryPolygon)
+  const matchedZone = BENGALURU_ZONES.find(
+    (z) => z.status === 'ACTIVE' && isPointInPolygon(point, z.boundaryPolygon)
   );
 
   if (matchedZone) {
