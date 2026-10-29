@@ -9,6 +9,10 @@ import {
   InvalidCouponError,
 } from './couponService';
 import { calculateTotalBookingWeight } from '../validations/schemas';
+import {
+  getCachedWasteCategories,
+  setCachedWasteCategories,
+} from '../cache/wasteCategoriesCache';
 
 export { InvalidCouponError };
 
@@ -160,6 +164,33 @@ export async function createOrder(
   const durableIdempotency = (db as any).orderIdempotency;
   let durableIdempotencyAvailable = Boolean(durableIdempotency);
 
+  if (normalizedIdempotencyKey) {
+    const inFlight = inFlightOrders.get(normalizedIdempotencyKey);
+    if (inFlight) {
+      return await inFlight;
+    }
+
+    const cached = idempotencyStore.get(`${customerId || 'anonymous'}:${normalizedIdempotencyKey}`);
+
+    if (
+      cached &&
+      Date.now() - cached.timestamp <
+        IDEMPOTENCY_TTL_MS
+    ) {
+      if (cached.payloadHash && cached.payloadHash !== payloadHash) {
+        throw new OrderIdempotencyConflictError(
+          'Idempotency key was already used for a different booking payload. Please start a new booking or retry with the original details.'
+        );
+      }
+
+      console.log(
+        `[IDEMPOTENCY] Returning existing order #${cached.orderId}`
+      );
+
+      return cached.responseData;
+    }
+  }
+
   if (normalizedIdempotencyKey && customerId && durableIdempotencyAvailable) {
     try {
       const existing = await durableIdempotency.findUnique({
@@ -207,33 +238,6 @@ export async function createOrder(
     }
   }
 
-  if (normalizedIdempotencyKey) {
-    const cached = idempotencyStore.get(`${customerId || 'anonymous'}:${normalizedIdempotencyKey}`);
-
-    if (
-      cached &&
-      Date.now() - cached.timestamp <
-        IDEMPOTENCY_TTL_MS
-    ) {
-      if (cached.payloadHash && cached.payloadHash !== payloadHash) {
-        throw new OrderIdempotencyConflictError(
-          'Idempotency key was already used for a different booking payload. Please start a new booking or retry with the original details.'
-        );
-      }
-
-      console.log(
-        `[IDEMPOTENCY] Returning existing order #${cached.orderId}`
-      );
-
-      return cached.responseData;
-    }
-
-    const inFlight = inFlightOrders.get(normalizedIdempotencyKey);
-    if (inFlight) {
-      return await inFlight;
-    }
-  }
-
   const execute = async () => {
     timer?.recordPhase('idempotency_lookup');
 
@@ -264,14 +268,27 @@ export async function createOrder(
           },
         })
       : Promise.resolve(null),
-    db.wasteCategory.findMany({
-      where: {
-        id: {
-          in: categoryIds,
+    (async () => {
+      const cached = getCachedWasteCategories();
+      if (cached && Array.isArray(cached)) {
+        const matching = cached.filter((c: any) => c.active && categoryIds.includes(c.id));
+        if (matching.length === categoryIds.length) {
+          return matching;
+        }
+      }
+      const fetched = await db.wasteCategory.findMany({
+        where: {
+          id: {
+            in: categoryIds,
+          },
+          active: true,
         },
-        active: true,
-      },
-    }),
+      });
+      if (fetched && fetched.length > 0) {
+        setCachedWasteCategories(fetched);
+      }
+      return fetched;
+    })(),
   ]);
 
   timer?.recordPhase('parallel_lookups');
@@ -549,29 +566,7 @@ export async function createOrder(
           },
 
           include: {
-            customer: {
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    name: true,
-                    phone: true,
-                    email: true,
-                  },
-                },
-              },
-            },
-
-            address: true,
-
-            items: {
-              include: {
-                category: true,
-              },
-            },
-
-            statusHistory: true,
-
+            items: true,
             payments: {
               where: { direction: 'CUSTOMER_PAYS' },
               orderBy: { createdAt: 'desc' },
@@ -592,7 +587,47 @@ export async function createOrder(
           });
         }
 
-        return createdOrder;
+        const assembledCustomer = user?.customer
+          ? {
+              ...user.customer,
+              user: user
+                ? {
+                    id: user.id,
+                    name: user.name || '',
+                    phone: user.phone || '',
+                    email: user.email || null,
+                  }
+                : null,
+            }
+          : (createdOrder as any).customer || null;
+
+        const assembledOrder = {
+          ...createdOrder,
+          customer: assembledCustomer,
+          address: savedAddress || (createdOrder as any).address || null,
+          items: (createdOrder.items || []).map((item: any) => ({
+            ...item,
+            category: item.category || dbCategories.find((c: any) => c.id === item.categoryId) || null,
+          })),
+          statusHistory:
+            (createdOrder as any).statusHistory && (createdOrder as any).statusHistory.length > 0
+              ? (createdOrder as any).statusHistory
+              : [
+                  {
+                    id: `hist-${createdOrder.id}`,
+                    orderId: createdOrder.id,
+                    oldStatus: null,
+                    newStatus: 'BOOKING_RECEIVED',
+                    status: 'BOOKING_RECEIVED',
+                    changedByUserId: user?.id || null,
+                    notes: 'Order placed by customer via web platform. Payment pending.',
+                    timestamp: createdOrder.createdAt,
+                    createdAt: createdOrder.createdAt,
+                  },
+                ],
+        };
+
+        return assembledOrder;
       },
       {
         maxWait: 5000,

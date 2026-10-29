@@ -20,6 +20,11 @@ import {
   errorResponse,
 } from '@/lib/utils/apiResponse';
 
+const inFlightGatewayOrders = new Map<
+  string,
+  Promise<{ gatewayOrderId: string; keyId: string; amount: number; paymentId: string }>
+>();
+
 export async function POST(req: NextRequest) {
   const timer = new OrderExecutionTimer(req.headers.get('x-request-id') || undefined);
   try {
@@ -102,42 +107,75 @@ export async function POST(req: NextRequest) {
               };
             }
           } else if (paymentRecord.status === 'CREATION_PENDING') {
-            const razorpayOrder = await createRazorpayOrder({
-              amountInPaise: Math.round(amount * 100),
-              receipt: order.orderNumber,
-              notes: { orderId: order.id, orderNumber: order.orderNumber },
-            });
-            createdGatewayOrder = razorpayOrder;
-            timer.recordPhase('razorpay_gateway_call');
+            const inFlightGate = inFlightGatewayOrders.get(order.id);
+            if (inFlightGate) {
+              const res = await inFlightGate;
+              paymentRecord.gatewayOrderId = res.gatewayOrderId;
+              paymentRecord.status = 'INITIATED';
+              (order as any).paymentStatus = 'INITIATED';
+              paymentConfig = {
+                paymentId: res.paymentId,
+                gatewayOrderId: res.gatewayOrderId,
+                amount: res.amount,
+                currency: 'INR',
+                key: res.keyId,
+                name: 'Junk It Out Waste Pickup',
+                description: `Pickup service charge #${order.orderNumber}`,
+              };
+            } else {
+              const gatePromise = (async () => {
+                const razorpayOrder = await createRazorpayOrder({
+                  amountInPaise: Math.round(amount * 100),
+                  receipt: order.orderNumber,
+                  notes: { orderId: order.id, orderNumber: order.orderNumber },
+                });
+                createdGatewayOrder = razorpayOrder;
 
-            await db.$transaction([
-              db.payment.update({
-                where: { id: paymentRecord.id },
-                data: {
+                await db.$transaction([
+                  db.payment.update({
+                    where: { id: paymentRecord.id },
+                    data: {
+                      gatewayOrderId: razorpayOrder.id,
+                      status: 'INITIATED',
+                    },
+                  }),
+                  db.order.update({
+                    where: { id: order.id },
+                    data: { paymentStatus: 'INITIATED' },
+                  }),
+                ]);
+
+                return {
                   gatewayOrderId: razorpayOrder.id,
-                  status: 'INITIATED',
-                },
-              }),
-              db.order.update({
-                where: { id: order.id },
-                data: { paymentStatus: 'INITIATED' },
-              }),
-            ]);
-            timer.recordPhase('payment_and_order_db_updates');
+                  keyId: razorpayOrder.keyId,
+                  amount,
+                  paymentId: paymentRecord.id,
+                };
+              })();
 
-            paymentRecord.gatewayOrderId = razorpayOrder.id;
-            paymentRecord.status = 'INITIATED';
-            (order as any).paymentStatus = 'INITIATED';
+              inFlightGatewayOrders.set(order.id, gatePromise);
+              try {
+                const res = await gatePromise;
+                timer.recordPhase('razorpay_gateway_call');
+                timer.recordPhase('payment_and_order_db_updates');
 
-            paymentConfig = {
-              paymentId: paymentRecord.id,
-              gatewayOrderId: razorpayOrder.id,
-              amount,
-              currency: 'INR',
-              key: razorpayOrder.keyId,
-              name: 'Junk It Out Waste Pickup',
-              description: `Pickup service charge #${order.orderNumber}`,
-            };
+                paymentRecord.gatewayOrderId = res.gatewayOrderId;
+                paymentRecord.status = 'INITIATED';
+                (order as any).paymentStatus = 'INITIATED';
+
+                paymentConfig = {
+                  paymentId: res.paymentId,
+                  gatewayOrderId: res.gatewayOrderId,
+                  amount: res.amount,
+                  currency: 'INR',
+                  key: res.keyId,
+                  name: 'Junk It Out Waste Pickup',
+                  description: `Pickup service charge #${order.orderNumber}`,
+                };
+              } finally {
+                inFlightGatewayOrders.delete(order.id);
+              }
+            }
           }
         } else {
           // Fallback path: lock and create payment if not eagerly created

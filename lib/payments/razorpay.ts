@@ -95,6 +95,33 @@ export function closeRazorpayConnections(): void {
   }
 }
 
+export function warmRazorpayConnection(): void {
+  try {
+    const agent = getRazorpayHttpsAgent();
+    if (!agent || typeof https?.request !== 'function') return;
+    const req = https.request({
+      hostname: 'api.razorpay.com',
+      port: 443,
+      method: 'HEAD',
+      path: '/',
+      agent,
+      timeout: 4000,
+    });
+    req.on('error', () => {});
+    req.on('timeout', () => req.destroy());
+    req.end();
+  } catch {
+    // Non-fatal pre-warming
+  }
+}
+
+// Auto-warm connection in Node server environment
+if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'test') {
+  try {
+    warmRazorpayConnection();
+  } catch {}
+}
+
 // Low-level HTTPS helper that bypasses Node's fetch issues and works with tests
 function razorpayRequest(
   method: string,
