@@ -204,7 +204,7 @@ async function run() {
 
     try {
       // Invalidate cache first
-      const { invalidateCategoriesCache } = await import('../app/api/waste-categories/route');
+      const { invalidateCategoriesCache } = await import('../lib/cache/wasteCategoriesCache');
       invalidateCategoriesCache();
 
       // Customer view (?customer=true) should only see active customer categories
