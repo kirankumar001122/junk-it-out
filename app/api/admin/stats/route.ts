@@ -3,12 +3,7 @@ import { db } from '@/lib/db';
 import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 
-let cachedStats: { payload: any; expiresAt: number } | null = null;
-const STATS_CACHE_TTL_MS = 10_000;
-
-export function invalidateAdminStatsCache() {
-  cachedStats = null;
-}
+import { getCachedAdminStats, setCachedAdminStats } from '@/lib/cache/adminStatsCache';
 
 export async function GET(req: NextRequest) {
   try {
@@ -23,8 +18,9 @@ export async function GET(req: NextRequest) {
 
     // Short-lived in-memory cache to absorb rapid concurrent dashboard polling bursts
     const bypassCache = req.headers.get('cache-control') === 'no-cache' || process.env.NODE_ENV === 'test';
-    if (!bypassCache && cachedStats && Date.now() < cachedStats.expiresAt) {
-      const res = successResponse(cachedStats.payload);
+    const cachedPayload = !bypassCache ? getCachedAdminStats() : null;
+    if (cachedPayload) {
+      const res = successResponse(cachedPayload);
       res.headers.set('Cache-Control', 'private, max-age=10');
       res.headers.set('X-Cache', 'HIT');
       return res;
@@ -199,10 +195,7 @@ export async function GET(req: NextRequest) {
     };
 
     if (!bypassCache) {
-      cachedStats = {
-        payload,
-        expiresAt: Date.now() + STATS_CACHE_TTL_MS,
-      };
+      setCachedAdminStats(payload);
     }
 
     const res = successResponse(payload);
