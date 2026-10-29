@@ -49,7 +49,7 @@ export async function PATCH(req: NextRequest) {
       const updatedAgent = await tx.agent.update({
         where: { id: authUser.agentId },
         data: { status: targetStatus },
-        include: { user: true },
+        include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } },
       });
       return { conflict: false as const, updatedAgent };
     }, { isolationLevel: 'ReadCommitted', maxWait: 5000, timeout: 5000 });

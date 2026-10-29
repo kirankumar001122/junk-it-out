@@ -24,8 +24,8 @@ export async function POST(
     const order = await db.order.findUnique({
       where: { id },
       include: {
-        agent: { include: { user: true } },
-        customer: { include: { user: true } },
+        agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
+        customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
         items: { include: { category: true } },
         weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
         invoices: { take: 1 },
@@ -129,8 +129,8 @@ export async function POST(
       const currentOrder = await tx.order.findUnique({
         where: { id },
         include: {
-          agent: { include: { user: true } },
-          customer: { include: { user: true } },
+          agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
+          customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
           items: { include: { category: true } },
           weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
           invoices: { take: 1 },
@@ -267,8 +267,8 @@ export async function POST(
         where: { id },
         data: orderUpdateData,
         include: {
-          agent: { include: { user: true } },
-          customer: { include: { user: true } },
+          agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
+          customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
           address: true,
           items: { include: { category: true } },
           weightRecords: true,

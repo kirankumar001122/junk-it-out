@@ -39,6 +39,9 @@ export default defineConfig({
       'tests/payment-retry-and-feedback.test.ts',
       'tests/booking-coupon-support.test.ts',
       'tests/health-route.test.ts',
+      'tests/security-hardening.test.ts',
+      'tests/response-shape-security.test.ts',
+      'tests/realtime-admin-stream.test.ts',
     ],
   },
 });

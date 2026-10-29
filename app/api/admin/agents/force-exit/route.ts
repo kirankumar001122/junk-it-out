@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
 
     const agent = await db.agent.findUnique({
       where: { id: agentId.trim() },
-      include: { user: true },
+      include: { user: { select: { id: true, name: true, phone: true } } },
     });
 
     if (!agent) {
