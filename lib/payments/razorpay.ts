@@ -74,6 +74,27 @@ function isValidSignature(payload: string, signature: string, secret: string) {
   }
 }
 
+// Shared keep-alive HTTPS agent for Razorpay requests to eliminate repeated TLS handshake overhead
+let razorpayHttpsAgent: https.Agent | null = null;
+function getRazorpayHttpsAgent(): https.Agent | undefined {
+  if (!razorpayHttpsAgent && typeof https?.Agent === 'function') {
+    razorpayHttpsAgent = new https.Agent({
+      keepAlive: true,
+      keepAliveMsecs: 60000,
+      maxSockets: 50,
+      timeout: 15000,
+    });
+  }
+  return razorpayHttpsAgent ?? undefined;
+}
+
+export function closeRazorpayConnections(): void {
+  if (razorpayHttpsAgent) {
+    razorpayHttpsAgent.destroy();
+    razorpayHttpsAgent = null;
+  }
+}
+
 // Low-level HTTPS helper that bypasses Node's fetch issues and works with tests
 function razorpayRequest(
   method: string,
@@ -92,6 +113,7 @@ function razorpayRequest(
         port: 443,
         path: `/v1${path}`,
         method: method,
+        agent: getRazorpayHttpsAgent(),
         headers: {
           Authorization: `Basic ${auth}`,
           "Content-Type": "application/json",

@@ -1,4 +1,20 @@
 import { db } from '../db';
+
+interface CachedServiceArea {
+  id: string;
+  name: string;
+  etaMinutes: number;
+  basePickupCharge: number;
+  status: string;
+  parsedPolygon: [number, number][];
+}
+
+let serviceAreaCache: { areas: CachedServiceArea[]; expiresAt: number } | null = null;
+
+export function invalidateServiceAreaCache(): void {
+  serviceAreaCache = null;
+}
+
 import { BENGALURU_ZONES, BENGALURU_MASTER_POLYGON, isPointInPolygon, calculateDistanceKm } from '../geofence';
 
 export async function checkGeofenceServiceability(

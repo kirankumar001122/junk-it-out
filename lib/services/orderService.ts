@@ -78,6 +78,9 @@ export function createOrderPayloadHash(input: any): string {
   return JSON.stringify(canonical);
 }
 
+// In-memory in-flight order promises to prevent race-condition duplicates
+const inFlightOrders = new Map<string, Promise<any>>();
+
 // In-memory Idempotency Store to prevent duplicate order placements
 // on network retries.
 const idempotencyStore = new Map<
@@ -218,18 +221,47 @@ export async function createOrder(
 
       return cached.responseData;
     }
+
+    const inFlight = inFlightOrders.get(normalizedIdempotencyKey);
+    if (inFlight) {
+      return await inFlight;
+    }
   }
 
-  // ---------------------------------------------------------
-  // 2. VALIDATE GEOFENCE / SERVICE AREA
-  // ---------------------------------------------------------
+  const execute = async () => {
 
-  const geofence =
-    await checkGeofenceServiceability(
+  // ---------------------------------------------------------
+  // 2. PARALLEL LOOKUP: GEOFENCE, USER PROFILE, AND WASTE CATEGORIES
+  // ---------------------------------------------------------
+  const categoryIds = input.items.map(
+    (item) => item.categoryId
+  );
+
+  const [geofence, initialUser, dbCategories] = await Promise.all([
+    checkGeofenceServiceability(
       input.address.lat,
       input.address.lng,
       input.address.area
-    );
+    ),
+    authUser?.userId
+      ? db.user.findUnique({
+          where: {
+            id: authUser.userId,
+          },
+          include: {
+            customer: true,
+          },
+        })
+      : Promise.resolve(null),
+    db.wasteCategory.findMany({
+      where: {
+        id: {
+          in: categoryIds,
+        },
+        active: true,
+      },
+    }),
+  ]);
 
   if (!geofence.serviceable) {
     throw new Error(
@@ -242,18 +274,7 @@ export async function createOrder(
   // 3. USER & CUSTOMER PROFILE
   // ---------------------------------------------------------
 
-  let user: any = null;
-
-  if (authUser?.userId) {
-    user = await db.user.findUnique({
-      where: {
-        id: authUser.userId,
-      },
-      include: {
-        customer: true,
-      },
-    });
-  }
+  let user: any = initialUser;
 
   if (!user || !user.customer) {
     user = await findOrCreateUserCustomer(
@@ -292,22 +313,8 @@ export async function createOrder(
     });
 
   // ---------------------------------------------------------
-  // 5. FETCH WASTE CATEGORIES & CALCULATE PRICE
+  // 5. VALIDATE WASTE CATEGORIES & WEIGHT
   // ---------------------------------------------------------
-
-  const categoryIds = input.items.map(
-    (item) => item.categoryId
-  );
-
-  const dbCategories =
-    await db.wasteCategory.findMany({
-      where: {
-        id: {
-          in: categoryIds,
-        },
-        active: true,
-      },
-    });
 
   const activeCategoryIds = new Set(dbCategories.map((category) => category.id));
   if (categoryIds.some((categoryId) => !activeCategoryIds.has(categoryId))) {
@@ -624,4 +631,18 @@ export async function createOrder(
   }
 
   return newOrder;
+  };
+
+  const promise = execute();
+  if (normalizedIdempotencyKey) {
+    inFlightOrders.set(normalizedIdempotencyKey, promise);
+  }
+
+  try {
+    return await promise;
+  } finally {
+    if (normalizedIdempotencyKey) {
+      inFlightOrders.delete(normalizedIdempotencyKey);
+    }
+  }
 }
