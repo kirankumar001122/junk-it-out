@@ -43,50 +43,62 @@ export async function GET(req: NextRequest) {
     const endOfDay = new Date(`${kolkataDateStr}T23:59:59.999+05:30`);
     const slaWindowStart = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
 
-    // Grouped queries to prevent connection pool exhaustion on remote PgBouncer connections
-    const orderStatusGroups = await db.order.groupBy({
-      by: ['status'],
-      _count: { _all: true },
-    }).catch(() => [] as Array<{ status: any; _count: { _all: number } }>);
+    // Execute independent aggregation and metric queries in parallel to minimize round-trip latency
+    const [
+      orderStatusGroups,
+      agentStatusGroups,
+      settlementGroups,
+      todaysBookings,
+      unassignedPickups,
+      customerCount,
+      paymentRevenueAgg,
+      totalWeightKg,
+      completedOrdersDates,
+    ] = await Promise.all([
+      db.order.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+      }).catch(() => [] as Array<{ status: any; _count: { _all: number } }>),
 
-    const agentStatusGroups = await db.agent.groupBy({
-      by: ['status'],
-      _count: { _all: true },
-    }).catch(() => [] as Array<{ status: any; _count: { _all: number } }>);
+      db.agent.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+      }).catch(() => [] as Array<{ status: any; _count: { _all: number } }>),
 
-    const settlementGroups = await db.settlement.groupBy({
-      by: ['status'],
-      _sum: { amount: true },
-    }).catch(() => [] as Array<{ status: any; _sum: { amount: number | null } }>);
+      db.settlement.groupBy({
+        by: ['status'],
+        _sum: { amount: true },
+      }).catch(() => [] as Array<{ status: any; _sum: { amount: number | null } }>),
 
-    const todaysBookings = await db.order.count({
-      where: { createdAt: { gte: startOfDay, lte: endOfDay } },
-    }).catch(() => 0);
+      db.order.count({
+        where: { createdAt: { gte: startOfDay, lte: endOfDay } },
+      }).catch(() => 0),
 
-    const unassignedPickups = await db.order.count({
-      where: { agentId: null, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
-    }).catch(() => 0);
+      db.order.count({
+        where: { agentId: null, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
+      }).catch(() => 0),
 
-    const customerCount = await db.customer.count().catch(() => 0);
+      db.customer.count().catch(() => 0),
 
-    const paymentRevenueAgg = await db.payment.aggregate({
-      _sum: { amount: true },
-      where: { status: { in: ['CAPTURED', 'SETTLEMENT_COMPLETED'] } },
-    }).catch(() => ({ _sum: { amount: 0 } }));
+      db.payment.aggregate({
+        _sum: { amount: true },
+        where: { status: { in: ['CAPTURED', 'SETTLEMENT_COMPLETED'] } },
+      }).catch(() => ({ _sum: { amount: 0 } })),
 
-    const totalWeightKg = await db.orderItem.aggregate({
-      _sum: { actualWeight: true },
-      where: { actualWeight: { not: null } },
-    }).catch(() => ({ _sum: { actualWeight: 0 } }));
+      db.orderItem.aggregate({
+        _sum: { actualWeight: true },
+        where: { actualWeight: { not: null } },
+      }).catch(() => ({ _sum: { actualWeight: 0 } })),
 
-    const completedOrdersDates = await db.order.findMany({
-      where: {
-        status: { in: ['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'] },
-        updatedAt: { gte: slaWindowStart },
-      },
-      select: { createdAt: true, updatedAt: true },
-      take: 200,
-    }).catch(() => [] as Array<{ createdAt: Date; updatedAt: Date }>);
+      db.order.findMany({
+        where: {
+          status: { in: ['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'] },
+          updatedAt: { gte: slaWindowStart },
+        },
+        select: { createdAt: true, updatedAt: true },
+        take: 200,
+      }).catch(() => [] as Array<{ createdAt: Date; updatedAt: Date }>),
+    ]);
 
     // Aggregate order status metrics
     let totalBookings = 0;
