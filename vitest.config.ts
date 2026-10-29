@@ -42,6 +42,7 @@ export default defineConfig({
       'tests/security-hardening.test.ts',
       'tests/response-shape-security.test.ts',
       'tests/realtime-admin-stream.test.ts',
+      'tests/payment-delay-diagnostics.test.ts',
     ],
   },
 });
