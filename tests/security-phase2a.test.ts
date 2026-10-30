@@ -194,6 +194,8 @@ describe('SEC-02: Secure OTP Rate Limiting & Client IP Resolution', () => {
     const origOtpId = process.env.FAST2SMS_OTP_ID;
     process.env.FAST2SMS_API_KEY = 'test-key';
     process.env.FAST2SMS_OTP_ID = 'test-otp-id';
+    const origFetch = global.fetch;
+    global.fetch = async () => new Response(JSON.stringify({ status_code: 400, message: ['Invalid OTP'] }), { status: 400 }) as any;
 
     try {
       // 5 failed verification attempts with 5 different rotating IPs
@@ -216,6 +218,7 @@ describe('SEC-02: Secure OTP Rate Limiting & Client IP Resolution', () => {
       const outcomeNormalized = await verifyOtp('9999912345', '000000', '198.51.100.100');
       assert.equal(outcomeNormalized.status, 'rate_limited');
     } finally {
+      global.fetch = origFetch;
       process.env.FAST2SMS_API_KEY = origApiKey;
       process.env.FAST2SMS_OTP_ID = origOtpId;
     }

@@ -423,6 +423,10 @@ describe('Additional Verification: SEC-02 Phone Normalization Shared Rate-Limit 
   test('+91 prefix and 10-digit Indian formats share the same rate-limit counter', async () => {
     const ip = '127.0.0.1';
     const testPhone = '9876511111';
+    const origApiKey = process.env.FAST2SMS_API_KEY;
+    const origOtpId = process.env.FAST2SMS_OTP_ID;
+    process.env.FAST2SMS_API_KEY = 'test-api-key';
+    process.env.FAST2SMS_OTP_ID = 'test-otp-id';
     const origFetch = global.fetch;
     global.fetch = async () => new Response(JSON.stringify({ status_code: 200, message: ['OTP sent'] }), { status: 200 }) as any;
 
@@ -442,6 +446,16 @@ describe('Additional Verification: SEC-02 Phone Normalization Shared Rate-Limit 
       assert.equal(res3.status, 'cooldown');
     } finally {
       global.fetch = origFetch;
+      if (origApiKey !== undefined) {
+        process.env.FAST2SMS_API_KEY = origApiKey;
+      } else {
+        delete process.env.FAST2SMS_API_KEY;
+      }
+      if (origOtpId !== undefined) {
+        process.env.FAST2SMS_OTP_ID = origOtpId;
+      } else {
+        delete process.env.FAST2SMS_OTP_ID;
+      }
     }
   });
 });

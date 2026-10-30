@@ -444,15 +444,23 @@ describe('SEC-11: Remove Runtime Database Schema Modifications', () => {
 describe('SEC-12: Secure Settlement Status Transitions', () => {
   let origFindUnique: any;
   let origUpdate: any;
+  let origSettlementFindUnique: any;
+  let origTransaction: any;
 
   beforeEach(() => {
     origFindUnique = (db.user as any).findUnique;
     origUpdate = (db.settlement as any).update;
+    origSettlementFindUnique = (db.settlement as any).findUnique;
+    origTransaction = (db as any).$transaction;
+    (db.settlement as any).findUnique = async () => null;
+    (db as any).$transaction = async (fn: any) => fn(db);
   });
 
   afterEach(() => {
     (db.user as any).findUnique = origFindUnique;
     (db.settlement as any).update = origUpdate;
+    (db.settlement as any).findUnique = origSettlementFindUnique;
+    (db as any).$transaction = origTransaction;
   });
 
   test('rejects marking PAID when transaction reference is missing (400)', async () => {
