@@ -7,7 +7,9 @@ import { getAuthUser, isAdminRole } from '@/lib/auth/middleware';
 import { isCustomerOrderOwner, isAgentOrderAssigned } from '@/lib/orderAccess';
 
 const PRIVATE_CACHE_HEADERS = {
-  'Cache-Control': 'private, no-store',
+  'Cache-Control': 'private, no-cache, no-store, must-revalidate',
+  Pragma: 'no-cache',
+  Expires: '0',
   'X-Content-Type-Options': 'nosniff',
 } as const;
 
@@ -56,7 +58,7 @@ export async function GET(req: NextRequest) {
 
     // 1. Enforce Authentication
     const authUser = await getAuthUser(req);
-    if (!authUser) {
+    if (!authUser || !authUser.userId) {
       return NextResponse.json(
         { success: false, message: 'Authentication is required to view photos.' },
         { status: 401, headers: PRIVATE_CACHE_HEADERS }
@@ -64,11 +66,12 @@ export async function GET(req: NextRequest) {
     }
 
     // 2. Authorize Access
-    const isAdmin = isAdminRole(authUser);
+    const isAdmin = isAdminRole(authUser) || authUser.role === 'ADMIN' || authUser.role === 'SUPER_ADMIN';
+    const isDirectUploader = Boolean(authUser.userId && filename.includes(`u_${authUser.userId}`));
 
-    if (!isAdmin) {
-      let isAuthorized = false;
+    let isAuthorized = isAdmin || isDirectUploader;
 
+    if (!isAuthorized) {
       if (orderIdParam) {
         // Explicit order ID supplied: verify order exists and contains the requested photo
         const order = await db.order.findUnique({
@@ -197,7 +200,9 @@ export async function GET(req: NextRequest) {
       const contentType = result.blob.contentType || 'image/jpeg';
       const responseHeaders = new Headers();
       responseHeaders.set('Content-Type', contentType);
-      responseHeaders.set('Cache-Control', 'private, no-store');
+      responseHeaders.set('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+      responseHeaders.set('Pragma', 'no-cache');
+      responseHeaders.set('Expires', '0');
       responseHeaders.set('X-Content-Type-Options', 'nosniff');
       if (result.blob.size) {
         responseHeaders.set('Content-Length', String(result.blob.size));
@@ -232,7 +237,9 @@ export async function GET(req: NextRequest) {
           status: 200,
           headers: {
             'Content-Type': mimeType,
-            'Cache-Control': 'private, no-store',
+            'Cache-Control': 'private, no-cache, no-store, must-revalidate',
+            Pragma: 'no-cache',
+            Expires: '0',
             'X-Content-Type-Options': 'nosniff',
           },
         });

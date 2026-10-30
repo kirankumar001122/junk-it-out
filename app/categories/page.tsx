@@ -25,6 +25,7 @@ import {
   PickupCartItem,
 } from '@/lib/pickupCart';
 import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
+import WeightQuantityInput from '@/components/WeightQuantityInput';
 
 const categoryImages: Record<string, string> = {
   'E-Waste': '/categories/e-waste.webp',
@@ -275,9 +276,12 @@ export default function CategoriesPage() {
                       <Minus className="h-3.5 w-3.5" />
                     </button>
 
-                    <span className="px-2 text-xs font-extrabold text-emerald-950">
-                      {quantity} kg
-                    </span>
+                    <WeightQuantityInput
+                      value={quantity}
+                      onChange={(val) => updatePickupCartQuantity(category.id, val)}
+                      categoryName={category.name}
+                      textClassName="text-xs font-extrabold text-emerald-950"
+                    />
 
                     <button
                       onClick={() =>

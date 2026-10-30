@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
       }
 
       const randomSuffix = Math.random().toString(36).substring(2, 9);
-      const filename = `waste-photo-${Date.now()}-${randomSuffix}${safeExtension}`;
+      const filename = `waste-photo-u_${authUser.userId}-${Date.now()}-${randomSuffix}${safeExtension}`;
 
       if (useBlob) {
         // Upload to persistent Vercel Blob storage with access: "private"

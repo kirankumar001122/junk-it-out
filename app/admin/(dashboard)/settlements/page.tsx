@@ -30,6 +30,17 @@ export default function AdminSettlementsPage() {
 
   const updateStatus = async (id: string, status: string) => {
     if (updatingRef.current) return;
+
+    let transactionReference: string | undefined;
+    if (status === 'PAID' || status === 'SETTLEMENT_COMPLETED') {
+      const ref = window.prompt('Enter transaction reference or payout ID (e.g. UPI Ref / IMPS / Bank Reference):');
+      if (!ref || !ref.trim()) {
+        setError('Transaction reference or payout ID is required to mark settlement as paid.');
+        return;
+      }
+      transactionReference = ref.trim();
+    }
+
     updatingRef.current = id;
     setUpdatingId(id);
     setError('');
@@ -38,7 +49,7 @@ export default function AdminSettlementsPage() {
       const response = await fetch('/api/admin/settlements', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, status }),
+        body: JSON.stringify({ id, status, ...(transactionReference ? { transactionReference } : {}) }),
       });
       const data = await response.json();
       if (data.success) {

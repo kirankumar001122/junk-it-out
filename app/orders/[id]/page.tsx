@@ -84,9 +84,12 @@ export default function OrderTrackingPage() {
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentMessage, setPaymentMessage] = useState<string | null>(null);
 
-  // Keyboard accessibility: dismiss active modal with Escape key
+  // Lock body scroll and handle Escape key while active modal is open
   useEffect(() => {
     if (!showCancelModal && !showComplaintModal && !showRatingModal) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (showCancelModal && !cancelling) setShowCancelModal(false);
@@ -95,7 +98,10 @@ export default function OrderTrackingPage() {
       }
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, [showCancelModal, showComplaintModal, showRatingModal, cancelling]);
 
   // Always holds the latest order so SSE handlers
@@ -1484,9 +1490,21 @@ export default function OrderTrackingPage() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="cancel-dialog-title"
-          className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in"
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6 overflow-y-auto pb-[calc(1rem+env(safe-area-inset-bottom,0px))]"
         >
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl border border-slate-100">
+          {/* Backdrop overlay: blurs background page content only, dismissible on click */}
+          <div
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm transition-opacity"
+            style={{ WebkitBackdropFilter: 'blur(4px)' }}
+            onClick={() => !cancelling && setShowCancelModal(false)}
+            aria-hidden="true"
+          />
+
+          {/* Modal content: completely sharp, isolated from backdrop filter, scrollable on short mobile viewports */}
+          <div
+            className="relative z-10 bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl border border-slate-100 my-auto max-h-[calc(100dvh-2rem)] overflow-y-auto"
+            style={{ transform: 'translateZ(0)' }}
+          >
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <div className="flex items-center gap-2 text-rose-600 font-extrabold text-base">
                 <AlertCircle className="w-5 h-5" />
@@ -1591,69 +1609,7 @@ export default function OrderTrackingPage() {
         </div>
       )}
 
-      {/* CANCEL ORDER MODAL */}
-      {showCancelModal && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
-            <div className="flex items-center gap-3 text-rose-600">
-              <div className="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center font-bold text-base">
-                ✕
-              </div>
-              <div>
-                <h3 className="text-base font-extrabold text-slate-900">Cancel Pickup Order?</h3>
-                <p className="text-xs text-slate-500">Order #{order.orderNumber}</p>
-              </div>
-            </div>
 
-            {cancelError && (
-              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs font-bold text-rose-700">
-                {cancelError}
-              </div>
-            )}
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700">Reason for Cancellation</label>
-              <select
-                value={cancelReason}
-                onChange={(e) => setCancelReason(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-900"
-              >
-                <option value="Customer rescheduled">Customer rescheduled</option>
-                <option value="Booked by mistake">Booked by mistake</option>
-                <option value="Changed mind / No longer needed">Changed mind / No longer needed</option>
-                <option value="Agent delayed">Agent delayed</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-900 space-y-1">
-              <p className="font-bold">Notice:</p>
-              <p className="text-[11px] text-amber-800">
-                If an agent was assigned, their status will be restored to Available so they can accept new pickups.
-              </p>
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <button
-                type="button"
-                disabled={cancelling}
-                onClick={() => setShowCancelModal(false)}
-                className="w-1/2 bg-slate-100 text-slate-700 font-bold text-xs py-3 rounded-xl hover:bg-slate-200"
-              >
-                Keep Order
-              </button>
-              <button
-                type="button"
-                disabled={cancelling}
-                onClick={handleCancelOrder}
-                className="w-1/2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs py-3 rounded-xl shadow-md flex items-center justify-center gap-2"
-              >
-                {cancelling ? "Cancelling..." : "Confirm Cancellation"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
     </div>
   );

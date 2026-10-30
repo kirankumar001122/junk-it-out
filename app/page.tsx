@@ -33,6 +33,7 @@ import {
 } from '@/lib/pickupCart';
 
 import CustomerReviews from '@/components/CustomerReviews';
+import WeightQuantityInput from '@/components/WeightQuantityInput';
 import ScrollReveal from '@/components/ScrollReveal';
 import { getCachedClientJson } from '@/lib/clientRequestCache';
 import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
@@ -454,9 +455,12 @@ export default function HomePage() {
                             <Minus className="h-3.5 w-3.5" />
                           </button>
 
-                          <span className="px-2 text-xs font-black text-emerald-950">
-                            {quantity} kg
-                          </span>
+                          <WeightQuantityInput
+                            value={quantity}
+                            onChange={(val) => updatePickupCartQuantity(category.id, val)}
+                            categoryName={category.name}
+                            textClassName="text-xs font-black text-emerald-950"
+                          />
 
                           <button
                             onClick={() =>
