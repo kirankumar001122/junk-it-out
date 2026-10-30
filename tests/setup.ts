@@ -1,3 +1,8 @@
+import { vi } from 'vitest';
+
+// Stub 'server-only' so Server Components and server-only services can run under Vitest node environment
+vi.mock('server-only', () => ({}));
+
 if (!process.env.DATABASE_URL) {
   process.env.DATABASE_URL = 'postgresql://test:test@127.0.0.1:5432/junk_it_out_test';
 }
