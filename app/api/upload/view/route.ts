@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { get } from '@vercel/blob';
 import { readFile } from 'fs/promises';
+import { existsSync } from 'fs';
 import path from 'path';
 import { db } from '@/lib/db';
 import { getAuthUser, isAdminRole } from '@/lib/auth/middleware';
 import { isCustomerOrderOwner, isAgentOrderAssigned } from '@/lib/orderAccess';
 
 const PRIVATE_CACHE_HEADERS = {
-  'Cache-Control': 'private, no-cache, no-store, must-revalidate',
-  Pragma: 'no-cache',
-  Expires: '0',
+  'Cache-Control': 'private, no-store',
   'X-Content-Type-Options': 'nosniff',
 } as const;
 
@@ -200,9 +199,7 @@ export async function GET(req: NextRequest) {
       const contentType = result.blob.contentType || 'image/jpeg';
       const responseHeaders = new Headers();
       responseHeaders.set('Content-Type', contentType);
-      responseHeaders.set('Cache-Control', 'private, no-cache, no-store, must-revalidate');
-      responseHeaders.set('Pragma', 'no-cache');
-      responseHeaders.set('Expires', '0');
+      responseHeaders.set('Cache-Control', 'private, no-store');
       responseHeaders.set('X-Content-Type-Options', 'nosniff');
       if (result.blob.size) {
         responseHeaders.set('Content-Length', String(result.blob.size));
@@ -216,8 +213,17 @@ export async function GET(req: NextRequest) {
 
     // 4. Handle local filesystem uploads fallback (e.g. /uploads/waste-photo-...)
     if (targetUrl.startsWith('/uploads/') || targetUrl.startsWith('uploads/') || filename === targetUrl) {
-      const uploadDir = path.resolve(process.cwd(), 'storage', 'uploads');
-      const filePath = path.resolve(uploadDir, filename);
+      let uploadDir = path.resolve(process.cwd(), 'storage', 'uploads');
+      let filePath = path.resolve(uploadDir, filename);
+
+      if (!existsSync(filePath)) {
+        const legacyDir = path.resolve(process.cwd(), 'public', 'uploads');
+        const legacyPath = path.resolve(legacyDir, filename);
+        if (legacyPath.startsWith(legacyDir) && existsSync(legacyPath)) {
+          uploadDir = legacyDir;
+          filePath = legacyPath;
+        }
+      }
 
       if (!filePath.startsWith(uploadDir)) {
         return NextResponse.json(
@@ -237,9 +243,7 @@ export async function GET(req: NextRequest) {
           status: 200,
           headers: {
             'Content-Type': mimeType,
-            'Cache-Control': 'private, no-cache, no-store, must-revalidate',
-            Pragma: 'no-cache',
-            Expires: '0',
+            'Cache-Control': 'private, no-store',
             'X-Content-Type-Options': 'nosniff',
           },
         });
