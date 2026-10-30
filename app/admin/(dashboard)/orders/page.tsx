@@ -25,38 +25,60 @@ export default function AdminOrdersPage() {
 
   const assignInFlightRef = useRef(false);
   const loadingRef = useRef(false);
+  const agentsLoadingRef = useRef(false);
 
-  const loadOrdersAndAgents = async () => {
+  const loadOrders = async () => {
     if (loadingRef.current) return;
     loadingRef.current = true;
     try {
       setLoading(true);
-      setAgentsLoading(true);
-      setAgentsError(null);
-      const [ordersRes, agentsRes] = await Promise.all([
-        fetch('/api/orders?limit=100').then((r) => r.json()).catch(() => ({ success: false })),
-        fetch('/api/admin/agents').then((r) => r.json()).catch(() => ({ success: false })),
-      ]);
+      const ordersRes = await fetch('/api/orders?limit=100')
+        .then((r) => r.json())
+        .catch(() => ({ success: false }));
 
-      if (ordersRes.success) setOrders(ordersRes.data || []);
-      if (agentsRes.success) {
-        const fetchedAgents = agentsRes.data || [];
-        setAgents(fetchedAgents);
-      } else {
-        setAgentsError(agentsRes.error?.message || agentsRes.message || 'Failed to load field agents.');
+      if (ordersRes.success) {
+        setOrders(ordersRes.data || []);
       }
     } catch (e: any) {
-      console.error(e);
-      setAgentsError('Error loading orders and agents.');
+      console.error('Error loading orders:', e);
     } finally {
       setLoading(false);
-      setAgentsLoading(false);
       loadingRef.current = false;
     }
   };
 
+  const loadAgents = async () => {
+    if (agentsLoadingRef.current) return;
+    agentsLoadingRef.current = true;
+    try {
+      setAgentsLoading(true);
+      setAgentsError(null);
+      const agentsRes = await fetch('/api/admin/agents')
+        .then((r) => r.json())
+        .catch(() => ({ success: false }));
+
+      if (agentsRes.success) {
+        setAgents(agentsRes.data || []);
+      } else {
+        setAgentsError(agentsRes.error?.message || agentsRes.message || 'Failed to load field agents.');
+      }
+    } catch (e: any) {
+      console.error('Error loading field agents:', e);
+      setAgentsError('Error loading field agents.');
+    } finally {
+      setAgentsLoading(false);
+      agentsLoadingRef.current = false;
+    }
+  };
+
+  const loadOrdersAndAgents = async () => {
+    await Promise.all([loadOrders(), loadAgents()]);
+  };
+
   useEffect(() => {
-    loadOrdersAndAgents();
+    // Unblock orders table immediately; fetch field agents in background
+    loadOrders();
+    loadAgents();
   }, []);
 
   // Keyboard accessibility and body scroll lock for modal
@@ -82,6 +104,17 @@ export default function AdminOrdersPage() {
     if (a.status !== 'AVAILABLE' && b.status === 'AVAILABLE') return 1;
     return a.name.localeCompare(b.name);
   });
+
+  useEffect(() => {
+    if (selectedOrderForAssign && !selectedAgentId && agents.length > 0) {
+      if (selectedOrderForAssign.agentId && agents.some((a: any) => a.id === selectedOrderForAssign.agentId)) {
+        setSelectedAgentId(selectedOrderForAssign.agentId);
+      } else {
+        const firstAvailable = agents.find((a: any) => a.status === 'AVAILABLE');
+        setSelectedAgentId(firstAvailable ? firstAvailable.id : (agents[0]?.id || ''));
+      }
+    }
+  }, [agents, selectedOrderForAssign, selectedAgentId]);
 
   const openAssignModal = (order: any) => {
     setSelectedOrderForAssign(order);

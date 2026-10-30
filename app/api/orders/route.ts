@@ -642,13 +642,21 @@ export async function GET(req: NextRequest) {
 
           address: true,
 
-          items: {
-            include: {
-              category: true,
-            },
-          },
+          ...(authUser.role === 'CUSTOMER' || searchParams.get('includeItems') === 'true'
+            ? {
+                items: {
+                  select: {
+                    id: true,
+                    categoryId: true,
+                    estimatedWeight: true,
+                    actualWeight: true,
+                    category: { select: { id: true, name: true } },
+                  },
+                },
+              }
+            : {}),
 
-          ...(authUser.role !== 'CUSTOMER' || searchParams.get('includeHistory') === 'true'
+          ...(searchParams.get('includeHistory') === 'true'
             ? {
                 statusHistory: {
                   orderBy: {
