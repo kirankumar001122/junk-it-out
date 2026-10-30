@@ -172,22 +172,24 @@ export default function Navbar() {
             <Bell className="h-4 w-4" />
           </Link>
 
-          <button
-            onClick={() => setCartOpen(true)}
-            className="btn-glossy-dark relative z-10 grid h-9 w-9 shrink-0 place-items-center overflow-visible rounded-full text-white shadow-lg shadow-slate-900/10 active:scale-95 sm:h-10 sm:w-10"
-            aria-label={`Shopping cart, ${cartCount} ${cartCount === 1 ? 'item' : 'items'}`}
-          >
-            <ShoppingBasket className="h-4.5 w-4.5" />
+          <span className="relative z-10 inline-flex shrink-0 overflow-visible isolate">
+            <button
+              onClick={() => setCartOpen(true)}
+              className="btn-glossy-dark grid h-9 w-9 place-items-center rounded-full text-white shadow-lg shadow-slate-900/10 active:scale-95 sm:h-10 sm:w-10"
+              aria-label={`Shopping cart, ${cartCount} ${cartCount === 1 ? 'item' : 'items'}`}
+            >
+              <ShoppingBasket className="h-4.5 w-4.5" />
+            </button>
             {cartCount > 0 && (
               <span
                 aria-live="polite"
                 aria-label={`${cartCount} ${cartCount === 1 ? 'item' : 'items'} in cart`}
-                className="absolute -right-1 -top-1 z-10 grid h-5 min-w-5 place-items-center rounded-full border-2 border-white bg-emerald-500 px-1 text-[10px] font-bold leading-none text-slate-950 shadow-md animate-scale-in"
+                className="pointer-events-none absolute -right-2 -top-2 z-20 grid h-6 min-w-6 place-items-center whitespace-nowrap rounded-full border-2 border-white bg-emerald-600 px-1.5 text-xs font-extrabold leading-none text-white shadow-lg"
               >
                 {cartCount}
               </span>
             )}
-          </button>
+          </span>
         </div>
       </div>
 
