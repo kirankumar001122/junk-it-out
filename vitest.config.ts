@@ -57,6 +57,8 @@ export default defineConfig({
       'tests/payment-delay-diagnostics.test.ts',
       'tests/pricing.test.ts',
       'tests/financial-correctness.test.ts',
+      'tests/upload-view-authorization.test.ts',
+      'tests/weighing-validation-and-rollback.test.ts',
     ],
   },
 });

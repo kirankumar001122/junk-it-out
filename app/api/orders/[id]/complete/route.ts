@@ -52,13 +52,27 @@ export async function POST(
     const hasWeightPayload = Array.isArray(actualWeights) && actualWeights.length > 0;
 
     // Verify weighing record exists or valid scale weights are supplied in the request body
-    if (order.weightRecords.length === 0 && !hasWeightPayload) {
-      return errorResponse('WEIGHING_REQUIRED', 'Digital scale weights must be recorded before completing pickup.', 400);
+    if (!hasWeightPayload) {
+      if (order.weightRecords.length === 0) {
+        return errorResponse('WEIGHING_REQUIRED', 'Digital scale weights must be recorded before completing pickup.', 400);
+      }
+      if (!order.items || order.items.length === 0) {
+        return errorResponse('WEIGHING_REQUIRED', 'Order has no items to complete.', 400);
+      }
+      const unweighedItem = order.items.find(
+        (item) => typeof item.actualWeight !== 'number' || !Number.isFinite(item.actualWeight) || item.actualWeight <= 0
+      );
+      if (unweighedItem) {
+        return errorResponse('WEIGHING_REQUIRED', 'All order items must have recorded scale weights before completing pickup.', 400);
+      }
     }
 
     const orderItemsById = new Map(order.items.map((item) => [item.id, item]));
 
     if (hasWeightPayload) {
+      if (!order.items || order.items.length === 0) {
+        return errorResponse('INVALID_WEIGH_DATA', 'Order has no items to weigh.', 400);
+      }
       const submittedItemIds = new Set<string>();
       for (const itemInput of actualWeights) {
         const itemId = itemInput?.itemId;
@@ -170,6 +184,18 @@ export async function POST(
         currentOrder.status === 'WASTE_VERIFICATION';
       if (!currentStatusIsCompletable) {
         return { kind: 'invalidTransition' as const, status: currentOrder.status };
+      }
+
+      // Verify all items have valid scale weights when completing without weight payload
+      if (!hasWeightPayload) {
+        const itemsToCheck = currentOrder.items && currentOrder.items.length > 0 ? currentOrder.items : order.items;
+        const unweighed = itemsToCheck.find(
+          (item) => typeof item.actualWeight !== 'number' || !Number.isFinite(item.actualWeight) || item.actualWeight <= 0
+        );
+        const wrCount = currentOrder.weightRecords?.length ?? order.weightRecords.length;
+        if (unweighed || wrCount === 0) {
+          return { kind: 'incompleteWeighing' as const };
+        }
       }
 
       // 1. If weights are supplied directly in this request, update order items and persist WeightRecord
@@ -345,6 +371,14 @@ export async function POST(
       return errorResponse(
         'INVALID_STATUS_TRANSITION',
         `Cannot complete order from current status (${completionResult.status}). Please complete weighing first.`,
+        400,
+      );
+    }
+
+    if (completionResult.kind === 'incompleteWeighing') {
+      return errorResponse(
+        'WEIGHING_REQUIRED',
+        'All order items must have recorded scale weights before completing pickup.',
         400,
       );
     }
