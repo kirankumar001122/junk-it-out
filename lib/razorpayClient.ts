@@ -13,31 +13,66 @@ export function loadRazorpayScript(): Promise<boolean> {
   if (razorpayScriptPromise) return razorpayScriptPromise;
 
   razorpayScriptPromise = new Promise((resolve) => {
-    const existing = document.getElementById(
-      RAZORPAY_SCRIPT_ID,
-    ) as HTMLScriptElement | null;
+    if (hasRazorpay()) {
+      resolve(true);
+      return;
+    }
 
     const finish = (loaded: boolean) => {
       if (!loaded) razorpayScriptPromise = null;
       resolve(loaded);
     };
 
+    const existing = document.getElementById(
+      RAZORPAY_SCRIPT_ID,
+    ) as HTMLScriptElement | null;
+
     if (existing) {
-      existing.addEventListener('load', () => finish(hasRazorpay()), {
-        once: true,
-      });
-      existing.addEventListener('error', () => finish(false), { once: true });
-      return;
+      if (hasRazorpay() || existing.getAttribute('data-loaded') === 'true') {
+        finish(true);
+        return;
+      }
+      if (existing.getAttribute('data-failed') === 'true') {
+        existing.remove();
+      } else {
+        existing.addEventListener('load', () => {
+          existing.setAttribute('data-loaded', 'true');
+          finish(hasRazorpay());
+        }, {
+          once: true,
+        });
+        existing.addEventListener('error', () => {
+          existing.setAttribute('data-failed', 'true');
+          finish(false);
+        }, { once: true });
+        // Failsafe timeout to prevent hanging promise on already-executed scripts
+        setTimeout(() => {
+          finish(hasRazorpay());
+        }, 3000);
+        return;
+      }
     }
 
     const script = document.createElement('script');
     script.id = RAZORPAY_SCRIPT_ID;
     script.src = RAZORPAY_SCRIPT_SRC;
     script.async = true;
-    script.onload = () => finish(hasRazorpay());
-    script.onerror = () => finish(false);
+    script.onload = () => {
+      script.setAttribute('data-loaded', 'true');
+      finish(hasRazorpay());
+    };
+    script.onerror = () => {
+      script.setAttribute('data-failed', 'true');
+      finish(false);
+    };
     document.head.appendChild(script);
   });
 
   return razorpayScriptPromise;
+}
+
+export function preloadRazorpayScript(): void {
+  if (typeof window !== 'undefined') {
+    loadRazorpayScript().catch(() => {});
+  }
 }
