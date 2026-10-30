@@ -5,6 +5,7 @@ export type AgentBookingAssignment = {
   orderNumber: string;
   agentId: string;
   agentUserId: string;
+  agentPhone?: string;
   status: string;
 };
 
@@ -55,6 +56,79 @@ export async function persistAgentBookingNotificationOnce(
   });
 
   return result.count === 1;
+}
+
+export function getAgentAssignmentSmsNotificationId(orderId: string, agentId: string) {
+  return `agent-assignment-sms-${orderId}-${agentId}`;
+}
+
+export function buildAgentAssignmentSmsNotificationData(
+  assignment: AgentBookingAssignment & { agentPhone: string; content: string },
+) {
+  return {
+    id: getAgentAssignmentSmsNotificationId(assignment.orderId, assignment.agentId),
+    userId: assignment.agentUserId,
+    orderId: assignment.orderId,
+    type: 'AGENT_BOOKING_ASSIGNED_SMS',
+    recipient: assignment.agentPhone,
+    content: assignment.content,
+    status: 'QUEUED',
+    provider: 'FAST2SMS_SMS',
+    deliveryStatus: 'queued',
+    statusDescription: 'Queued for assigned-agent SMS delivery.',
+  };
+}
+
+export async function persistAgentAssignmentSmsOnce(
+  tx: Pick<Prisma.TransactionClient, 'notification'>,
+  assignment: AgentBookingAssignment & { agentPhone: string; content: string },
+) {
+  const result = await tx.notification.createMany({
+    data: [buildAgentAssignmentSmsNotificationData(assignment)],
+    skipDuplicates: true,
+  });
+
+  return result.count === 1;
+}
+
+export type AgentAssignmentSmsDeliveryResult = {
+  success: boolean;
+  requestId?: string;
+  error?: string;
+};
+
+export async function deliverAgentAssignmentSms(
+  notification: {
+    id: string;
+    recipient: string;
+    content: string;
+  },
+  dependencies: {
+    claim: (notificationId: string) => Promise<boolean>;
+    send: (input: { agentPhone: string; message: string }) => Promise<AgentAssignmentSmsDeliveryResult>;
+    markSent: (notificationId: string, requestId?: string) => Promise<void>;
+    markFailed: (notificationId: string, error?: string) => Promise<void>;
+  },
+) {
+  if (!(await dependencies.claim(notification.id))) return false;
+
+  try {
+    const result = await dependencies.send({
+      agentPhone: notification.recipient,
+      message: notification.content,
+    });
+    if (result.success) {
+      await dependencies.markSent(notification.id, result.requestId);
+      return true;
+    }
+    await dependencies.markFailed(notification.id, result.error);
+  } catch (error) {
+    await dependencies.markFailed(
+      notification.id,
+      error instanceof Error ? error.message : 'SMS delivery failed.',
+    );
+  }
+  return false;
 }
 
 export function broadcastAgentBookingNotification(
