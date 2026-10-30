@@ -54,15 +54,11 @@ export async function POST(req: NextRequest) {
 
     // 2. Lookup Authorized Admin Account strictly from existing database records (SEC-01)
     const rawDigits = normalized.replace(/\D/g, '').slice(-10);
-    const isAuthorizedAdminNumber =
-      rawDigits === '7676272709' ||
-      rawDigits === '8884176048' ||
-      rawDigits === '7479895482';
     const phoneVariants = Array.from(
       new Set([normalized, rawDigits, `+91${rawDigits}`, `0${rawDigits}`])
     );
 
-    let user = await db.user.findFirst({
+    const user = await db.user.findFirst({
       where: {
         OR: [
           { phone: { in: phoneVariants } },
@@ -70,52 +66,6 @@ export async function POST(req: NextRequest) {
       },
       include: { admin: true, customer: true, agent: true },
     });
-
-    if (isAuthorizedAdminNumber) {
-      if (!user) {
-        user = await db.user.create({
-          data: {
-            phone: `+91${rawDigits}`,
-            email: adminEmail,
-            name: 'Junk It Out Admin',
-            role: 'SUPER_ADMIN',
-            admin: {
-              create: {
-                department: 'Operations & Management',
-                accessLevel: 'SUPER_ADMIN',
-              },
-            },
-          },
-          include: { admin: true, customer: true, agent: true },
-        });
-      } else {
-        let adminRecord = user.admin || (await db.admin.findUnique({ where: { userId: user.id } }));
-        if (!adminRecord) {
-          adminRecord = await db.admin.upsert({
-            where: { userId: user.id },
-            update: { accessLevel: 'SUPER_ADMIN' },
-            create: {
-              userId: user.id,
-              department: 'Operations & Management',
-              accessLevel: 'SUPER_ADMIN',
-            },
-          });
-        }
-
-        user = await db.user.update({
-          where: { id: user.id },
-          data: {
-            phone: user.phone || `+91${rawDigits}`,
-            role: 'SUPER_ADMIN',
-          },
-          include: { admin: true, customer: true, agent: true },
-        });
-
-        if (!user.admin && adminRecord) {
-          (user as any).admin = adminRecord;
-        }
-      }
-    }
 
     const adminRecord = user?.admin || (user?.id ? await db.admin.findUnique({ where: { userId: user.id } }) : null);
 

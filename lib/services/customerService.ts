@@ -135,7 +135,8 @@ export async function saveCustomerAddress(
 
   const runTx = async (tx: any) => {
     const addressClient = tx?.address || db.address;
-    if (isDefault && typeof addressClient?.updateMany === 'function') {
+    const shouldResetExisting = isDefault && options?.hasExistingDefault !== false;
+    if (shouldResetExisting && typeof addressClient?.updateMany === 'function') {
       await addressClient.updateMany({
         where: { userId },
         data: { isDefault: false },
