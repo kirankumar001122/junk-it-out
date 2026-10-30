@@ -1,63 +1,28 @@
-export type PickupCartItem = { categoryId: string; quantity: number };
+﻿export type CartItem = { id: string; qty: number; [key: string]: any };
 
-export const ACTIVE_CUSTOMER_CATEGORIES = [
-  'E-Waste',
-  'Household Dry Waste',
-  'Paper & Cardboard',
-  'Plastic Waste',
-] as const;
-
-export function isCustomerPickupCategory(categoryName?: string | null): boolean {
-  if (!categoryName) return false;
-  return (ACTIVE_CUSTOMER_CATEGORIES as readonly string[]).includes(categoryName.trim());
+export function addToPickupCart(item: CartItem) {
+  if (typeof window === 'undefined') return;
+  const cart = readPickupCart();
+  cart.push(item);
+  localStorage.setItem('pickupCart', JSON.stringify(cart));
 }
 
-const CART_KEY = 'junk-it-out-pickup-cart';
-const CART_EVENT = 'junk-it-out-cart-updated';
-
-export function readPickupCart(): PickupCartItem[] {
+export function readPickupCart(): CartItem[] {
   if (typeof window === 'undefined') return [];
   try {
-    const value = JSON.parse(window.sessionStorage.getItem(CART_KEY) || '[]');
-    return Array.isArray(value) ? value.filter((item) => item?.categoryId) : [];
-  } catch {
-    return [];
-  }
+    return JSON.parse(localStorage.getItem('pickupCart') || '[]');
+  } catch { return []; }
 }
 
-export function addToPickupCart(categoryId: string) {
-  const items = readPickupCart();
-  const existing = items.find((item) => item.categoryId === categoryId);
-  const next = existing
-    ? items.map((item) => (item.categoryId === categoryId ? { ...item, quantity: Math.min(500, item.quantity + 1) } : item))
-    : [...items, { categoryId, quantity: 1 }];
-  window.sessionStorage.setItem(CART_KEY, JSON.stringify(next));
-  window.dispatchEvent(new Event(CART_EVENT));
-  return next;
-}
-
-export function updatePickupCartQuantity(categoryId: string, quantity: number) {
-  if (quantity <= 0) {
-    return removeFromPickupCart(categoryId);
-  }
-  const safeQuantity = Math.max(1, Math.min(500, Math.round(Number(quantity) || 1)));
-  const next = readPickupCart().map((item) => (item.categoryId === categoryId ? { ...item, quantity: safeQuantity } : item));
-  window.sessionStorage.setItem(CART_KEY, JSON.stringify(next));
-  window.dispatchEvent(new Event(CART_EVENT));
-  return next;
-}
-
-export function removeFromPickupCart(categoryId: string) {
-  const next = readPickupCart().filter((item) => item.categoryId !== categoryId);
-  window.sessionStorage.setItem(CART_KEY, JSON.stringify(next));
-  window.dispatchEvent(new Event(CART_EVENT));
-  return next;
+export function updatePickupCartQuantity(id: string, qty: number) {
+  if (typeof window === 'undefined') return;
+  let cart = readPickupCart();
+  cart = cart.map(i => i.id === id ? { ...i, qty } : i);
+  localStorage.setItem('pickupCart', JSON.stringify(cart));
+  return cart;
 }
 
 export function clearPickupCart() {
   if (typeof window === 'undefined') return;
-  window.sessionStorage.removeItem(CART_KEY);
-  window.dispatchEvent(new Event(CART_EVENT));
+  localStorage.removeItem('pickupCart');
 }
-
-export const pickupCartEvent = CART_EVENT;

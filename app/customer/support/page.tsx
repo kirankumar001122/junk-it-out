@@ -45,7 +45,7 @@ export default function CustomerSupportPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submitting) return;
+    if (!description.trim() || submitting) return;
 
     setSubmitting(true);
     setError(null);
@@ -83,15 +83,14 @@ export default function CustomerSupportPage() {
   };
 
   return (
-    <div className="customer-page space-y-6">
+    <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
       <div>
-        <p className="customer-eyebrow">We are here to help</p>
-        <h1 className="customer-title mt-2">Customer support</h1>
-        <p className="customer-subtitle mt-2">Tell us what happened and our operations desk will review the pickup details.</p>
+        <h1 className="text-2xl font-black text-slate-900">Customer Support & Disputes</h1>
+        <p className="text-xs text-slate-500">Need help with a pickup? Report issues directly to our South Bengaluru operations desk.</p>
       </div>
 
       {/* NEW TICKET FORM */}
-      <div className="customer-surface space-y-4 p-5 sm:p-6">
+      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
         <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
           <HelpCircle className="w-4 h-4 text-emerald-600" />
           Report an Issue or Submit Support Ticket
@@ -150,9 +149,10 @@ export default function CustomerSupportPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Description (Optional):</label>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Description:</label>
             <textarea
               rows={3}
+              required
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Provide specific details about your issue..."
@@ -163,7 +163,7 @@ export default function CustomerSupportPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="customer-action flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 py-3.5 text-xs font-bold text-white shadow-md hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-500"
+            className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-500 text-white font-bold text-xs py-3.5 rounded-2xl shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
           >
             <Send className={`w-4 h-4 text-emerald-400 ${submitting ? 'animate-spin' : ''}`} />
             {submitting ? 'SUBMITTING TICKET...' : 'SUBMIT SUPPORT TICKET'}
@@ -172,7 +172,7 @@ export default function CustomerSupportPage() {
       </div>
 
       {/* TICKETS LIST */}
-      <div className="customer-surface space-y-4 p-5 sm:p-6">
+      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
         <h3 className="text-sm font-extrabold text-slate-900">Your Support Tickets</h3>
 
         {loading ? (

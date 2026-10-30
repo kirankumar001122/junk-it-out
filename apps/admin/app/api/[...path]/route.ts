@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || 'https://www.junkitout.in';
 
 type Props = {
-  params: Promise<{ path: string[] }>;
+  params: Promise<{ path: string[] }> | { path: string[] };
 };
 
 async function handleProxy(req: NextRequest, props: Props) {

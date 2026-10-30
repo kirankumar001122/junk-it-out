@@ -1,13 +1,11 @@
 export default function AcceptedWastePage() {
   return (
-    <div className="customer-page-cream min-h-[80vh]">
-    <div className="customer-page max-w-5xl space-y-6">
-      <p className="customer-eyebrow">Know before you book</p>
-      <h1 className="customer-title">Waste acceptance policy</h1>
-      <p className="customer-subtitle">A clear guide to what our field agents can collect at your doorstep.</p>
+    <div className="max-w-4xl mx-auto px-4 py-12 space-y-6">
+      <h1 className="text-3xl font-black text-slate-900">Waste Acceptance & Restriction Policy</h1>
+      <p className="text-sm text-slate-600">Please review what materials are accepted by Junk It Out field agents.</p>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="customer-feature-card border-emerald-200 p-6 space-y-3">
+        <div className="bg-emerald-50 border border-emerald-200 p-6 rounded-3xl space-y-3">
           <h2 className="text-base font-bold text-emerald-900 flex items-center gap-2">
             ✓ Accepted Materials (We Buy / Collect)
           </h2>
@@ -23,7 +21,7 @@ export default function AcceptedWastePage() {
           </ul>
         </div>
 
-        <div className="rounded-[1.5rem] border border-rose-200 bg-rose-50 p-6 space-y-3 shadow-[0_14px_35px_rgba(159,18,57,0.07)]">
+        <div className="bg-rose-50 border border-rose-200 p-6 rounded-3xl space-y-3">
           <h2 className="text-base font-bold text-rose-900 flex items-center gap-2">
             ✕ Prohibited & Rejected Materials
           </h2>
@@ -35,7 +33,6 @@ export default function AcceptedWastePage() {
             <li>Construction debris / concrete rubble</li>
             <li>Stolen or illegal goods</li>
           </ul>
-        </div>
         </div>
       </div>
     </div>

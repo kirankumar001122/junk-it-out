@@ -1,5 +1,4 @@
 import 'server-only';
-import { getSafeErrorType, logStructured } from '../observability/structuredLogger';
 
 const FAST2SMS_WHATSAPP_URL = 'https://www.fast2sms.com/dev/whatsapp';
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -20,13 +19,16 @@ export interface WhatsAppServiceResult {
   error?: string;
 }
 
-export interface SendAgentPickupOfferInput {
-  agentPhone: string;
-  orderNumber: string;
-  pickupAddress: string;
-  latitude: number;
-  longitude: number;
-  mapsLink: string;
+/**
+ * Safely masks a phone number for privacy in server logs.
+ * Example: "+919876543210" -> "+91 98****3210"
+ */
+function maskPhone(phone: string): string {
+  if (!phone || phone.length < 7) return '***';
+  const clean = phone.replace(/\s+/g, '');
+  const start = clean.slice(0, 4);
+  const end = clean.slice(-4);
+  return `${start}****${end}`;
 }
 
 /**
@@ -80,7 +82,9 @@ export async function sendDispatchUpdate(
     ).trim();
 
     if (!apiKey) {
-      logStructured('warn', 'notification.whatsapp.configuration_missing', { dependency: 'fast2sms' });
+      console.warn(
+        '[WHATSAPP_CONFIG_NOTICE] Fast2SMS API key missing in environment variables. WhatsApp dispatch notification skipped.'
+      );
       return {
         success: false,
         error: 'FAST2SMS_API_KEY missing in server environment.',
@@ -119,7 +123,12 @@ export async function sendDispatchUpdate(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-    logStructured('info', 'notification.whatsapp.request_started', { dependency: 'fast2sms' });
+    console.log('[WHATSAPP_DISPATCH_REQUEST]', {
+      messageId,
+      phoneNumberId,
+      maskedCustomerPhone: maskPhone(input.customerPhone),
+      orderNumber: input.orderNumber || 'N/A',
+    });
 
     const response = await fetch(targetUrl, {
       method: 'GET',
@@ -147,18 +156,19 @@ export async function sendDispatchUpdate(
       (Array.isArray(responseData.data) && responseData.data[0]?.request_id) ||
       undefined;
 
+    console.log('[WHATSAPP_DISPATCH_RESPONSE]', {
+      httpStatus: response.status,
+      returnStatus: responseData.return,
+      statusCode: responseData.status_code,
+      requestId: requestId || 'N/A',
+      orderNumber: input.orderNumber || 'N/A',
+    });
+
     const isSuccess =
       response.ok &&
       (responseData.return === true ||
         String(responseData.return).toLowerCase() === 'true' ||
         responseData.status_code === 200);
-
-    logStructured(isSuccess ? 'info' : 'warn', 'notification.whatsapp.response', {
-      dependency: 'fast2sms',
-      providerStatusCode: Number.isInteger(responseData.status_code)
-        ? responseData.status_code
-        : response.status,
-    });
 
     if (isSuccess) {
       return {
@@ -180,93 +190,14 @@ export async function sendDispatchUpdate(
       };
     }
   } catch (err: any) {
-    logStructured('error', 'notification.whatsapp.failed', {
-      dependency: 'fast2sms',
-      errorType: getSafeErrorType(err),
+    console.error('[WHATSAPP_SERVICE_ERROR]', {
+      error: err.message || 'Unknown network error',
+      orderNumber: input.orderNumber || 'N/A',
     });
 
     return {
       success: false,
       error: err.message || 'Network exception calling Fast2SMS API.',
     };
-  }
-}
-
-/** Sends a pre-approved Fast2SMS WhatsApp template to an eligible agent. */
-export async function sendAgentPickupOffer(
-  input: SendAgentPickupOfferInput,
-): Promise<WhatsAppServiceResult> {
-  const apiKey = (
-    process.env.FAST2SMS_WHATSAPP_API_KEY || process.env.FAST2SMS_API_KEY || ''
-  ).trim();
-  const messageId = process.env.FAST2SMS_AGENT_PICKUP_MESSAGE_ID?.trim();
-  const phoneNumberId = (
-    process.env.FAST2SMS_WHATSAPP_PHONE_NUMBER_ID || '1238240156029770'
-  ).trim();
-
-  if (!apiKey || !messageId) {
-    logStructured('warn', 'notification.agent_pickup.configuration_missing', {
-      dependency: 'fast2sms',
-    });
-    return { success: false, error: 'Agent pickup WhatsApp configuration is missing.' };
-  }
-
-  const recipient = normalizePhoneNumber(input.agentPhone);
-  if (![10, 12].includes(recipient.length) || !/^\d+$/.test(recipient)) {
-    return { success: false, error: 'Agent mobile number is invalid.' };
-  }
-
-  const templateValue = (value: string) => value.replace(/[|\r\n]/g, ' ').trim();
-  const params = new URLSearchParams({
-    message_id: messageId,
-    phone_number_id: phoneNumberId,
-    numbers: recipient,
-    variables_values: [input.orderNumber, input.pickupAddress, String(input.latitude), String(input.longitude), input.mapsLink]
-      .map(templateValue)
-      .join('|'),
-  });
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(`${FAST2SMS_WHATSAPP_URL}?${params.toString()}`, {
-      method: 'GET',
-      headers: { Authorization: apiKey, Accept: 'application/json' },
-      cache: 'no-store',
-      signal: controller.signal,
-    });
-    const responseText = await response.text();
-    let responseData: any = {};
-    try {
-      responseData = JSON.parse(responseText);
-    } catch {
-      // A non-JSON response is treated as a failed provider request.
-    }
-
-    const success = response.ok && (
-      responseData.return === true ||
-      String(responseData.return).toLowerCase() === 'true' ||
-      responseData.status_code === 200
-    );
-    logStructured(success ? 'info' : 'warn', 'notification.agent_pickup.provider_response', {
-      dependency: 'fast2sms',
-      providerStatusCode: Number.isInteger(responseData.status_code)
-        ? responseData.status_code
-        : response.status,
-    });
-
-    const requestId = responseData.request_id || responseData.requestId ||
-      (Array.isArray(responseData.data) ? responseData.data[0]?.request_id : undefined);
-    return success
-      ? { success: true, requestId, message: 'Agent pickup alert accepted by provider.' }
-      : { success: false, requestId, error: 'Fast2SMS did not accept the agent pickup alert.' };
-  } catch (error) {
-    logStructured('error', 'notification.agent_pickup.provider_failed', {
-      dependency: 'fast2sms',
-      errorType: getSafeErrorType(error),
-    });
-    return { success: false, error: 'Fast2SMS agent pickup request failed.' };
-  } finally {
-    clearTimeout(timeout);
   }
 }

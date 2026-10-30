@@ -3,7 +3,6 @@ import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import BottomNav from '@/components/BottomNav';
 import AgentBottomNav from '@/components/AgentBottomNav';
-import CustomerMotionShell from '@/components/CustomerMotionShell';
 
 const getMetadataBase = () => {
   const envUrl = process.env.NEXT_PUBLIC_APP_URL;
@@ -48,9 +47,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="min-h-screen flex flex-col antialiased bg-slate-50 text-slate-900">
         <Navbar />
-        <main className="flex-1 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-0">
-          <CustomerMotionShell>{children}</CustomerMotionShell>
-        </main>
+        <main className="flex-1 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-0">{children}</main>
         <Footer />
         <BottomNav />
         <AgentBottomNav />

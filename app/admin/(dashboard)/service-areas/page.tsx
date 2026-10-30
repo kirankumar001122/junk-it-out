@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { MapPin, RefreshCw, AlertTriangle } from 'lucide-react';
 
 export default function AdminServiceAreasPage() {
@@ -8,7 +8,6 @@ export default function AdminServiceAreasPage() {
   const [loading, setLoading] = useState(true);
   const [pendingArea, setPendingArea] = useState<any | null>(null);
   const [updating, setUpdating] = useState(false);
-  const updateInFlightRef = useRef(false);
 
   const loadAreas = () => {
     setLoading(true);
@@ -25,23 +24,6 @@ export default function AdminServiceAreasPage() {
     loadAreas();
   }, []);
 
-  // Keyboard accessibility and body scroll lock for modal
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setPendingArea(null);
-      }
-    };
-    if (pendingArea) {
-      window.addEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = 'hidden';
-    }
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = '';
-    };
-  }, [pendingArea]);
-
   const handleOpenToggleModal = (area: any) => {
     const nextStatus = area.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
     setPendingArea({
@@ -53,8 +35,7 @@ export default function AdminServiceAreasPage() {
   };
 
   const confirmToggleStatus = async () => {
-    if (!pendingArea || updateInFlightRef.current || updating) return;
-    updateInFlightRef.current = true;
+    if (!pendingArea || updating) return;
     setUpdating(true);
     try {
       const res = await fetch('/api/service-areas', {
@@ -62,17 +43,16 @@ export default function AdminServiceAreasPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: pendingArea.id, status: pendingArea.nextStatus }),
       });
-      const data = await res.json().catch(() => null);
-      if (res.ok && data?.success) {
+      const data = await res.json();
+      if (res.ok && data.success) {
         setAreas(areas.map((a) => (a.id === pendingArea.id ? { ...a, status: pendingArea.nextStatus } : a)));
         setPendingArea(null);
       } else {
-        alert(data?.message || 'Failed to update service area status.');
+        alert(data.message || 'Failed to update service area status.');
       }
     } catch (e: any) {
       alert(e.message || 'Error updating service area status.');
     } finally {
-      updateInFlightRef.current = false;
       setUpdating(false);
     }
   };
@@ -90,8 +70,7 @@ export default function AdminServiceAreasPage() {
 
         <button
           onClick={loadAreas}
-          disabled={loading}
-          className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 flex items-center gap-1.5 self-start sm:self-auto disabled:opacity-50"
+          className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 flex items-center gap-1.5 self-start sm:self-auto"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           Refresh
@@ -149,18 +128,8 @@ export default function AdminServiceAreasPage() {
 
       {/* Confirmation Modal */}
       {pendingArea && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Confirm Service Area Status Change"
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 overflow-y-auto"
-        >
-          <div
-            className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm cursor-pointer"
-            onClick={() => setPendingArea(null)}
-            aria-hidden="true"
-          />
-          <div className="relative bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl z-10 my-auto">
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
             <div className="flex items-center gap-3">
               <div
                 className={`w-10 h-10 rounded-2xl flex items-center justify-center ${

@@ -19,13 +19,10 @@ export default function ScrollReveal({
 }: ScrollRevealProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
-  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-
-    setIsReady(true);
 
     // Respect reduced motion
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -53,7 +50,7 @@ export default function ScrollReveal({
   return (
     <div
       ref={ref}
-      className={`${isReady ? 'reveal-hidden' : ''} ${isVisible ? 'reveal-visible' : ''} ${className}`}
+      className={`reveal-hidden ${isVisible ? 'reveal-visible' : ''} ${className}`}
       style={delay > 0 ? { transitionDelay: `${delay}ms` } : undefined}
     >
       {children}

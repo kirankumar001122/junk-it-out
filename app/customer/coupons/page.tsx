@@ -32,16 +32,15 @@ export default function CustomerCouponsPage() {
   };
 
   return (
-    <div className="customer-page space-y-6">
+    <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
       <div>
-        <p className="customer-eyebrow">Save on your next pickup</p>
-        <h1 className="customer-title mt-2">Offers & coupons</h1>
-        <p className="customer-subtitle mt-2">Copy a code and apply it during booking when your pickup qualifies.</p>
+        <h1 className="text-2xl font-black text-slate-900">Offers & Promo Coupons</h1>
+        <p className="text-xs text-slate-500">Apply promotional codes for instant discounts on doorstep pickup charges</p>
       </div>
 
       <div className="space-y-4">
         {coupons.map((coupon) => (
-          <div key={coupon.code} className="customer-surface relative space-y-3 overflow-hidden border-emerald-200 p-5">
+          <div key={coupon.code} className="bg-white p-5 rounded-3xl border border-emerald-200 shadow-sm space-y-3 relative overflow-hidden">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
@@ -56,7 +55,7 @@ export default function CustomerCouponsPage() {
               <button
                 onClick={() => handleCopy(coupon.code)}
                 aria-label={`Copy coupon code ${coupon.code}`}
-                className="customer-action flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-xs font-extrabold text-emerald-800 transition-colors hover:bg-emerald-100"
+                className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-extrabold text-xs px-4 py-2 rounded-xl border border-emerald-300 flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 {copiedCode === coupon.code ? (
                   <span role="status" aria-live="polite" className="inline-flex items-center gap-1.5">

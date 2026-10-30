@@ -1,56 +1,28 @@
 {
-  "name": "junk-it-out",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "junk-app",
+  "version": "0.1.0",
+  "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
-    "start": "next start",
-    "db:push": "prisma db push",
-    "db:seed": "prisma db seed",
-    "db:seed:categories": "npx tsx prisma/seed-categories.ts",
-    "test": "npm run test:regression && npm run test:standalone",
-    "test:feature-suite": "node scripts/run-test-suite.mjs",
-    "test:regression": "vitest run",
-    "test:pg-agent-notifications": "tsx tests/agent-pickup-notifications.postgres.test.ts",
-    "test:pg-agent-concurrency": "tsx tests/agent-order-concurrency.postgres.test.ts",
-    "test:security": "vitest run tests/security-route-handlers.test.ts tests/admin-jwt-config.test.ts tests/admin-security-hardening.test.ts",
-    "test:payments": "vitest run tests/payment-idempotency.test.ts tests/razorpay-order-creation.test.ts tests/payment-retry-and-feedback.test.ts",
-    "test:observability": "vitest run tests/health-routes.test.ts tests/health-route.test.ts tests/structured-logger.test.ts tests/instrumentation.test.ts",
-    "test:standalone": "node scripts/run-test-suite.mjs --standalone-only"
+    "build": "next build",
+    "start": "next start"
   },
-  "prisma": {
-    "seed": "npx tsx prisma/seed.ts"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "@prisma/client": "5.22.0",
-    "@vercel/blob": "^2.8.0",
-    "canvas-confetti": "^1.9.4",
+    "next": "15.3.5",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "lucide-react": "^1.41.0",
-    "next": "^16.3.4",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "recharts": "^3.10.1",
-    "server-only": "^0.0.1",
-    "tailwind-merge": "^3.6.0"
+    "lucide-react": "^0.469.0",
+    "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.3.3",
-    "@types/canvas-confetti": "^1.9.0",
-    "@types/node": "^26.4.1",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.7",
-    "autoprefixer": "^10.5.5",
-    "postcss": "^8.5.28",
-    "prisma": "5.22.0",
-    "tailwindcss": "^4.3.3",
-    "tsx": "^4.23.13",
-    "typescript": "^7.0.2",
-    "vitest": "^3.2.4"
+    "@types/node": "^20",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^3.4.19",
+    "typescript": "^5.7.2"
   }
 }

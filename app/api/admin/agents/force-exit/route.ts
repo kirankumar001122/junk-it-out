@@ -1,15 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
+import { getAuthUser, requireAdminUser } from '@/lib/auth/middleware';
 
 export async function POST(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
-    const authorizationStatus = getAdminAuthorizationStatus(authUser);
-    if (authorizationStatus === 401) {
-      return NextResponse.json({ success: false, message: 'Authentication is required.' }, { status: 401 });
-    }
-    if (authorizationStatus === 403) {
+    if (!authUser || !requireAdminUser(authUser)) {
       return NextResponse.json({ success: false, message: 'Admin access required.' }, { status: 403 });
     }
 
@@ -19,16 +15,13 @@ export async function POST(req: NextRequest) {
     }
 
     const agent = await db.agent.findUnique({
-      where: { id: agentId.trim() },
-      include: { user: { select: { id: true, name: true, phone: true } } },
+      where: { id: agentId },
+      include: { user: true },
     });
 
     if (!agent) {
       return NextResponse.json({ success: false, message: 'Agent not found.' }, { status: 404 });
     }
-
-    const oldStatus = agent.status;
-    const oldTokenVersion = (agent as any).tokenVersion ?? 1;
 
     // Persistently invalidate agent session by incrementing tokenVersion and setting offline status
     const updatedAgent = await db.agent.update({
@@ -38,17 +31,6 @@ export async function POST(req: NextRequest) {
         tokenVersion: { increment: 1 } as any,
       },
     });
-
-    // Immutable audit log for destructive force-exit session revocation
-    await db.auditLog.create({
-      data: {
-        userId: authUser?.userId || null,
-        userName: authUser?.name || 'Admin Operations',
-        action: 'AGENT_FORCE_EXIT',
-        oldValue: `Agent ${agent.user?.name || agent.id} (${agent.user?.phone || 'N/A'}) - Status: ${oldStatus}, TokenVersion: ${oldTokenVersion}`,
-        newValue: `Agent forced offline - Status: OFFLINE, TokenVersion: ${oldTokenVersion + 1}`,
-      },
-    }).catch(() => null);
 
     return NextResponse.json({
       success: true,

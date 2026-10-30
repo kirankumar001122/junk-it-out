@@ -1,40 +1,37 @@
-import { NextRequest } from 'next/server';
 import { broadcaster } from '@/lib/realtime';
-import { getAuthUser, isAdminRole } from '@/lib/auth/middleware';
-import { createSseResponse } from '@/lib/sse';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
-  const authUser = await getAuthUser(req);
+export async function GET() {
+  const encoder = new TextEncoder();
 
-  if (!authUser) {
-    return new Response(
-      JSON.stringify({ success: false, message: 'Authentication is required.' }),
-      {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
-  }
+  const customStream = new ReadableStream({
+    start(controller) {
+      // Send initial heartbeat
+      controller.enqueue(encoder.encode(`event: connected\ndata: ${JSON.stringify({ status: 'connected' })}\n\n`));
 
-  if (!isAdminRole(authUser)) {
-    return new Response(
-      JSON.stringify({ success: false, message: 'Admin access required.' }),
-      {
-        status: 403,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
-  }
+      const unsubscribe = broadcaster.subscribe((eventData) => {
+        try {
+          controller.enqueue(
+            encoder.encode(`event: ${eventData.event}\ndata: ${JSON.stringify(eventData.payload)}\n\n`)
+          );
+        } catch (err) {
+          console.error('SSE Stream error:', err);
+        }
+      });
 
-  return createSseResponse({
-    signal: req.signal,
-    subscribe: (listener) => broadcaster.subscribe(listener),
-    onEvent: (event, send) => {
-      // Do not leak sensitive payload data over the broadcast stream; emit signal only
-      send(event.event, {});
+      // Cleanup on stream close
+      return () => {
+        unsubscribe();
+      };
     },
-    connectedPayload: { status: 'connected' },
+  });
+
+  return new Response(customStream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+    },
   });
 }

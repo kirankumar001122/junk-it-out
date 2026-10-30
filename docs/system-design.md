@@ -116,7 +116,7 @@ Customer order creation validates input, computes totals server-side, and uses a
 
 ### Integration and operations boundaries
 
-Fast2SMS is used for OTP and WhatsApp-related notifications. Razorpay is used for customer charges and provider refunds. Upload code supports Vercel Blob when configured/required. Map display uses Leaflet/OpenStreetMap-related code and a geocoding helper. The SSE broadcaster is an in-memory shared `globalThis` singleton per Node process; it is not a cross-process message bus. The current tree includes `.github/workflows/ci.yml`, which validates pull requests and the feature branch; no deployment workflow or hosting manifest is present. The `@vercel/blob` dependency and Vercel-looking admin origin are configuration clues only and do not establish either app's hosting provider. Package scripts are the verified development/build/test entry points.
+Fast2SMS is used for OTP and WhatsApp-related notifications. Razorpay is used for customer charges and provider refunds. Upload code supports Vercel Blob when configured/required. Map display uses Leaflet/OpenStreetMap-related code and a geocoding helper. The SSE broadcaster is an in-memory shared `globalThis` singleton per Node process; it is not a cross-process message bus. No repository README or checked-in CI workflow/deployment manifest was found in the initial discovery. Package scripts are the verified development/build/test entry points.
 
 ## API boundaries
 

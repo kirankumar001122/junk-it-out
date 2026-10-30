@@ -8,11 +8,6 @@ import {
   validateAndCalculateCoupon,
   InvalidCouponError,
 } from './couponService';
-import { calculateTotalBookingWeight } from '../validations/schemas';
-import {
-  getCachedWasteCategories,
-  setCachedWasteCategories,
-} from '../cache/wasteCategoriesCache';
 
 export { InvalidCouponError };
 
@@ -23,36 +18,6 @@ export class OrderIdempotencyConflictError extends Error {
     super(message);
     this.name = 'OrderIdempotencyConflictError';
   }
-}
-
-export class InvalidWasteCategoryError extends Error {
-  constructor(message = 'One or more selected waste categories are unavailable.') {
-    super(message);
-    this.name = 'InvalidWasteCategoryError';
-  }
-}
-
-export class InvalidBookingWeightError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'InvalidBookingWeightError';
-  }
-}
-
-export class InvalidIdempotencyKeyError extends Error {
-  constructor() {
-    super('Idempotency-Key must be 10-128 characters using letters, numbers, "_" or "-".');
-    this.name = 'InvalidIdempotencyKeyError';
-  }
-}
-
-export function normalizeOrderIdempotencyKey(key?: string | null) {
-  if (key == null || key.trim() === '') return null;
-  const normalized = key.trim();
-  if (!/^[A-Za-z0-9_-]{10,128}$/.test(normalized)) {
-    throw new InvalidIdempotencyKeyError();
-  }
-  return normalized;
 }
 
 export function createOrderPayloadHash(input: any): string {
@@ -81,9 +46,6 @@ export function createOrderPayloadHash(input: any): string {
 
   return JSON.stringify(canonical);
 }
-
-// In-memory in-flight order promises to prevent race-condition duplicates
-const inFlightOrders = new Map<string, Promise<any>>();
 
 // In-memory Idempotency Store to prevent duplicate order placements
 // on network retries.
@@ -151,26 +113,16 @@ export async function createOrder(
   authUser?: {
     userId: string;
     customerId?: string | null;
-  } | null,
-  timer?: { recordPhase: (phase: string) => number }
+  } | null
 ) {
   // ---------------------------------------------------------
   // 1. IDEMPOTENCY CHECK
   // ---------------------------------------------------------
 
   const payloadHash = createOrderPayloadHash(input);
-  const normalizedIdempotencyKey = normalizeOrderIdempotencyKey(idempotencyKey);
-  const customerId = authUser?.customerId;
-  const durableIdempotency = (db as any).orderIdempotency;
-  let durableIdempotencyAvailable = Boolean(durableIdempotency);
 
-  if (normalizedIdempotencyKey) {
-    const inFlight = inFlightOrders.get(normalizedIdempotencyKey);
-    if (inFlight) {
-      return await inFlight;
-    }
-
-    const cached = idempotencyStore.get(`${customerId || 'anonymous'}:${normalizedIdempotencyKey}`);
+  if (idempotencyKey) {
+    const cached = idempotencyStore.get(idempotencyKey);
 
     if (
       cached &&
@@ -191,107 +143,17 @@ export async function createOrder(
     }
   }
 
-  if (normalizedIdempotencyKey && customerId && durableIdempotencyAvailable) {
-    try {
-      const existing = await durableIdempotency.findUnique({
-        where: { customerId_key: { customerId, key: normalizedIdempotencyKey } },
-      });
-      if (existing) {
-        if (existing.payloadHash !== payloadHash) {
-          throw new OrderIdempotencyConflictError();
-        }
-        const persistedOrder = await db.order.findUnique({
-          where: { id: existing.orderId },
-          include: {
-            customer: {
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    name: true,
-                    phone: true,
-                    email: true,
-                  },
-                },
-              },
-            },
-            address: true,
-            items: { include: { category: true } },
-            statusHistory: true,
-            payments: {
-              where: { direction: 'CUSTOMER_PAYS' },
-              orderBy: { createdAt: 'desc' },
-              take: 1,
-            },
-          },
-        });
-        if (!persistedOrder) {
-          throw new Error('The idempotent order record no longer exists.');
-        }
-        return persistedOrder;
-      }
-    } catch (error: any) {
-      if (error?.code !== 'P2021') {
-        throw error;
-      }
-      durableIdempotencyAvailable = false;
-    }
-  }
-
-  const execute = async () => {
-    timer?.recordPhase('idempotency_lookup');
-
   // ---------------------------------------------------------
-  // 2. PARALLEL LOOKUP: GEOFENCE, USER PROFILE, AND WASTE CATEGORIES
+  // 2. VALIDATE GEOFENCE / SERVICE AREA
   // ---------------------------------------------------------
-  const categoryIds = input.items.map(
-    (item) => item.categoryId
-  );
 
-  const [geofence, initialUser, dbCategories] = await Promise.all([
-    checkGeofenceServiceability(
+  const geofence =
+    await checkGeofenceServiceability(
       input.address.lat,
       input.address.lng,
       input.address.area
-    ),
-    authUser?.userId
-      ? db.user.findUnique({
-          where: {
-            id: authUser.userId,
-          },
-          include: {
-            customer: true,
-            addresses: {
-              where: { isDefault: true },
-              take: 1,
-            },
-          },
-        })
-      : Promise.resolve(null),
-    (async () => {
-      const cached = getCachedWasteCategories();
-      if (cached && Array.isArray(cached)) {
-        const matching = cached.filter((c: any) => c.active && categoryIds.includes(c.id));
-        if (matching.length === categoryIds.length) {
-          return matching;
-        }
-      }
-      const fetched = await db.wasteCategory.findMany({
-        where: {
-          id: {
-            in: categoryIds,
-          },
-          active: true,
-        },
-      });
-      if (fetched && fetched.length > 0) {
-        setCachedWasteCategories(fetched);
-      }
-      return fetched;
-    })(),
-  ]);
+    );
 
-  timer?.recordPhase('parallel_lookups');
   if (!geofence.serviceable) {
     throw new Error(
       geofence.message ||
@@ -303,7 +165,18 @@ export async function createOrder(
   // 3. USER & CUSTOMER PROFILE
   // ---------------------------------------------------------
 
-  let user: any = initialUser;
+  let user: any = null;
+
+  if (authUser?.userId) {
+    user = await db.user.findUnique({
+      where: {
+        id: authUser.userId,
+      },
+      include: {
+        customer: true,
+      },
+    });
+  }
 
   if (!user || !user.customer) {
     user = await findOrCreateUserCustomer(
@@ -319,84 +192,44 @@ export async function createOrder(
   }
 
   // ---------------------------------------------------------
-  // 4. SAVE PICKUP ADDRESS (Reuses existing default if identical)
+  // 4. SAVE PICKUP ADDRESS
   // ---------------------------------------------------------
 
-  const existingDefaultAddr = user.addresses?.[0];
-  const isIdenticalAddress =
-    existingDefaultAddr &&
-    existingDefaultAddr.houseNo?.trim().toLowerCase() === input.address.houseNo?.trim().toLowerCase() &&
-    existingDefaultAddr.street?.trim().toLowerCase() === input.address.street?.trim().toLowerCase() &&
-    existingDefaultAddr.area?.trim().toLowerCase() === input.address.area?.trim().toLowerCase() &&
-    existingDefaultAddr.pincode?.trim() === input.address.pincode?.trim() &&
-    (input.address.building ? (existingDefaultAddr.building || '').trim().toLowerCase() === input.address.building.trim().toLowerCase() : true) &&
-    (input.address.landmark ? (existingDefaultAddr.landmark || '').trim().toLowerCase() === input.address.landmark.trim().toLowerCase() : true);
-
-  const savedAddress = isIdenticalAddress
-    ? existingDefaultAddr
-    : await saveCustomerAddress(user.id, {
-        label: input.address.label || 'Home',
-        name: input.name,
-        phone: input.phone,
-        houseNo: input.address.houseNo,
-        building: input.address.building,
-        street: input.address.street,
-        area: input.address.area,
-        landmark: input.address.landmark,
-        pincode: input.address.pincode,
-        lat: input.address.lat,
-        lng: input.address.lng,
-        googlePlaceId:
-          input.address.googlePlaceId ||
-          undefined,
-        isDefault: true,
-      });
-
-  timer?.recordPhase('save_customer_address');
+  const savedAddress =
+    await saveCustomerAddress(user.id, {
+      label: input.address.label || 'Home',
+      name: input.name,
+      phone: input.phone,
+      houseNo: input.address.houseNo,
+      building: input.address.building,
+      street: input.address.street,
+      area: input.address.area,
+      landmark: input.address.landmark,
+      pincode: input.address.pincode,
+      lat: input.address.lat,
+      lng: input.address.lng,
+      googlePlaceId:
+        input.address.googlePlaceId ||
+        undefined,
+      isDefault: true,
+    });
 
   // ---------------------------------------------------------
-  // 5. VALIDATE WASTE CATEGORIES & WEIGHT
+  // 5. FETCH WASTE CATEGORIES & CALCULATE PRICE
   // ---------------------------------------------------------
 
-  const activeCategoryIds = new Set(dbCategories.map((category) => category.id));
-  if (categoryIds.some((categoryId) => !activeCategoryIds.has(categoryId))) {
-    throw new InvalidWasteCategoryError(
-      'One or more selected waste categories are unavailable. Please refresh and try again.',
-    );
-  }
+  const categoryIds = input.items.map(
+    (item) => item.categoryId
+  );
 
-  const totalBookingWeight = calculateTotalBookingWeight(input.items);
-  if (
-    input.items.some(
-      (item) =>
-        typeof item.estimatedWeight !== 'number' ||
-        !Number.isFinite(item.estimatedWeight) ||
-        item.estimatedWeight <= 0,
-    ) ||
-    !Number.isFinite(totalBookingWeight)
-  ) {
-    throw new InvalidBookingWeightError(
-      'Booking weights must be finite positive values and produce a finite total.',
-    );
-  }
-  for (const category of dbCategories) {
-    if (
-      Number.isFinite(category.minWeightKg) &&
-      totalBookingWeight < category.minWeightKg
-    ) {
-      throw new InvalidBookingWeightError(
-        `Total booking weight must be at least ${category.minWeightKg} kg for ${category.name}.`,
-      );
-    }
-    if (
-      Number.isFinite(category.maxWeightKg) &&
-      totalBookingWeight > category.maxWeightKg
-    ) {
-      throw new InvalidBookingWeightError(
-        `Total booking weight must not exceed ${category.maxWeightKg} kg for ${category.name}.`,
-      );
-    }
-  }
+  const dbCategories =
+    await db.wasteCategory.findMany({
+      where: {
+        id: {
+          in: categoryIds,
+        },
+      },
+    });
 
   let totalWasteItemsValue = 0;
 
@@ -409,7 +242,8 @@ export async function createOrder(
         (cat) => cat.id === item.categoryId
       );
 
-      const ratePerKg = category!.pricePerKg;
+      const ratePerKg =
+        category?.pricePerKg ?? 20.0;
 
       const subtotal =
         item.estimatedWeight * ratePerKg;
@@ -448,8 +282,6 @@ export async function createOrder(
     discountAmount = couponValidation.discountAmount;
   }
 
-  timer?.recordPhase('coupon_validation');
-
   // ---------------------------------------------------------
   // 7. PAYMENT DIRECTION
   // ---------------------------------------------------------
@@ -479,15 +311,11 @@ export async function createOrder(
   // ---------------------------------------------------------
   // 8. CREATE ORDER
   // ---------------------------------------------------------
-  // Note: Prisma executes nested creates (items, statusHistory) atomically
-  // in a single database transaction internally, avoiding interactive
-  // transaction timeout (P2028) contention.
 
-  let newOrder: any;
-  try {
-    newOrder = await db.$transaction(
-      async (tx) => {
-        const createdOrder = await tx.order.create({
+  const newOrder =
+    await db.$transaction(async (tx) => {
+      const createdOrder =
+        await tx.order.create({
           data: {
             orderNumber,
 
@@ -523,19 +351,6 @@ export async function createOrder(
             paymentStatus:
               'PENDING',
 
-            ...(financialDirection === 'CUSTOMER_PAYS' && finalAmount > 0
-              ? {
-                  payments: {
-                    create: {
-                      amount: finalAmount,
-                      direction: 'CUSTOMER_PAYS',
-                      gateway: 'RAZORPAY',
-                      status: 'CREATION_PENDING',
-                    },
-                  },
-                }
-              : {}),
-
             wastePhotos:
               JSON.stringify(
                 input.photos || []
@@ -566,119 +381,26 @@ export async function createOrder(
           },
 
           include: {
-            items: true,
-            payments: {
-              where: { direction: 'CUSTOMER_PAYS' },
-              orderBy: { createdAt: 'desc' },
-              take: 1,
-            },
-          },
-        });
-
-        if (normalizedIdempotencyKey && customerId && durableIdempotencyAvailable) {
-          await (tx as any).orderIdempotency.create({
-            data: {
-              customerId,
-              key: normalizedIdempotencyKey,
-              payloadHash,
-              orderId: createdOrder.id,
-              expiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_MS),
-            },
-          });
-        }
-
-        const assembledCustomer = user?.customer
-          ? {
-              ...user.customer,
-              user: user
-                ? {
-                    id: user.id,
-                    name: user.name || '',
-                    phone: user.phone || '',
-                    email: user.email || null,
-                  }
-                : null,
-            }
-          : (createdOrder as any).customer || null;
-
-        const assembledOrder = {
-          ...createdOrder,
-          customer: assembledCustomer,
-          address: savedAddress || (createdOrder as any).address || null,
-          items: (createdOrder.items || []).map((item: any) => ({
-            ...item,
-            category: item.category || dbCategories.find((c: any) => c.id === item.categoryId) || null,
-          })),
-          statusHistory:
-            (createdOrder as any).statusHistory && (createdOrder as any).statusHistory.length > 0
-              ? (createdOrder as any).statusHistory
-              : [
-                  {
-                    id: `hist-${createdOrder.id}`,
-                    orderId: createdOrder.id,
-                    oldStatus: null,
-                    newStatus: 'BOOKING_RECEIVED',
-                    status: 'BOOKING_RECEIVED',
-                    changedByUserId: user?.id || null,
-                    notes: 'Order placed by customer via web platform. Payment pending.',
-                    timestamp: createdOrder.createdAt,
-                    createdAt: createdOrder.createdAt,
-                  },
-                ],
-        };
-
-        return assembledOrder;
-      },
-      {
-        maxWait: 5000,
-        timeout: 15000,
-      }
-    );
-    timer?.recordPhase('order_creation_tx');
-  } catch (error: any) {
-    if (
-      normalizedIdempotencyKey &&
-      customerId &&
-      durableIdempotencyAvailable &&
-      (error?.code === 'P2002' || /unique constraint/i.test(String(error?.message || '')))
-    ) {
-      const existing = await durableIdempotency.findUnique({
-        where: { customerId_key: { customerId, key: normalizedIdempotencyKey } },
-      });
-      if (existing) {
-        if (existing.payloadHash !== payloadHash) {
-          throw new OrderIdempotencyConflictError();
-        }
-        const persistedOrder = await db.order.findUnique({
-          where: { id: existing.orderId },
-          include: {
             customer: {
               include: {
-                user: {
-                  select: {
-                    id: true,
-                    name: true,
-                    phone: true,
-                    email: true,
-                  },
-                },
+                user: true,
               },
             },
+
             address: true,
-            items: { include: { category: true } },
-            statusHistory: true,
-            payments: {
-              where: { direction: 'CUSTOMER_PAYS' },
-              orderBy: { createdAt: 'desc' },
-              take: 1,
+
+            items: {
+              include: {
+                category: true,
+              },
             },
+
+            statusHistory: true,
           },
         });
-        if (persistedOrder) return persistedOrder;
-      }
-    }
-    throw error;
-  }
+
+      return createdOrder;
+    });
 
   // ---------------------------------------------------------
   // 9. IMPORTANT
@@ -699,9 +421,9 @@ export async function createOrder(
   // 10. STORE IDEMPOTENCY RESPONSE
   // ---------------------------------------------------------
 
-  if (normalizedIdempotencyKey) {
+  if (idempotencyKey) {
     idempotencyStore.set(
-      `${customerId || 'anonymous'}:${normalizedIdempotencyKey}`,
+      idempotencyKey,
       {
         orderId:
           newOrder.id,
@@ -718,18 +440,4 @@ export async function createOrder(
   }
 
   return newOrder;
-  };
-
-  const promise = execute();
-  if (normalizedIdempotencyKey) {
-    inFlightOrders.set(normalizedIdempotencyKey, promise);
-  }
-
-  try {
-    return await promise;
-  } finally {
-    if (normalizedIdempotencyKey) {
-      inFlightOrders.delete(normalizedIdempotencyKey);
-    }
-  }
 }

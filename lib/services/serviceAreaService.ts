@@ -1,20 +1,4 @@
 import { db } from '../db';
-
-interface CachedServiceArea {
-  id: string;
-  name: string;
-  etaMinutes: number;
-  basePickupCharge: number;
-  status: string;
-  parsedPolygon: [number, number][];
-}
-
-let serviceAreaCache: { areas: CachedServiceArea[]; expiresAt: number } | null = null;
-
-export function invalidateServiceAreaCache(): void {
-  serviceAreaCache = null;
-}
-
 import { BENGALURU_ZONES, BENGALURU_MASTER_POLYGON, isPointInPolygon, calculateDistanceKm } from '../geofence';
 
 export async function checkGeofenceServiceability(
@@ -28,64 +12,44 @@ export async function checkGeofenceServiceability(
 }> {
   const point: [number, number] = [lat, lng];
 
-  // 1. Check database service area boundary polygons (cached in-memory for 60s)
-  const now = Date.now();
-  let cachedAreas = serviceAreaCache && serviceAreaCache.expiresAt > now ? serviceAreaCache.areas : null;
-  if (!cachedAreas) {
-    try {
-      const dbAreas = await db.serviceArea.findMany({
-        where: { status: { in: ['ACTIVE', 'INACTIVE'] } },
-        take: 1000,
-      });
-      cachedAreas = [];
+  // 1. Check database service area boundary polygons
+  try {
+    const dbAreas = await db.serviceArea.findMany();
+    if (dbAreas.length > 0) {
       for (const area of dbAreas) {
         try {
           const polygon: [number, number][] = JSON.parse(area.boundaryPolygon);
-          cachedAreas.push({
-            id: area.id,
-            name: area.name,
-            etaMinutes: area.etaMinutes,
-            basePickupCharge: area.basePickupCharge,
-            status: area.status,
-            parsedPolygon: polygon,
-          });
+          if (isPointInPolygon(point, polygon)) {
+            if (area.status === 'ACTIVE') {
+              return {
+                serviceable: true,
+                message: `Location is inside active Junk It Out service zone: ${area.name}`,
+                zone: {
+                  id: area.id,
+                  name: area.name,
+                  etaMinutes: area.etaMinutes,
+                  basePickupCharge: area.basePickupCharge,
+                },
+              };
+            } else {
+              return {
+                serviceable: false,
+                message: `Service is currently disabled/inactive in ${area.name}.`,
+              };
+            }
+          }
         } catch (err) {
           console.error(`Failed to parse polygon for zone ${area.name}`, err);
         }
       }
-      serviceAreaCache = { areas: cachedAreas, expiresAt: now + 60_000 };
-    } catch (err) {
-      console.error('Database service area check error:', err);
     }
-  }
-
-  if (cachedAreas && cachedAreas.length > 0) {
-    for (const area of cachedAreas) {
-      if (isPointInPolygon(point, area.parsedPolygon)) {
-        if (area.status === 'ACTIVE') {
-          return {
-            serviceable: true,
-            message: `Location is inside active Junk It Out service zone: ${area.name}`,
-            zone: {
-              id: area.id,
-              name: area.name,
-              etaMinutes: area.etaMinutes,
-              basePickupCharge: area.basePickupCharge,
-            },
-          };
-        } else {
-          return {
-            serviceable: false,
-            message: `Service is currently disabled/inactive in ${area.name}.`,
-          };
-        }
-      }
-    }
+  } catch (err) {
+    console.error('Database service area check error:', err);
   }
 
   // 2. Check preset Bengaluru zone polygons
-  const matchedZone = BENGALURU_ZONES.find(
-    (z) => z.status === 'ACTIVE' && isPointInPolygon(point, z.boundaryPolygon)
+  const matchedZone = BENGALURU_ZONES.find((z) =>
+    z.status === 'ACTIVE' && isPointInPolygon(point, z.boundaryPolygon)
   );
 
   if (matchedZone) {

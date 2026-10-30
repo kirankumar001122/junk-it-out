@@ -164,17 +164,15 @@ export default function CustomerProfilePage() {
   const displayName = getDisplayName(user);
 
   return (
-    <div className="customer-page space-y-6">
+    <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
       {/* PROFILE HEADER CARD */}
-      <div className="relative overflow-hidden rounded-[1.75rem] bg-slate-950 p-6 text-white shadow-xl shadow-slate-900/10 sm:p-8">
-        <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-emerald-500/20 blur-3xl" />
+      <div className="bg-slate-900 text-white rounded-3xl p-6 shadow-xl relative overflow-hidden">
         <div className="flex items-center gap-4">
           <div className="w-16 h-16 rounded-2xl bg-emerald-500 text-slate-950 font-black text-2xl flex items-center justify-center shadow-lg shadow-emerald-500/30 shrink-0">
             {getInitials(displayName)}
           </div>
           <div className="min-w-0">
-            <p className="customer-eyebrow text-emerald-300">Your customer account</p>
-            <h1 className="mt-1 truncate text-2xl font-black tracking-tight">{displayName}</h1>
+            <h1 className="text-xl font-black truncate">{displayName}</h1>
             <p className="text-xs text-slate-300 font-mono mt-0.5">{user.phone} • {user.email || 'Mobile Verified'}</p>
             <div className="flex items-center gap-2 mt-2">
               <span className="text-[10px] font-extrabold bg-emerald-400/20 text-emerald-300 border border-emerald-400/30 px-2.5 py-0.5 rounded-full uppercase">
@@ -187,7 +185,7 @@ export default function CustomerProfilePage() {
 
       {/* MENU GROUPS */}
       {menuGroups.map((group, idx) => (
-        <div key={idx} className="customer-surface space-y-3 p-5">
+        <div key={idx} className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm space-y-3">
           <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1">{group.title}</h3>
           <div className="divide-y divide-slate-100">
             {group.items.map((item, itemIdx) => {
@@ -196,13 +194,13 @@ export default function CustomerProfilePage() {
                 <Link
                   key={itemIdx}
                   href={item.href}
-                  className="group flex min-h-14 items-center justify-between rounded-xl px-2 py-3 transition-colors hover:bg-slate-50"
+                  className="py-3 flex items-center justify-between hover:bg-slate-50 px-2 rounded-xl transition-colors"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-50 text-emerald-700 transition group-hover:bg-emerald-100">
+                    <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
                       <Icon className="w-4 h-4" />
                     </div>
-                    <span className="text-xs font-bold text-slate-900">{item.label}</span>
+                    <span className="font-bold text-xs text-slate-900">{item.label}</span>
                   </div>
                   <ChevronRight className="w-4 h-4 text-slate-400" />
                 </Link>

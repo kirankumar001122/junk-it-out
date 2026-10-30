@@ -5,12 +5,22 @@ import { getAuthUser } from '@/lib/auth/middleware';
 export async function GET(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
-    if (!authUser || authUser.role !== 'CUSTOMER' || !authUser.userId) {
-      return NextResponse.json({ success: false, message: 'Authenticated customer access is required.' }, { status: 401 });
+    const { searchParams } = new URL(req.url);
+    const phone = searchParams.get('phone');
+
+    let userId = authUser?.userId;
+
+    if (!userId && phone) {
+      const user = await db.user.findUnique({ where: { phone } });
+      if (user) userId = user.id;
+    }
+
+    if (!userId) {
+      return NextResponse.json({ success: true, data: [] });
     }
 
     const addresses = await db.address.findMany({
-      where: { userId: authUser.userId },
+      where: { userId },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -23,29 +33,40 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const authUser = await getAuthUser(req);
-    if (!authUser || authUser.role !== 'CUSTOMER' || !authUser.userId) {
-      return NextResponse.json({ success: false, message: 'Authenticated customer access is required.' }, { status: 401 });
-    }
-
     const body = await req.json();
-    const { label, houseNo, building, street, area, landmark, pincode, lat, lng, name: bodyName } = body;
+    const authUser = await getAuthUser(req);
+    const { phone: bodyPhone, name: bodyName, label, houseNo, building, street, area, landmark, pincode, lat, lng } = body;
 
     if (!houseNo || !street || !area) {
       return NextResponse.json({ success: false, message: 'Missing required address fields.' }, { status: 400 });
     }
 
-    const user = await db.user.findUnique({
-      where: { id: authUser.userId },
-      select: { id: true, phone: true, name: true },
-    });
+    let user = authUser?.role === 'CUSTOMER'
+      ? await db.user.findUnique({ where: { id: authUser.userId }, select: { id: true, phone: true, name: true } })
+      : bodyPhone
+        ? await db.user.findUnique({ where: { phone: bodyPhone } })
+        : null;
+    const phone = user?.phone || bodyPhone;
+    const name = bodyName || user?.name || 'Customer';
 
-    if (!user) {
-      return NextResponse.json({ success: false, message: 'Customer account not found.' }, { status: 404 });
+    if (!phone) {
+      return NextResponse.json({ success: false, message: 'Authenticated customer access is required.' }, { status: 401 });
     }
 
-    const phone = user.phone;
-    const name = bodyName?.trim() || user.name || 'Customer';
+    if (!user) {
+      user = await db.user.create({
+        data: {
+          phone,
+          name: name || 'Customer',
+          role: 'CUSTOMER',
+          customer: {
+            create: {
+              referralCode: `JIO-${Math.random().toString(36).substring(2, 7).toUpperCase()}`,
+            },
+          },
+        },
+      });
+    }
 
     const newAddress = await db.address.create({
       data: {
@@ -59,8 +80,8 @@ export async function POST(req: NextRequest) {
         area,
         landmark: landmark || null,
         pincode: pincode || '560078',
-        lat: typeof lat === 'number' ? lat : 12.9077,
-        lng: typeof lng === 'number' ? lng : 77.5854,
+        lat: lat || 12.9077,
+        lng: lng || 77.5854,
         isDefault: true,
       },
     });

@@ -21,12 +21,9 @@ import {
   XCircle,
   X,
   CreditCard,
-  UserRound,
-  History,
 } from 'lucide-react';
 import CustomerOtpLogin from '@/components/CustomerOtpLogin';
 import { readCustomerPickupsResponse } from '@/lib/customerPickupsResponse';
-import { getApiErrorMessage } from '@/lib/utils/apiErrorMessage';
 
 const isCustomerCancellable = (status?: string): boolean => {
   return [
@@ -134,7 +131,6 @@ export default function MyPickupsPage() {
       const res = await fetch(`/api/orders/${cancellingOrder.id}/cancel`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
         body: JSON.stringify({ cancellationReason: finalReason }),
       });
 
@@ -143,25 +139,10 @@ export default function MyPickupsPage() {
       if (res.ok && data.success) {
         setCancellingOrder(null);
         setCustomCancelReason('');
-        try {
-          if (typeof window !== 'undefined') {
-            const raw = sessionStorage.getItem('jio_pending_order');
-            if (raw) {
-              const parsed = JSON.parse(raw);
-              if (parsed?.id === cancellingOrder.id) {
-                sessionStorage.removeItem('jio_pending_order');
-                setPendingNotice(null);
-              }
-            }
-          }
-        } catch {}
         await fetchOrders();
       } else {
         setCancelError(
-          getApiErrorMessage(
-            data,
-            'Failed to cancel order. Please verify order status and try again.'
-          )
+          data.message || 'Failed to cancel order. Please verify order status and try again.'
         );
       }
     } catch {
@@ -236,22 +217,20 @@ export default function MyPickupsPage() {
 
   if (unauthenticated && !loading) {
     return (
-      <div className="customer-page-cream min-h-[70vh]">
-        <div className="customer-page max-w-xl">
-        <div className="customer-hero rounded-[1.75rem] p-8 text-center text-white shadow-xl animate-scale-in sm:p-10">
-          <div className="mx-auto grid h-16 w-16 place-items-center rounded-3xl border border-emerald-300/20 bg-emerald-400/15 text-emerald-300">
+      <div className="max-w-xl mx-auto px-4 py-16 space-y-6">
+        <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm text-center space-y-5 animate-scale-in">
+          <div className="w-16 h-16 bg-emerald-100 text-emerald-700 rounded-3xl grid place-items-center mx-auto">
             <Smartphone className="w-8 h-8" />
           </div>
           <div className="space-y-1">
-            <p className="customer-eyebrow text-emerald-300">Customer dashboard</p>
-            <h1 className="mt-2 text-2xl font-black tracking-tight text-white">Your pickups, all in one place</h1>
-            <p className="mx-auto mt-2 max-w-sm text-xs leading-relaxed text-emerald-50/70">
+            <h1 className="text-xl font-black text-slate-900">Sign in to View Your Pickups</h1>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
               Log in with your mobile OTP to view your active doorstep pickups, order status, and digital scrap receipts.
             </p>
           </div>
           <button
             onClick={() => setLoginOpen(true)}
-            className="customer-action mt-5 w-full rounded-2xl bg-emerald-400 py-3.5 text-xs font-black uppercase tracking-wider text-slate-950 shadow-lg shadow-emerald-950/30 hover:bg-emerald-300"
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-3.5 rounded-2xl shadow-md uppercase tracking-wider transition-transform hover:scale-[1.01]"
           >
             LOGIN WITH MOBILE OTP
           </button>
@@ -266,7 +245,6 @@ export default function MyPickupsPage() {
             void fetchOrders();
           }}
         />
-        </div>
       </div>
     );
   }
@@ -309,7 +287,7 @@ export default function MyPickupsPage() {
   };
 
   return (
-    <div className="customer-page space-y-6">
+    <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
       {/* REALTIME AGENT ASSIGNED NOTIFICATION BANNER */}
       {agentNotice && (
         <div className="bg-slate-900 border-2 border-emerald-500 rounded-3xl p-5 text-white shadow-xl flex items-start justify-between animate-scale-in">
@@ -340,17 +318,19 @@ export default function MyPickupsPage() {
       )}
 
       {/* HEADER WITH BOOK NEW PICKUP BUTTON */}
-      <div className="customer-page-header">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <p className="customer-eyebrow">Customer dashboard</p>
-          <h1 className="customer-title mt-2">My pickups</h1>
-          <p className="customer-subtitle mt-2">Track current doorstep pickups and revisit past waste receipts.</p>
+          <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-3 py-1 rounded-full uppercase">
+            Customer Dashboard
+          </span>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-1">My Waste Pickups</h1>
+          <p className="text-xs text-slate-500">Track current doorstep pickups and view past waste receipts</p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={fetchOrders}
-            className="customer-action grid h-11 w-11 place-items-center rounded-xl bg-slate-100 text-slate-700 transition-colors hover:bg-slate-200"
+            className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors"
             title="Refresh Orders"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -358,81 +338,15 @@ export default function MyPickupsPage() {
 
           <Link
             href="/book"
-            className="customer-action flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-xs font-extrabold uppercase tracking-wider text-white shadow-md hover:bg-emerald-700"
+            className="hover-lift bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-5 py-3 rounded-xl shadow-md flex items-center gap-2 uppercase tracking-wider"
           >
             + BOOK NEW PICKUP
           </Link>
         </div>
       </div>
 
-      <section className="customer-dashboard-overview overflow-hidden rounded-[1.75rem] border border-emerald-900/20 bg-[#071b16] p-5 text-white shadow-xl sm:p-7">
-        <div className="relative z-10 grid gap-6 lg:grid-cols-[1.1fr_.9fr] lg:items-end">
-          <div className="max-w-xl">
-            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
-              Your pickup activity
-            </p>
-            <h2 className="mt-2 text-2xl font-black tracking-[-0.04em] sm:text-3xl">
-              Keep your doorstep clear.
-            </h2>
-            <p className="mt-2 max-w-lg text-xs leading-relaxed text-emerald-50/70 sm:text-sm">
-              Follow every request from booking to collection, or start a new pickup whenever you are ready.
-            </p>
-            <div className="mt-5 flex flex-wrap gap-2.5">
-              <Link
-                href="/book"
-                className="customer-action inline-flex items-center gap-2 rounded-xl bg-emerald-400 px-4 py-2.5 text-xs font-black text-slate-950 shadow-lg shadow-emerald-950/30 hover:bg-emerald-300"
-              >
-                <Package className="h-4 w-4" />
-                Book a Pickup
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-              <Link
-                href="/customer/profile"
-                className="customer-action inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/10 px-4 py-2.5 text-xs font-bold text-white hover:bg-white/15"
-              >
-                <UserRound className="h-4 w-4 text-emerald-300" />
-                Manage profile
-              </Link>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2.5 sm:gap-3">
-            {[
-              { label: 'Total', value: orders.length, icon: Layers },
-              { label: 'Active', value: activeOrders.length, icon: Truck },
-              { label: 'Completed', value: completedOrders.length, icon: CheckCircle },
-            ].map(({ label, value, icon: Icon }) => (
-              <div key={label} className="rounded-2xl border border-white/10 bg-white/[0.07] p-3 backdrop-blur-sm sm:p-4">
-                <Icon className="h-4 w-4 text-emerald-300" />
-                <strong className="mt-3 block text-2xl font-black tracking-tight">{value}</strong>
-                <span className="mt-0.5 block text-[10px] font-bold uppercase tracking-wider text-emerald-50/55">{label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <div className="grid gap-3 sm:grid-cols-3">
-        {[
-          { href: '/book', label: 'Book a pickup', detail: 'Schedule doorstep collection', icon: Package },
-          { href: '/customer/orders', label: 'Pickup history', detail: 'Review your requests', icon: History },
-          { href: '/customer/profile', label: 'Manage profile', detail: 'Update account details', icon: UserRound },
-        ].map(({ href, label, detail, icon: Icon }) => (
-          <Link key={href + label} href={href} className="customer-surface group flex items-center gap-3 p-4 hover:border-emerald-300 hover:shadow-md">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700 transition-transform group-hover:scale-105">
-              <Icon className="h-4.5 w-4.5" />
-            </span>
-            <span className="min-w-0">
-              <strong className="block text-xs font-black text-slate-900">{label}</strong>
-              <span className="mt-0.5 block truncate text-[11px] font-medium text-slate-500">{detail}</span>
-            </span>
-            <ArrowRight className="ml-auto h-4 w-4 shrink-0 text-slate-300 transition-transform group-hover:translate-x-1 group-hover:text-emerald-600" />
-          </Link>
-        ))}
-      </div>
-
       {/* FILTER TABS WITH DYNAMIC REAL COUNTS */}
-      <div className="customer-surface flex items-center gap-1 overflow-x-auto p-1.5">
+      <div className="bg-white rounded-2xl p-1.5 border border-slate-200 shadow-sm flex items-center gap-1 overflow-x-auto">
         {[
           { id: 'ALL', label: 'All Pickups', count: orders.length },
           { id: 'ACTIVE', label: 'Active / Upcoming', count: activeOrders.length },
@@ -637,30 +551,6 @@ export default function MyPickupsPage() {
                       <PhoneCall className="w-3.5 h-3.5" />
                       Call Agent
                     </a>
-                  </div>
-                )}
-
-                {o.status === 'CANCELLED' && (
-                  <div className="p-3 bg-rose-50/80 rounded-2xl border border-rose-200/80 space-y-1 text-xs">
-                    <div className="flex items-center gap-1.5 font-bold text-rose-800">
-                      <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                      <span>Pickup Order Cancelled</span>
-                    </div>
-                    {o.cancellationReason && (
-                      <p className="text-[11px] text-rose-700">
-                        Reason: {o.cancellationReason}
-                      </p>
-                    )}
-                    {o.paymentStatus === 'REFUND_PENDING' && (
-                      <p className="text-[11px] font-semibold text-amber-800">
-                        Refund Status: 100% refund is queued for admin review to your original payment method.
-                      </p>
-                    )}
-                    {o.paymentStatus === 'REFUNDED' && (
-                      <p className="text-[11px] font-semibold text-emerald-800">
-                        Refund Status: 100% refunded to your original payment method.
-                      </p>
-                    )}
                   </div>
                 )}
 

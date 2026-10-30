@@ -35,38 +35,22 @@ export async function GET(req: NextRequest) {
     }
 
     let whereClause: any = {};
-    const page = Math.max(1, Number(searchParams.get('page') || 1) || 1);
-    const pageSize = Math.min(100, Math.max(1, Number(searchParams.get('pageSize') || 25) || 25));
     if (authUser.role === 'CUSTOMER') {
       whereClause = { customerId: authUser.customerId || 'unmatched' };
     } else if (authUser.role === 'AGENT') {
       whereClause = { agentId: authUser.agentId || 'unmatched' };
-    } else if (authUser.role === 'ADMIN' || authUser.role === 'SUPER_ADMIN') {
-      whereClause = {};
-    } else {
-      return NextResponse.json({ success: false, message: 'Forbidden.' }, { status: 403 });
     }
 
     const reviews = await db.review.findMany({
       where: whereClause,
       include: {
-        customer: {
-          include: {
-            user: { select: { id: true, name: true, phone: true, email: true } },
-          },
-        },
-        agent: {
-          include: {
-            user: { select: { id: true, name: true, phone: true, email: true } },
-          },
-        },
+        customer: { include: { user: true } },
+        agent: { include: { user: true } },
         order: true,
       },
       orderBy: { createdAt: 'desc' },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
     });
-    return NextResponse.json({ success: true, data: reviews, page, pageSize });
+    return NextResponse.json({ success: true, data: reviews });
   } catch (error: any) {
     return NextResponse.json({ success: false, message: error.message }, { status: 500 });
   }

@@ -1,5 +1,4 @@
 import 'server-only';
-import { getSafeErrorType, logStructured } from '../observability/structuredLogger';
 
 const SEND_URL = 'https://www.fast2sms.com/dev/otp/send';
 const VERIFY_URL = 'https://www.fast2sms.com/dev/otp/verify';
@@ -13,7 +12,7 @@ function config() {
   const hasApiKey = Boolean(apiKey);
   const hasOtpId = Boolean(otpId);
   if (!apiKey || !otpId) {
-    logStructured('error', 'auth.otp.configuration_missing', { dependency: 'fast2sms' });
+    console.error('[FAST2SMS_CONFIG_ERROR] Configuration missing:', { hasApiKey, hasOtpId });
     throw new Error(`Fast2SMS OTP configuration missing (hasApiKey: ${hasApiKey}, hasOtpId: ${hasOtpId})`);
   }
   return { apiKey, otpId };
@@ -24,7 +23,7 @@ async function post(url: string, payload: Record<string, string>) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    logStructured('info', 'auth.otp.provider_request_started', { dependency: 'fast2sms' });
+    console.log('[FAST2SMS_REQUEST]', { url, payloadKeys: Object.keys(payload) });
     const response = await fetch(url, {
       method: 'POST',
       headers: { Authorization: apiKey, Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -37,11 +36,14 @@ async function post(url: string, payload: Record<string, string>) {
     try {
       data = JSON.parse(text);
     } catch {
-      logStructured('warn', 'auth.otp.provider_response_invalid', {
-        dependency: 'fast2sms',
-        providerStatusCode: response.status,
-      });
+      console.error('[FAST2SMS_RESPONSE_NOT_JSON]', { status: response.status, textSnippet: text.substring(0, 100) });
     }
+    console.log('[FAST2SMS_RESPONSE]', {
+      httpStatus: response.status,
+      return: data.return,
+      status_code: data.status_code,
+      message: data.message || data.error || data.detail,
+    });
     const isReturnTrue = data.return === true || String(data.return).toLowerCase() === 'true';
     const isStatusCodeOk = data.status_code === 200;
     const isMessageSuccess = Array.isArray(data.message)
@@ -50,19 +52,12 @@ async function post(url: string, payload: Record<string, string>) {
     const isRequestIdPresent = Boolean((data as any).request_id);
 
     const ok = response.ok && (isReturnTrue || isStatusCodeOk || isMessageSuccess || isRequestIdPresent);
-    logStructured(ok ? 'info' : 'warn', 'auth.otp.provider_response', {
-      dependency: 'fast2sms',
-      providerStatusCode: Number.isInteger(data.status_code) ? data.status_code : response.status,
-    });
     const rawMsg = data.message || data.error || data.detail;
     const errorDetails = Array.isArray(rawMsg) ? rawMsg.join(', ') : typeof rawMsg === 'object' ? JSON.stringify(rawMsg) : String(rawMsg || `HTTP ${response.status}`);
 
     return { ok, errorDetails };
   } catch (err: any) {
-    logStructured('error', 'auth.otp.provider_request_failed', {
-      dependency: 'fast2sms',
-      errorType: getSafeErrorType(err),
-    });
+    console.error('[FAST2SMS_FETCH_ERROR]', { url, error: err.message, name: err.name });
     return { ok: false, errorDetails: err.message };
   } finally {
     clearTimeout(timeout);

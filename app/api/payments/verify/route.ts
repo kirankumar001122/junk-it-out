@@ -1,15 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { PaymentVerificationError, verifyAndRecordPayment } from '@/lib/payments/verification';
-import {
-  getSafeErrorDependency,
-  getSafeErrorType,
-  logStructured,
-  withApiRequestLogging,
-  type ApiRequestContext,
-} from '@/lib/observability/structuredLogger';
 
-async function handlePost(req: NextRequest, context: ApiRequestContext) {
+export async function POST(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
     if (!authUser || authUser.role !== 'CUSTOMER' || !authUser.customerId) {
@@ -31,29 +24,15 @@ async function handlePost(req: NextRequest, context: ApiRequestContext) {
     return NextResponse.json({ success: true, data: updated });
   } catch (error: unknown) {
     if (error instanceof PaymentVerificationError) {
-      if (error.statusCode >= 500) {
-        logStructured('error', 'payment.verify.failed', {
-          ...context,
-          dependency: getSafeErrorDependency(error),
-          errorType: getSafeErrorType(error),
-        });
-      }
       return NextResponse.json(
         { success: false, message: error.message },
         { status: error.statusCode },
       );
     }
 
-    logStructured('error', 'payment.verify.failed', {
-      ...context,
-      dependency: getSafeErrorDependency(error),
-      errorType: getSafeErrorType(error),
-    });
     return NextResponse.json(
       { success: false, message: 'Payment verification failed.' },
       { status: 500 },
     );
   }
 }
-
-export const POST = withApiRequestLogging('/api/payments/verify', handlePost);

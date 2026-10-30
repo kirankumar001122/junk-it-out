@@ -39,8 +39,8 @@ export default function CustomerReviews() {
 
   if (loading) {
     return (
-      <section className="customer-reviews-section mx-auto max-w-7xl rounded-[2rem] px-4 py-8 sm:px-8 sm:py-10">
-        <div className="mx-auto h-40 w-full max-w-xl animate-pulse rounded-3xl border border-emerald-100 bg-emerald-50/70" />
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+        <div className="h-48 w-full animate-pulse rounded-3xl bg-slate-100 border border-slate-200" />
       </section>
     );
   }
@@ -51,7 +51,7 @@ export default function CustomerReviews() {
       : null;
 
   return (
-    <section className="customer-reviews-section mx-auto max-w-7xl space-y-6 rounded-[2rem] px-4 py-8 sm:px-8 sm:py-10">
+    <section className="max-w-7xl mx-auto py-6 space-y-6">
       {/* HEADER */}
       <div className="text-center max-w-2xl mx-auto space-y-2">
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200/80">
@@ -119,20 +119,20 @@ export default function CustomerReviews() {
           </div>
         </div>
       ) : (
-        <div className="customer-review-empty mx-auto max-w-xl space-y-4 rounded-3xl p-6 text-center sm:p-8">
-          <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-emerald-100 text-emerald-700 shadow-sm">
+        <div className="bg-white rounded-xl p-6 sm:p-8 border border-slate-200 shadow-sm text-center max-w-xl mx-auto space-y-4">
+          <div className="w-10 h-10 bg-emerald-50 text-emerald-700 rounded-xl grid place-items-center mx-auto">
             <MessageSquareQuote className="w-5 h-5" />
           </div>
           <div className="space-y-1">
-            <h3 className="font-black text-slate-950 text-base">Real feedback, after every pickup.</h3>
-            <p className="mx-auto max-w-md text-xs leading-relaxed text-slate-600">
+            <h3 className="font-bold text-slate-900 text-sm">Verified Customer Reviews</h3>
+            <p className="text-xs text-slate-600 leading-relaxed max-w-md mx-auto">
               Reviews are collected directly from verified customers upon completing a doorstep waste pickup. As new pickups are completed, genuine customer ratings and comments will appear here.
             </p>
           </div>
           <div className="pt-1">
             <Link
               href="/book?cart=1"
-              className="btn-glossy-primary inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-xs font-bold shadow-sm"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white font-semibold text-xs hover:bg-emerald-600 transition-colors shadow-sm"
             >
               Book a Doorstep Pickup <ArrowRight className="w-3.5 h-3.5" />
             </Link>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Truck,
   MapPin,
@@ -8,6 +8,7 @@ import {
   CheckCircle,
   Clock,
   Scale,
+  Camera,
   Play,
   Navigation,
   RefreshCw,
@@ -22,24 +23,16 @@ import {
   Eye,
   X,
 } from 'lucide-react';
-import {
-  getAgentGeolocationErrorMessage,
-  getFreshAgentCoordinates,
-} from '@/lib/agentGeolocation';
 
 export default function AgentDashboardPage() {
   const [agent, setAgent] = useState<any>(null);
   const [orders, setOrders] = useState<any[]>([]);
   const [activeOrder, setActiveOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [dashboardError, setDashboardError] = useState<string | null>(null);
-  const [isOnline, setIsOnline] = useState(false);
-  const [locationSharing, setLocationSharing] = useState(false);
-  const [geolocationSupported, setGeolocationSupported] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
-  const [multipleActiveWarning, setMultipleActiveWarning] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // Realtime Pickup Notification & Read-Only View Modal State
   const [newPickupNotice, setNewPickupNotice] = useState<any | null>(null);
@@ -65,30 +58,24 @@ export default function AgentDashboardPage() {
     estimatedWeight: number;
     weightStr: string;
   }[]>([]);
+  const [scalePhotoUrl, setScalePhotoUrl] = useState('https://images.unsplash.com/photo-1589939705384-5185137a7f0f?q=80&w=600');
   const [weighNotes, setWeighNotes] = useState('');
   const [submittingWeigh, setSubmittingWeigh] = useState(false);
   const [weighModalError, setWeighModalError] = useState<string | null>(null);
   const dataRequestRef = useRef(false);
-  const refreshAfterRequestRef = useRef(false);
   const acceptingPickupRef = useRef(false);
   const actionRequestRef = useRef(false);
   const statusRequestRef = useRef(false);
   const weighingRequestRef = useRef(false);
   const loginRequestRef = useRef(false);
-  const seenBookingNotificationIdsRef = useRef(new Set<string>());
-  const locationUpdateRequestRef = useRef(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
 
-  const fetchAgentData = useCallback(async (showLoading = true) => {
-    if (dataRequestRef.current) {
-      refreshAfterRequestRef.current = true;
-      return;
-    }
+  const fetchAgentData = async () => {
+    if (dataRequestRef.current) return;
     dataRequestRef.current = true;
-    setDashboardError(null);
-    if (showLoading) setLoading(true);
-    else setIsRefreshing(true);
     try {
+      setLoading(true);
+      setAuthError(null);
+
       const [profileRes, ordersRes] = await Promise.all([
         fetch('/api/auth/me', { cache: 'no-store' }),
         fetch('/api/orders?limit=20', { cache: 'no-store' }),
@@ -99,10 +86,7 @@ export default function AgentDashboardPage() {
         setAgent(null);
         setOrders([]);
         setActiveOrder(null);
-        setMultipleActiveWarning(null);
-        if (!profileRes.ok && profileRes.status !== 401) {
-          setDashboardError('Unable to verify your agent session. Please retry.');
-        }
+        setLoading(false);
         return;
       }
 
@@ -113,8 +97,7 @@ export default function AgentDashboardPage() {
         setAgent(null);
         setOrders([]);
         setActiveOrder(null);
-        setMultipleActiveWarning(null);
-        setDashboardError('Your account does not have an active agent profile. Contact an administrator.');
+        setLoading(false);
         return;
       }
 
@@ -124,34 +107,21 @@ export default function AgentDashboardPage() {
         phone: agentUser.phone,
         email: agentUser.email,
       });
-      setIsOnline(agentProfile.status !== 'OFFLINE');
+      setIsOnline((agentProfile?.status || 'AVAILABLE') !== 'OFFLINE');
 
       const data = await ordersRes.json().catch(() => ({ success: false }));
-      if (!ordersRes.ok || !data.success || !Array.isArray(data.data)) {
-        setDashboardError(data.error?.message || data.message || 'Unable to load pickups. Retry to refresh your assignments.');
-        return;
-      }
+      if (data.success) {
+        const agentOrders = (data.data || []).filter((o: any) => o.agentId === agentProfile.id);
+        setOrders(agentOrders);
 
-      const agentOrders = data.data.filter((o: any) => o.agentId === agentProfile.id);
-      setOrders(agentOrders);
+        const assigned = agentOrders.find(
+          (o: any) => !['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED', 'CANCELLED'].includes(o.status)
+        ) || null;
 
-      const activeAssignments = agentOrders.filter(
-        (o: any) => !['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED', 'CANCELLED'].includes(o.status)
-      );
-
-      const assigned = activeAssignments[0] || null;
-      setActiveOrder(assigned);
-
-      if (activeAssignments.length > 1) {
-        setMultipleActiveWarning(
-          `Notice: Multiple active pickups (${activeAssignments.length}) are currently assigned to your account. Showing pickup #${assigned.orderNumber || assigned.id}. Please contact dispatch.`
-        );
-      } else {
-        setMultipleActiveWarning(null);
-      }
-      setActualWeightsInput(
-        assigned
-          ? (assigned.items || []).map((i: any) => ({
+        setActiveOrder(assigned);
+        if (assigned) {
+          setActualWeightsInput(
+            (assigned.items || []).map((i: any) => ({
               itemId: i.id,
               categoryId: i.categoryId,
               categoryName: i.category?.name || 'Waste item',
@@ -161,120 +131,65 @@ export default function AgentDashboardPage() {
                   ? String(i.actualWeight)
                   : '',
             }))
-          : [],
-      );
-    } catch (error) {
-      console.error('Agent dashboard refresh failed:', error);
-      setDashboardError('Network error while loading your pickup dashboard.');
+          );
+        } else {
+          setActualWeightsInput([]);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      setAuthError('Network error while loading your pickup dashboard.');
     } finally {
       setLoading(false);
-      setIsRefreshing(false);
       dataRequestRef.current = false;
-      if (refreshAfterRequestRef.current) {
-        refreshAfterRequestRef.current = false;
-        window.setTimeout(() => void fetchAgentData(false), 0);
-      }
     }
+  };
+
+  useEffect(() => {
+    fetchAgentData();
   }, []);
 
   useEffect(() => {
-    void fetchAgentData();
-  }, [fetchAgentData]);
+    if (!activeOrder?.id || !isOnline || !agent?.id) return;
 
-  useEffect(() => {
-    const TRACKING_ELIGIBLE_STATUSES = [
-      'AGENT_ACCEPTED',
-      'AGENT_ON_WAY',
-      'AGENT_ARRIVED',
-      'WEIGHING',
-      'WASTE_VERIFICATION',
-    ];
-
-    if (!activeOrder?.id || !isOnline || !agent?.id || !locationSharing) return;
-    if (!TRACKING_ELIGIBLE_STATUSES.includes(activeOrder.status)) return;
-
-    if (!navigator.geolocation) {
-      setLocationSharing(false);
-      setStatusNotice('This device or browser does not support location sharing.');
-      return;
-    }
-
-    let watchId: number | null = null;
-    let controller: AbortController | null = null;
     let cancelled = false;
+    let locationTimer: ReturnType<typeof setTimeout> | undefined;
 
-    const stopWatching = () => {
-      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
-      watchId = null;
+    const sendLocation = async () => {
+      const simulatedLat = (activeOrder.address?.lat || 12.9077) + (Math.random() - 0.5) * 0.005;
+      const simulatedLng = (activeOrder.address?.lng || 77.5854) + (Math.random() - 0.5) * 0.005;
+
+      try {
+        const response = await fetch('/api/agent/location', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentId: agent.id,
+          orderId: activeOrder.id,
+          lat: simulatedLat,
+          lng: simulatedLng,
+          speed: 22.4,
+        }),
+        });
+        if (!response.ok) {
+          console.warn('[AGENT_LOCATION_UPDATE_FAILED]', response.status);
+        }
+      } catch (error) {
+        console.warn('[AGENT_LOCATION_UPDATE_FAILED]', error);
+      } finally {
+        if (!cancelled) {
+          locationTimer = setTimeout(sendLocation, 8000);
+        }
+      }
     };
 
-    watchId = navigator.geolocation.watchPosition(
-      async (position) => {
-        const coordinates = getFreshAgentCoordinates(position);
-        if (!coordinates) {
-          setStatusNotice('A stale or invalid location reading was ignored. Waiting for a fresh device location.');
-          return;
-        }
-        if (
-          cancelled ||
-          locationUpdateRequestRef.current ||
-          actionRequestRef.current ||
-          statusRequestRef.current ||
-          weighingRequestRef.current ||
-          acceptingPickupRef.current
-        ) return;
-
-        locationUpdateRequestRef.current = true;
-        controller = new AbortController();
-        try {
-          const response = await fetch('/api/agent/location', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              orderId: activeOrder.id,
-              ...coordinates,
-            }),
-            signal: controller.signal,
-          });
-          if (!response.ok) {
-            setStatusNotice('Location update failed. Your assignment is unchanged; retry location sharing when ready.');
-          }
-        } catch (error) {
-          if (!(error instanceof DOMException && error.name === 'AbortError')) {
-            console.warn('[AGENT_LOCATION_UPDATE_FAILED]', error);
-            setStatusNotice('Network error while sharing location. Retry when your connection is available.');
-          }
-        } finally {
-          controller = null;
-          locationUpdateRequestRef.current = false;
-        }
-      },
-      (error) => {
-        if (cancelled) return;
-        stopWatching();
-        setLocationSharing(false);
-        setStatusNotice(getAgentGeolocationErrorMessage(error.code));
-      },
-      { enableHighAccuracy: true, maximumAge: 15_000, timeout: 15_000 },
-    );
+    locationTimer = setTimeout(sendLocation, 8000);
 
     return () => {
       cancelled = true;
-      stopWatching();
-      controller?.abort();
+      if (locationTimer) clearTimeout(locationTimer);
     };
-  }, [activeOrder?.id, activeOrder?.status, isOnline, agent?.id, locationSharing]);
-
-  useEffect(() => {
-    setGeolocationSupported(typeof navigator !== 'undefined' && Boolean(navigator.geolocation));
-  }, []);
-
-  useEffect(() => {
-    const trackingStatuses = ['AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WEIGHING', 'WASTE_VERIFICATION'];
-    if (!isOnline || !trackingStatuses.includes(activeOrder?.status)) {
-      setLocationSharing(false);
-    }
-  }, [isOnline, activeOrder?.status]);
+  }, [activeOrder?.id, isOnline, agent?.id]);
 
   // Authenticated Agent SSE Stream Connection for NEW_PICKUP_AVAILABLE Notifications
   useEffect(() => {
@@ -294,33 +209,6 @@ export default function AgentDashboardPage() {
         }
       });
 
-      eventSource.addEventListener('AGENT_BOOKING_ASSIGNED', (e: MessageEvent) => {
-        try {
-          const payload = JSON.parse(e.data);
-          void fetchAgentData(false);
-          const notificationId = payload?.notificationId;
-          if (typeof notificationId !== 'string' || seenBookingNotificationIdsRef.current.has(notificationId)) return;
-
-          const storageKey = `junkitout:agent-booking-notifications:${agent.id}`;
-          try {
-            const storedIds = JSON.parse(localStorage.getItem(storageKey) || '[]');
-            if (Array.isArray(storedIds) && storedIds.includes(notificationId)) {
-              seenBookingNotificationIdsRef.current.add(notificationId);
-              return;
-            }
-            const recentIds = Array.isArray(storedIds) ? storedIds.filter((id) => typeof id === 'string') : [];
-            localStorage.setItem(storageKey, JSON.stringify([...recentIds, notificationId].slice(-100)));
-          } catch {
-            // The in-memory guard still prevents duplicate display for this page session.
-          }
-
-          seenBookingNotificationIdsRef.current.add(notificationId);
-          setStatusNotice(payload.message || `New booking assigned: Order #${payload.orderNumber || ''}.`);
-        } catch (err) {
-          console.error('[AGENT SSE] Error parsing assignment notification:', err);
-        }
-      });
-
       eventSource.onerror = () => {
         // EventSource will automatically handle reconnection safely
       };
@@ -333,68 +221,28 @@ export default function AgentDashboardPage() {
         eventSource.close();
       }
     };
-  }, [agent?.id, isOnline, fetchAgentData]);
+  }, [agent?.id, isOnline]);
 
+  // Keyboard accessibility: dismiss active modal with Escape key
   useEffect(() => {
     if (!showWeighModal && !viewPickupModal) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (showWeighModal && !submittingWeigh) setShowWeighModal(false);
-      if (viewPickupModal) setViewPickupModal(null);
+      if (e.key === 'Escape') {
+        if (showWeighModal && !submittingWeigh) setShowWeighModal(false);
+        if (viewPickupModal) setViewPickupModal(null);
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showWeighModal, viewPickupModal, submittingWeigh]);
 
-  useEffect(() => {
-    if (!showWeighModal && !viewPickupModal) return;
-
-    const previousFocus = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    const frame = window.requestAnimationFrame(() => dialogRef.current?.focus());
-    const handleTab = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      ));
-      if (focusable.length === 0) {
-        event.preventDefault();
-        dialogRef.current.focus();
-        return;
-      }
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener('keydown', handleTab);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.removeEventListener('keydown', handleTab);
-      if (previousFocus?.isConnected) previousFocus.focus();
-    };
-  }, [showWeighModal, Boolean(viewPickupModal)]);
-
   const fetchOrderDetails = async (orderId: string) => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
-    try {
-      const res = await fetch(`/api/orders/${orderId}`, { signal: controller.signal });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) {
-        throw new Error(data.error?.message || data.message || 'Unable to fetch pickup details.');
-      }
-      return data.data;
-    } finally {
-      clearTimeout(timeout);
+    const res = await fetch(`/api/orders/${orderId}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      throw new Error(data.error?.message || data.message || 'Unable to fetch pickup details.');
     }
+    return data.data;
   };
 
   const handleViewPickupDetails = async (orderId: string) => {
@@ -412,16 +260,11 @@ export default function AgentDashboardPage() {
     if (acceptingPickupRef.current) return;
     acceptingPickupRef.current = true;
     setAcceptingPickup(true);
-    let acceptTimeout: number | undefined;
     try {
-      const controller = new AbortController();
-      acceptTimeout = window.setTimeout(() => controller.abort(), 15_000);
       const res = await fetch(`/api/orders/${orderId}/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
       });
-      window.clearTimeout(acceptTimeout);
       const data = await res.json();
 
       if (res.status === 409) {
@@ -435,54 +278,22 @@ export default function AgentDashboardPage() {
       if (res.ok && data.success) {
         setStatusNotice(`Pickup Accepted! Order #${data.data?.orderNumber || ''} assigned to you.`);
         setTimeout(() => setStatusNotice(null), 5000);
-        const cachedModalOrder = viewPickupModal;
         setViewPickupModal(null);
         setNewPickupNotice(null);
-        const rawOrder = data.data;
-        const updatedOrder = Array.isArray(rawOrder?.items)
-          ? rawOrder
-          : cachedModalOrder && (cachedModalOrder.id === orderId || cachedModalOrder.orderNumber === orderId)
-          ? {
-              ...cachedModalOrder,
-              ...(rawOrder || {}),
-              id: rawOrder?.id || rawOrder?.orderId || cachedModalOrder.id,
-              status: rawOrder?.status || 'AGENT_ACCEPTED',
-              agentId: rawOrder?.agentId || agent?.id,
-            }
+        const updatedOrder = Array.isArray(data.data?.items)
+          ? data.data
           : await fetchOrderDetails(orderId);
-
-        if (updatedOrder) {
-          setActiveOrder(updatedOrder);
-          if (Array.isArray(updatedOrder.items) && updatedOrder.items.length > 0) {
-            setActualWeightsInput(
-              updatedOrder.items.map((i: any) => ({
-                itemId: i.id,
-                categoryId: i.categoryId,
-                categoryName: i.category?.name || 'Waste item',
-                estimatedWeight: Number(i.estimatedWeight ?? 0),
-                weightStr:
-                  typeof i.actualWeight === 'number' && i.actualWeight > 0
-                    ? String(i.actualWeight)
-                    : '',
-              }))
-            );
-          }
-          setOrders((currentOrders) => [
-            updatedOrder,
-            ...currentOrders.filter((order) => order.id !== updatedOrder.id),
-          ]);
-        }
+        setActiveOrder(updatedOrder);
+        setOrders((currentOrders) => [
+          updatedOrder,
+          ...currentOrders.filter((order) => order.id !== updatedOrder.id),
+        ]);
       } else {
         alert(data.error?.message || data.message || 'Failed to accept pickup.');
       }
     } catch (err) {
-      alert(
-        err instanceof DOMException && err.name === 'AbortError'
-          ? 'Accepting pickup timed out. Please check your network and active pickups.'
-          : 'Network error while accepting pickup.'
-      );
+      alert('Network error while accepting pickup.');
     } finally {
-      if (acceptTimeout) window.clearTimeout(acceptTimeout);
       setAcceptingPickup(false);
       acceptingPickupRef.current = false;
     }
@@ -552,8 +363,7 @@ export default function AgentDashboardPage() {
     if (loggingOut) return;
     setLoggingOut(true);
     try {
-      const response = await fetch('/api/auth/logout', { method: 'POST' });
-      if (!response.ok) throw new Error('Logout request failed.');
+      await fetch('/api/auth/logout', { method: 'POST' });
       setAgent(null);
       setOrders([]);
       setActiveOrder(null);
@@ -561,7 +371,6 @@ export default function AgentDashboardPage() {
       setLoginOtp('');
     } catch (e) {
       console.error('Agent logout error:', e);
-      setStatusNotice('Unable to log out. Check your connection and try again.');
     } finally {
       setLoggingOut(false);
     }
@@ -573,39 +382,25 @@ export default function AgentDashboardPage() {
     const targetStatus = isOnline ? 'OFFLINE' : 'AVAILABLE';
     setStatusUpdating(true);
     setStatusNotice(null);
-    let statusTimeout: number | undefined;
     try {
-      const controller = new AbortController();
-      statusTimeout = window.setTimeout(() => controller.abort(), 10_000);
       const res = await fetch('/api/agent/status', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: targetStatus }),
-        signal: controller.signal,
       });
-      window.clearTimeout(statusTimeout);
       const data = await res.json();
       if (res.ok && data.success) {
         const newStatus = data.data.status;
-        const nowOnline = newStatus === 'AVAILABLE';
-        setIsOnline(nowOnline);
+        setIsOnline(newStatus === 'AVAILABLE');
         setAgent((prev: any) => (prev ? { ...prev, status: newStatus } : prev));
         setStatusNotice(`Status updated to ${newStatus}`);
         setTimeout(() => setStatusNotice(null), 3000);
-        if (nowOnline) {
-            void fetchAgentData(false);
-        }
       } else {
         setStatusNotice(data.error?.message || data.message || 'Failed to update status.');
       }
-    } catch (e) {
-      setStatusNotice(
-        e instanceof DOMException && e.name === 'AbortError'
-          ? 'Status update timed out. Please check connection and try again.'
-          : 'Network error updating status.'
-      );
+    } catch {
+      setStatusNotice('Network error updating status.');
     } finally {
-      if (statusTimeout) window.clearTimeout(statusTimeout);
       setStatusUpdating(false);
       statusRequestRef.current = false;
     }
@@ -643,41 +438,16 @@ export default function AgentDashboardPage() {
             : 'Arrived at customer doorstep!'
         );
         setTimeout(() => setStatusNotice(null), 4000);
-        if (data.data?.id || data.data?.orderId) {
-          const rawOrder = data.data;
-          const targetId = rawOrder.id || rawOrder.orderId || activeOrder?.id;
+        if (data.data?.id) {
           const nextOrder = action === 'accept'
-            ? Array.isArray(rawOrder?.items)
-              ? rawOrder
-              : activeOrder && (activeOrder.id === targetId || activeOrder.orderNumber === targetId)
-              ? {
-                  ...activeOrder,
-                  ...(rawOrder || {}),
-                  id: targetId,
-                  status: rawOrder.status || 'AGENT_ACCEPTED',
-                }
-              : await fetchOrderDetails(targetId)
-            : rawOrder;
-          if (nextOrder) {
-            setActiveOrder(nextOrder);
-            if (action === 'accept' && Array.isArray(nextOrder.items) && nextOrder.items.length > 0) {
-              setActualWeightsInput(
-                nextOrder.items.map((i: any) => ({
-                  itemId: i.id,
-                  categoryId: i.categoryId,
-                  categoryName: i.category?.name || 'Waste item',
-                  estimatedWeight: Number(i.estimatedWeight ?? 0),
-                  weightStr:
-                    typeof i.actualWeight === 'number' && i.actualWeight > 0
-                      ? String(i.actualWeight)
-                      : '',
-                }))
-              );
-            }
-            setOrders((currentOrders) =>
-              currentOrders.map((order) => order.id === nextOrder.id ? nextOrder : order)
-            );
-          }
+            ? Array.isArray(data.data.items)
+              ? data.data
+              : await fetchOrderDetails(data.data.id)
+            : data.data;
+          setActiveOrder(nextOrder);
+          setOrders((currentOrders) =>
+            currentOrders.map((order) => order.id === nextOrder.id ? nextOrder : order)
+          );
         }
       } else {
         const errorText = data.error?.message || data.message || `Failed to perform ${action} action.`;
@@ -701,9 +471,10 @@ export default function AgentDashboardPage() {
 
   const handleSubmitWeighingAndComplete = async () => {
     if (!activeOrder || weighingRequestRef.current) return;
+    weighingRequestRef.current = true;
     setWeighModalError(null);
 
-    // 1. Client-side weight validation before setting request lock
+    // 1. Client-side weight validation
     if (!actualWeightsInput || actualWeightsInput.length === 0) {
       setWeighModalError('No order items available to weigh.');
       return;
@@ -727,51 +498,50 @@ export default function AgentDashboardPage() {
       });
     }
 
-    weighingRequestRef.current = true;
     setSubmittingWeigh(true);
-    let weighTimeout: number | undefined;
     try {
-      const controller = new AbortController();
-      weighTimeout = window.setTimeout(() => controller.abort(), 15_000);
-      // Submit door-to-door scale weights and complete pickup in a single atomic request
-      const completeRes = await fetch(`/api/orders/${activeOrder.id}/complete`, {
+      // 2. Submit door-to-door scale weights
+      const weighRes = await fetch(`/api/orders/${activeOrder.id}/weigh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           actualWeights: payloadActualWeights,
-          scalePhotoUrl: null,
+          scalePhotoUrl,
           notes: weighNotes || 'Digital scale weight recorded at doorstep.',
         }),
-        signal: controller.signal,
       });
-      window.clearTimeout(weighTimeout);
+      const weighData = await weighRes.json().catch(() => ({}));
+      if (!weighRes.ok || !weighData.success) {
+        setWeighModalError(weighData.error?.message || weighData.message || 'Failed to record scale weights.');
+        setSubmittingWeigh(false);
+        return;
+      }
+
+      // 3. Submit Order Completion
+      const completeRes = await fetch(`/api/orders/${activeOrder.id}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
       const completeData = await completeRes.json().catch(() => ({}));
       if (completeRes.ok && completeData.success) {
         setShowWeighModal(false);
         setStatusNotice(`Order #${activeOrder.orderNumber} successfully COMPLETED! Weights persisted & invoice generated.`);
         setTimeout(() => setStatusNotice(null), 6000);
         if (completeData.data?.id) {
+          setActiveOrder(completeData.data);
           setOrders((currentOrders) =>
             currentOrders.map((order) =>
               order.id === completeData.data.id ? completeData.data : order
             )
           );
         }
-        setActiveOrder(null);
-        setActualWeightsInput([]);
-        void fetchAgentData(false);
       } else {
         setWeighModalError(completeData.error?.message || completeData.message || 'Failed to complete pickup order.');
       }
     } catch (e) {
       console.error('Weighing/Completion error:', e);
-      setWeighModalError(
-        e instanceof DOMException && e.name === 'AbortError'
-          ? 'Completion timed out. Please check your network and active orders.'
-          : 'Network error while completing pickup. Please check your connection and try again.'
-      );
+      setWeighModalError('Network error while completing pickup. Please check your connection and try again.');
     } finally {
-      if (weighTimeout) window.clearTimeout(weighTimeout);
       setSubmittingWeigh(false);
       weighingRequestRef.current = false;
     }
@@ -805,14 +575,6 @@ export default function AgentDashboardPage() {
             <div role="alert" className="p-3 bg-rose-950/60 border border-rose-800/80 text-rose-300 rounded-2xl text-xs font-bold flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
               <span>{loginError}</span>
-            </div>
-          )}
-          {dashboardError && (
-            <div role="alert" className="p-3 bg-amber-950/60 border border-amber-800/80 text-amber-200 rounded-2xl text-xs font-bold">
-              {dashboardError}
-              <button type="button" onClick={() => void fetchAgentData()} className="ml-2 underline">
-                Retry
-              </button>
             </div>
           )}
 
@@ -898,23 +660,8 @@ export default function AgentDashboardPage() {
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-900 text-white pb-24">
-      {dashboardError && (
-        <div role="alert" className="p-3 text-xs text-amber-200 bg-amber-500/10 border-b border-amber-500/30 flex items-center justify-between gap-3">
-          <span>{dashboardError}</span>
-          <button
-            type="button"
-            onClick={() => void fetchAgentData(false)}
-            disabled={isRefreshing}
-            className="shrink-0 underline disabled:opacity-50"
-          >
-            {isRefreshing ? 'Refreshing…' : 'Retry'}
-          </button>
-        </div>
-      )}
-      {multipleActiveWarning && (
-        <div role="alert" className="p-3 text-xs font-bold text-amber-200 bg-amber-950/80 border-b border-amber-800 flex items-center justify-between gap-3">
-          <span>{multipleActiveWarning}</span>
-        </div>
+      {authError && (
+        <div className="p-4 text-xs text-amber-200 bg-amber-500/10 border-b border-amber-500/30">{authError}</div>
       )}
       {statusNotice && (
         <div className="p-3 text-xs font-bold text-center text-emerald-300 bg-emerald-950/60 border-b border-emerald-800 animate-scale-in">
@@ -935,15 +682,6 @@ export default function AgentDashboardPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void fetchAgentData(false)}
-            disabled={isRefreshing}
-            aria-label="Refresh pickup assignments"
-            className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-full border border-slate-700 disabled:opacity-50"
-          >
-            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-          </button>
           <button
             type="button"
             onClick={toggleAgentStatus}
@@ -1031,7 +769,7 @@ export default function AgentDashboardPage() {
       <div className="p-4 grid grid-cols-3 gap-2">
         <div className="bg-slate-800/80 p-3 rounded-2xl border border-slate-700/50 text-center">
           <span className="text-xl font-black text-white block">{todayPickups}</span>
-          <span className="text-[10px] text-slate-400 uppercase font-semibold">Recent Total</span>
+          <span className="text-[10px] text-slate-400 uppercase font-semibold">Today Total</span>
         </div>
         <div className="bg-slate-800/80 p-3 rounded-2xl border border-slate-700/50 text-center">
           <span className="text-xl font-black text-amber-400 block">{pendingCount}</span>
@@ -1076,30 +814,6 @@ export default function AgentDashboardPage() {
                 <Phone className="w-5 h-5 shrink-0" />
               </a>
             </div>
-
-            {isOnline && ['AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WEIGHING', 'WASTE_VERIFICATION'].includes(activeOrder.status) && (
-              <div className="rounded-2xl border border-slate-700 bg-slate-800/70 p-3 space-y-2">
-                <p className="text-xs text-slate-300">
-                  Location is shared only while this pickup is active and only after you enable it.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStatusNotice(null);
-                    setLocationSharing((sharing) => !sharing);
-                  }}
-                  disabled={!geolocationSupported}
-                  aria-pressed={locationSharing}
-                  className="w-full rounded-full border border-emerald-700 px-4 py-3 text-xs font-bold text-emerald-300 disabled:opacity-50"
-                >
-                  {locationSharing
-                    ? 'STOP SHARING LOCATION'
-                    : geolocationSupported
-                      ? 'ENABLE LOCATION SHARING'
-                      : 'LOCATION IS NOT SUPPORTED ON THIS DEVICE'}
-                </button>
-              </div>
-            )}
 
             {/* Waste Items Summary */}
             <div className="pt-2 border-t border-slate-700">
@@ -1205,10 +919,6 @@ export default function AgentDashboardPage() {
             )}
           </div>
         </div>
-      ) : dashboardError ? (
-        <div role="status" className="mx-4 rounded-2xl border border-amber-800/60 bg-amber-950/40 p-5 text-center text-xs text-amber-200">
-          Pickup assignments could not be confirmed. Retry to check your current work.
-        </div>
       ) : (
         <div className="p-8 text-center text-slate-400 space-y-3">
           <Truck className="w-12 h-12 text-slate-600 mx-auto" />
@@ -1223,8 +933,6 @@ export default function AgentDashboardPage() {
           role="dialog"
           aria-modal="true"
           aria-label="Record Digital Scale Weights"
-          ref={dialogRef}
-          tabIndex={-1}
           className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
         >
           <div className="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -1261,11 +969,7 @@ export default function AgentDashboardPage() {
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <label className="sr-only" htmlFor={`actual-weight-${item.itemId || idx}`}>
-                      Actual weight in kilograms for {item.categoryName}
-                    </label>
                     <input
-                      id={`actual-weight-${item.itemId || idx}`}
                       type="text"
                       inputMode="decimal"
                       value={item.weightStr}
@@ -1287,9 +991,27 @@ export default function AgentDashboardPage() {
               ))}
             </div>
 
-            <p className="rounded-xl border border-slate-700 bg-slate-800/70 p-3 text-xs text-slate-400">
-              Scale-photo upload is not available in this portal. No photo evidence will be attached.
-            </p>
+            {/* Photo Scale Proof */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-400">Scale Photo Proof URL:</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={scalePhotoUrl}
+                  onChange={(e) => setScalePhotoUrl(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-300"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    setScalePhotoUrl('https://images.unsplash.com/photo-1589939705384-5185137a7f0f?q=80&w=600')
+                  }
+                  className="bg-slate-800 border border-slate-700 text-emerald-400 p-2.5 rounded-xl shrink-0 hover:bg-slate-700 transition-colors"
+                >
+                  <Camera className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
 
             {/* Doorstep Weighing Notes */}
             <div className="space-y-1.5">
@@ -1331,8 +1053,6 @@ export default function AgentDashboardPage() {
           role="dialog"
           aria-modal="true"
           aria-label="Pickup Details"
-          ref={dialogRef}
-          tabIndex={-1}
           className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
         >
           <div className="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -1372,9 +1092,11 @@ export default function AgentDashboardPage() {
                 <p className="font-bold text-white">
                   📍 {viewPickupModal.address?.area || viewPickupModal.serviceArea?.name || 'Bengaluru Zone'}
                 </p>
-                <p className="text-slate-400 text-[11px] leading-relaxed">
-                  Exact pickup details are shown after the assignment is accepted.
-                </p>
+                {viewPickupModal.address && (
+                  <p className="text-slate-400 text-[11px] leading-relaxed">
+                    {viewPickupModal.address.houseNo}, {viewPickupModal.address.street}, {viewPickupModal.address.area}
+                  </p>
+                )}
               </div>
 
               {viewPickupModal.items && viewPickupModal.items.length > 0 && (

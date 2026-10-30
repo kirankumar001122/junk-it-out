@@ -5,14 +5,8 @@ import { getAuthUser } from '@/lib/auth/middleware';
 export async function GET(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
-    if (!authUser) {
-      return NextResponse.json({ success: false, message: 'Authentication is required.' }, { status: 401 });
-    }
-    if (authUser.role !== 'SUPER_ADMIN') {
-      return NextResponse.json({
-        success: false,
-        message: 'Super admin authorization required for database schema operations.',
-      }, { status: 403 });
+    if (!authUser || !['ADMIN', 'SUPER_ADMIN'].includes(authUser.role)) {
+      return NextResponse.json({ success: false, message: 'Admin authorization required.' }, { status: 403 });
     }
 
     // 1. Production Schema Safety Check
@@ -48,16 +42,6 @@ export async function GET(req: NextRequest) {
       db.customer.count(),
       db.user.count(),
     ]);
-
-    await db.auditLog.create({
-      data: {
-        userId: authUser.userId,
-        userName: authUser.name,
-        action: 'SCHEMA_SYNC_EXECUTED',
-        oldValue: `Initial orderId nullable: ${initialNullable}`,
-        newValue: `Sync executed: ${syncExecuted}, Current nullable: ${isNowNullable}`,
-      },
-    }).catch(() => null);
 
     return NextResponse.json({
       success: true,

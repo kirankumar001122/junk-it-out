@@ -5,6 +5,14 @@ import Link from 'next/link';
 import {
   Package,
   Search,
+  Filter,
+  Plus,
+  Clock,
+  User,
+  MapPin,
+  Scale,
+  CheckCircle,
+  XCircle,
   RefreshCw,
   Eye,
   UserPlus,
@@ -34,7 +42,7 @@ export default function AdminOrdersPage() {
       setAgentsLoading(true);
       setAgentsError(null);
       const [ordersRes, agentsRes] = await Promise.all([
-        fetch('/api/orders?limit=100').then((r) => r.json()).catch(() => ({ success: false })),
+        fetch('/api/orders').then((r) => r.json()).catch(() => ({ success: false })),
         fetch('/api/admin/agents').then((r) => r.json()).catch(() => ({ success: false })),
       ]);
 
@@ -59,38 +67,15 @@ export default function AdminOrdersPage() {
     loadOrdersAndAgents();
   }, []);
 
-  // Keyboard accessibility and body scroll lock for modal
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setSelectedOrderForAssign(null);
-        setAssignError(null);
-      }
-    };
-    if (selectedOrderForAssign) {
-      window.addEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = 'hidden';
-    }
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = '';
-    };
-  }, [selectedOrderForAssign]);
-
-  const sortedAgents = [...agents].sort((a, b) => {
-    if (a.status === 'AVAILABLE' && b.status !== 'AVAILABLE') return -1;
-    if (a.status !== 'AVAILABLE' && b.status === 'AVAILABLE') return 1;
-    return a.name.localeCompare(b.name);
-  });
-
   const openAssignModal = (order: any) => {
     setSelectedOrderForAssign(order);
     setAssignError(null);
     if (order.agentId && agents.some((a) => a.id === order.agentId)) {
       setSelectedAgentId(order.agentId);
+    } else if (agents.length > 0) {
+      setSelectedAgentId(agents[0].id);
     } else {
-      const firstAvailable = agents.find((a) => a.status === 'AVAILABLE');
-      setSelectedAgentId(firstAvailable ? firstAvailable.id : (agents[0]?.id || ''));
+      setSelectedAgentId('');
     }
   };
 
@@ -153,20 +138,21 @@ export default function AdminOrdersPage() {
             Orders Roster
           </span>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-1">Orders Management</h1>
-          <p className="text-xs text-slate-500">Live operational pickups, scheduled dispatch slots, and active agent assignments</p>
+          <p className="text-xs text-slate-500">Monitor doorstep pickups, re-assign agents, track status & payouts</p>
         </div>
 
         <button
+          type="button"
           onClick={loadOrdersAndAgents}
           disabled={loading}
-          className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 flex items-center gap-1.5 self-start sm:self-auto disabled:opacity-50"
+          className="btn-glossy-secondary rounded-full disabled:opacity-50 text-slate-800 font-bold text-xs px-5 py-2.5 border border-slate-200 flex items-center gap-2 shadow-2xs"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
+          <RefreshCw className={`w-4 h-4 text-slate-600 ${loading ? 'animate-spin' : ''}`} />
+          Refresh List
         </button>
       </div>
 
-      {/* Filter and Search Bar */}
+      {/* Filter Bar & Search */}
       <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="relative w-full sm:w-80">
@@ -180,18 +166,17 @@ export default function AdminOrdersPage() {
             />
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <Filter className="w-4 h-4 text-slate-400 shrink-0" />
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
-              className="w-full sm:w-auto bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              className="w-full sm:w-48 bg-slate-50 border border-slate-200 rounded-2xl px-3 py-2.5 text-xs font-bold text-slate-900"
             >
-              <option value="ALL">All Order Statuses</option>
+              <option value="ALL">All Statuses</option>
               <option value="BOOKING_RECEIVED">Booking Received</option>
-              <option value="AGENT_BEING_ASSIGNED">Agent Being Assigned</option>
               <option value="AGENT_ASSIGNED">Agent Assigned</option>
               <option value="AGENT_ON_WAY">Agent On Way</option>
-              <option value="AGENT_ARRIVED">Agent Arrived</option>
               <option value="WEIGHING">Weighing</option>
               <option value="PICKUP_COMPLETED">Completed</option>
               <option value="CANCELLED">Cancelled</option>
@@ -199,9 +184,9 @@ export default function AdminOrdersPage() {
           </div>
         </div>
 
-        {/* Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-xs">
+        {/* Orders Table */}
+        <div className="overflow-x-auto pt-2">
+          <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 text-slate-500 uppercase font-bold text-[10px]">
               <tr>
                 <th className="p-3">Order Number</th>
@@ -209,18 +194,16 @@ export default function AdminOrdersPage() {
                 <th className="p-3">Pickup Area</th>
                 <th className="p-3">Status</th>
                 <th className="p-3">Assigned Agent</th>
-                <th className="p-3">Total Value</th>
-                <th className="p-3">Created At</th>
+                <th className="p-3">Estimated / Final</th>
+                <th className="p-3">Date</th>
                 <th className="p-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
               {filteredOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-8 text-center text-slate-400 space-y-2">
-                    <Package className="w-8 h-8 mx-auto text-slate-300" />
-                    <p className="font-bold text-slate-700 text-xs">No orders match filter criteria</p>
-                    <p className="text-[11px] text-slate-400">Try adjusting your search query or status filter</p>
+                  <td colSpan={8} className="p-6 text-center text-slate-400 font-medium">
+                    No orders match your filter criteria.
                   </td>
                 </tr>
               ) : (
@@ -294,21 +277,8 @@ export default function AdminOrdersPage() {
 
       {/* Agent Assign Modal */}
       {selectedOrderForAssign && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Assign Agent to Order"
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 overflow-y-auto"
-        >
-          <div
-            className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm cursor-pointer"
-            onClick={() => {
-              setSelectedOrderForAssign(null);
-              setAssignError(null);
-            }}
-            aria-hidden="true"
-          />
-          <div className="relative bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl z-10 my-auto">
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-base font-extrabold text-slate-900">
@@ -359,9 +329,9 @@ export default function AdminOrdersPage() {
                   disabled={assignLoading}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none disabled:opacity-50"
                 >
-                  {sortedAgents.map((ag) => (
+                  {agents.map((ag) => (
                     <option key={ag.id} value={ag.id}>
-                      {ag.status === 'AVAILABLE' ? '🟢 [AVAILABLE]' : `⚪ [${ag.status}]`} {ag.name} ({ag.vehicleType} • {ag.vehicleNumber}) [★{ag.rating} | {ag.phone}]
+                      {ag.name} ({ag.vehicleType} • {ag.vehicleNumber}) - {ag.status} [★{ag.rating} | {ag.phone}]
                     </option>
                   ))}
                 </select>
@@ -386,14 +356,7 @@ export default function AdminOrdersPage() {
                 disabled={assignLoading || agents.length === 0 || !selectedAgentId}
                 className="w-1/2 btn-glossy-primary rounded-full text-white font-bold text-xs py-3 shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {assignLoading ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Assigning...</span>
-                  </>
-                ) : (
-                  <span>Confirm Assignment</span>
-                )}
+                {assignLoading ? 'Assigning...' : 'Confirm Assignment'}
               </button>
             </div>
           </div>

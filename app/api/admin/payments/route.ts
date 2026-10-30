@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
+import { getAuthUser } from '@/lib/auth/middleware';
 
 export async function GET(req: NextRequest) {
   const requestStartedAt = performance.now();
@@ -19,12 +19,7 @@ export async function GET(req: NextRequest) {
     let phaseStartedAt = performance.now();
     const authUser = await getAuthUser(req);
     timings.auth = performance.now() - phaseStartedAt;
-    const authorizationStatus = getAdminAuthorizationStatus(authUser);
-    if (authorizationStatus === 401) {
-      logPerformance(0, 0);
-      return NextResponse.json({ success: false, message: 'Authentication is required.' }, { status: 401 });
-    }
-    if (authorizationStatus === 403) {
+    if (!authUser || !['ADMIN', 'SUPER_ADMIN'].includes(authUser.role)) {
       logPerformance(0, 0);
       return NextResponse.json({ success: false, message: 'Admin access required.' }, { status: 403 });
     }

@@ -52,8 +52,7 @@ export default function AdminCustomersPage() {
 
         <button
           onClick={loadCustomers}
-          disabled={loading}
-          className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 flex items-center gap-1.5 self-start sm:self-auto disabled:opacity-50"
+          className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 flex items-center gap-1.5 self-start sm:self-auto"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           Refresh Database
@@ -94,7 +93,7 @@ export default function AdminCustomersPage() {
           </div>
         ) : (
           <div className="overflow-x-auto pt-2">
-            <table className="w-full min-w-[720px] text-left text-xs">
+            <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 text-slate-500 uppercase font-bold text-[10px]">
                 <tr>
                   <th className="p-3">Customer Name</th>

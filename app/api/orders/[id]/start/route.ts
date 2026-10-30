@@ -1,3 +1,4 @@
+import { after } from 'next/server';
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
@@ -5,8 +6,6 @@ import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { sendDispatchUpdate } from '@/lib/services/whatsappService';
-import { runBackgroundTask } from '@/lib/utils/backgroundTask';
-import { SAFE_HYDRATED_ORDER_INCLUDE, formatOrderResponse } from '@/lib/orders/orderFormat';
 
 export async function POST(
   req: NextRequest,
@@ -21,7 +20,7 @@ export async function POST(
 
     const order = await db.order.findUnique({
       where: { id },
-      include: SAFE_HYDRATED_ORDER_INCLUDE,
+      include: { agent: { include: { user: true } }, customer: { include: { user: true } } },
     });
 
     if (!order) {
@@ -35,79 +34,36 @@ export async function POST(
     const oldStatus = order.status;
     const newStatus = 'AGENT_ON_WAY';
 
-    // Idempotent retry: order is already in AGENT_ON_WAY for this agent
-    if (oldStatus === newStatus) {
-      return successResponse(
-        formatOrderResponse(order, {
-          id: order.id,
-          orderNumber: order.orderNumber,
-          agentId: order.agentId,
-          status: newStatus,
-        })
-      );
-    }
-
     if (!validateStatusTransition(oldStatus, newStatus)) {
       return errorResponse('INVALID_STATUS_TRANSITION', `Cannot transition order status from ${oldStatus} to ${newStatus}.`, 400);
     }
 
-    const transition = await db.$transaction(async (tx) => {
-      const result = await tx.order.updateMany({
-        where: { id, agentId: authUser.agentId, status: oldStatus },
-        data: { status: newStatus },
-      });
-
-      if (result.count !== 1) {
-        return {
-          kind: 'conflict' as const,
-          order: await tx.order.findUnique({
-            where: { id },
-            include: SAFE_HYDRATED_ORDER_INCLUDE,
-          }),
-        };
-      }
-
-      await tx.orderStatusHistory.create({
-        data: {
-          orderId: id,
-          oldStatus,
-          newStatus,
-          changedByUserId: authUser.userId || null,
-          notes: 'Agent started journey to customer location.',
+    const updatedOrder = await db.order.update({
+      where: { id },
+      data: {
+        status: newStatus,
+        statusHistory: {
+          create: {
+            oldStatus,
+            newStatus,
+            changedByUserId: authUser?.userId || null,
+            notes: `Agent started journey to customer location.`,
+          },
         },
-      });
+      },
+      include: {
+        agent: { include: { user: true } },
+        customer: { include: { user: true } },
+        address: true,
+        items: { include: { category: true } },
+      },
+    });
 
-      await tx.agent.update({
-        where: { id: authUser.agentId },
+    if (order.agentId) {
+      await db.agent.update({
+        where: { id: order.agentId },
         data: { status: 'EN_ROUTE' },
       });
-
-      return {
-        kind: 'updated' as const,
-        order: await tx.order.findUnique({
-          where: { id },
-          include: SAFE_HYDRATED_ORDER_INCLUDE,
-        }),
-      };
-    }, { isolationLevel: 'ReadCommitted', maxWait: 5000, timeout: 5000 });
-
-    if (transition.kind === 'conflict') {
-      if (transition.order?.agentId === authUser.agentId && transition.order.status === newStatus) {
-        return successResponse(
-          formatOrderResponse(transition.order, {
-            id: order.id,
-            orderNumber: order.orderNumber,
-            agentId: order.agentId,
-            status: newStatus,
-          })
-        );
-      }
-      return errorResponse('ORDER_STATE_CHANGED', 'The order changed while starting the journey. Refresh and try again.', 409);
-    }
-
-    const updatedOrder = transition.order;
-    if (!updatedOrder) {
-      return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
     }
 
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
@@ -115,7 +71,7 @@ export async function POST(
 
     // Notifications are nonessential to the journey transition and may involve
     // a slow third-party request. Keep them out of the action response path.
-    runBackgroundTask(async () => {
+    after(async () => {
       try {
         const customerPhone = updatedOrder.customer?.user?.phone;
         const customerName = updatedOrder.customer?.user?.name || 'Valued Customer';
@@ -162,14 +118,7 @@ export async function POST(
       }
     });
 
-    return successResponse(
-      formatOrderResponse(updatedOrder, {
-        id: order.id,
-        orderNumber: order.orderNumber,
-        agentId: order.agentId,
-        status: newStatus,
-      })
-    );
+    return successResponse(updatedOrder);
   } catch (err: any) {
     console.error('Start journey error:', err);
     return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to start journey.', 500);

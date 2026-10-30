@@ -1,14 +1,8 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { executeAgentAcceptTransaction } from '@/lib/services/agentService';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
-import { SAFE_HYDRATED_ORDER_INCLUDE, formatOrderResponse } from '@/lib/orders/orderFormat';
-import {
-  broadcastAgentBookingNotification,
-  persistAgentBookingNotificationOnce,
-} from '@/lib/services/agentBookingNotification';
 
 export async function POST(
   req: NextRequest,
@@ -31,11 +25,19 @@ export async function POST(
     // 2. Load Agent Profile & Check Availability Status
     const agent = await db.agent.findUnique({
       where: { id: agentId },
-      include: { user: { select: { id: true, name: true, phone: true } } },
+      include: { user: true },
     });
 
     if (!agent) {
       return errorResponse('AGENT_NOT_FOUND', 'Agent profile not found.', 404);
+    }
+
+    if (agent.status !== 'AVAILABLE') {
+      return errorResponse(
+        'AGENT_NOT_AVAILABLE',
+        'Agent is currently offline or unavailable for new pickups.',
+        400
+      );
     }
 
     // 3. Load Order & Address for Service Area Matching
@@ -52,36 +54,18 @@ export async function POST(
       return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
     }
 
-    const acceptingOwnAssignment =
-      agent.status === 'ASSIGNED' &&
-      order.agentId === agentId &&
-      order.status === 'AGENT_ASSIGNED';
-    if (agent.status !== 'AVAILABLE' && agent.status !== 'ASSIGNED' && !acceptingOwnAssignment) {
-      return errorResponse(
-        'AGENT_NOT_AVAILABLE',
-        'Agent is currently offline or unavailable for new pickups.',
-        400
-      );
-    }
-
     // 4. Check Order State & Idempotency / Conflict
     if (
       order.agentId === agentId &&
       !['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'].includes(order.status)
     ) {
       // Idempotent retry: Order is already accepted or beyond by this exact agent
-      const hydratedOrder = await db.order.findUnique({
-        where: { id: order.id },
-        include: SAFE_HYDRATED_ORDER_INCLUDE,
+      return successResponse({
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        agentId: order.agentId,
+        status: order.status,
       });
-      return successResponse(
-        formatOrderResponse(hydratedOrder, {
-          id: order.id,
-          orderNumber: order.orderNumber,
-          agentId: order.agentId,
-          status: order.status,
-        })
-      );
     }
 
     if (order.agentId !== null && order.agentId !== agentId) {
@@ -95,10 +79,6 @@ export async function POST(
 
     if (['CANCELLED', 'PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'].includes(order.status)) {
       return errorResponse('ORDER_UNAVAILABLE', 'This pickup is no longer available for acceptance.', 400);
-    }
-
-    if (order.financialDirection === 'CUSTOMER_PAYS' && order.paymentStatus !== 'CAPTURED') {
-      return errorResponse('PAYMENT_NOT_CAPTURED', 'This pickup is not available until payment is confirmed.', 409);
     }
 
     // 5. Service Area Matching Check
@@ -122,32 +102,30 @@ export async function POST(
 
     // 6. Atomic Conditional Update (Race-Condition Prevention)
     // Update status to AGENT_ACCEPTED if order is unassigned or assigned to this agent in AGENT_ASSIGNED state
-    const assignment = await executeAgentAcceptTransaction(db, {
-      order,
-      agentId,
-      agentName: agent.user.name,
-      vehicleNumber: agent.vehicleNumber,
-      agentUserId: agent.userId,
-      userId: authUser.userId,
+    const updateResult = await db.order.updateMany({
+      where: {
+        id: order.id,
+        OR: [
+          { agentId: null, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
+          { agentId: agentId, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
+        ],
+      },
+      data: {
+        agentId: agentId,
+        status: 'AGENT_ACCEPTED',
+      },
     });
-    const notificationCreated = assignment.notificationCreated;
 
-    if (!assignment.changed) {
-      if (assignment.reason === 'agentUnavailable') {
-        return errorResponse('AGENT_NOT_AVAILABLE', 'Agent is currently offline or unavailable for new pickups.', 400);
-      }
-      if (assignment.reason === 'activeAssignment') {
-        return errorResponse('AGENT_HAS_ACTIVE_ORDER', 'Finish or cancel the active pickup before accepting another assignment.', 409);
-      }
-      if (assignment.alreadyAssignedToAgent) {
-        return successResponse(
-          formatOrderResponse(assignment.order, {
-            id: order.id,
-            orderNumber: order.orderNumber,
-            agentId,
-            status: assignment.order?.status ?? order.status,
-          })
-        );
+    if (updateResult.count === 0) {
+      // Another concurrent request updated the order first. Re-verify state.
+      const recheckOrder = await db.order.findUnique({ where: { id: order.id } });
+      if (recheckOrder?.agentId === agentId) {
+        return successResponse({
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          agentId: agentId,
+          status: recheckOrder.status,
+        });
       }
       return errorResponse(
         'CONFLICT',
@@ -156,22 +134,41 @@ export async function POST(
       );
     }
 
-    // 7. Post-Acceptance Realtime Event Broadcasting
+    // 7. Post-Acceptance Updates & Realtime Event Broadcasting
+    const oldStatus = order.status;
     const newStatus = 'AGENT_ACCEPTED';
-    const updatedOrder = assignment.order;
+
+    // Record Order Status History
+    await db.orderStatusHistory.create({
+      data: {
+        orderId: order.id,
+        oldStatus,
+        newStatus,
+        changedByUserId: authUser.userId || null,
+        notes: `Pickup accepted by field agent ${agent.user.name} (${agent.vehicleNumber}).`,
+      },
+    });
+
+    // Update Agent status to ASSIGNED
+    await db.agent.update({
+      where: { id: agentId },
+      data: { status: 'ASSIGNED' },
+    });
+
+    // Fetch updated order for broadcasting
+    const updatedOrder = await db.order.findUnique({
+      where: { id: order.id },
+      include: {
+        agent: { include: { user: true } },
+        customer: { include: { user: true } },
+        address: true,
+        items: { include: { category: true } },
+      },
+    });
 
     if (updatedOrder) {
       broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
       broadcaster.broadcast('ORDER_ACCEPTED', { orderId: order.id, agentId });
-      if (notificationCreated) {
-        broadcastAgentBookingNotification({
-          orderId: order.id,
-          orderNumber: order.orderNumber,
-          agentId,
-          agentUserId: agent.userId,
-          status: newStatus,
-        }, notificationCreated, (event, payload) => broadcaster.broadcast(event, payload));
-      }
 
       // Phase 4: Dispatch AGENT_ASSIGNED event for authenticated Customer SSE stream
       try {
@@ -194,14 +191,12 @@ export async function POST(
       }
     }
 
-    return successResponse(
-      formatOrderResponse(updatedOrder, {
-        id: order.id,
-        orderNumber: order.orderNumber,
-        agentId: agentId,
-        status: newStatus,
-      })
-    );
+    return successResponse(updatedOrder || {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      agentId: agentId,
+      status: newStatus,
+    });
   } catch (err: any) {
     console.error('Accept order error:', err);
     return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to accept pickup order.', 500);

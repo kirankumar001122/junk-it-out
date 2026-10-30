@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { AlertCircle, CheckCircle, Search, RefreshCw, MessageSquare } from 'lucide-react';
 
 export default function AdminComplaintsPage() {
@@ -8,8 +8,6 @@ export default function AdminComplaintsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [resolvingId, setResolvingId] = useState<string | null>(null);
-  const resolvingInFlightRef = useRef<string | null>(null);
 
   const loadComplaints = async () => {
     setLoading(true);
@@ -34,13 +32,8 @@ export default function AdminComplaintsPage() {
   }, []);
 
   const resolveComplaint = async (id: string) => {
-    if (resolvingInFlightRef.current || resolvingId) return;
-
     const resolutionNotes = prompt('Enter resolution details/notes for this ticket:', 'Resolved by Admin Operations.');
     if (resolutionNotes === null) return;
-
-    resolvingInFlightRef.current = id;
-    setResolvingId(id);
 
     try {
       const res = await fetch('/api/admin/complaints', {
@@ -48,18 +41,12 @@ export default function AdminComplaintsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, status: 'RESOLVED', resolutionNotes }),
       });
-      const data = await res.json().catch(() => null);
-      if (res.ok && data?.success) {
-        await loadComplaints();
-      } else {
-        alert(data?.message || 'Failed to resolve ticket.');
+      const data = await res.json();
+      if (data.success) {
+        loadComplaints();
       }
     } catch (e) {
       console.error(e);
-      alert('Network error while resolving ticket.');
-    } finally {
-      resolvingInFlightRef.current = null;
-      setResolvingId(null);
     }
   };
 
@@ -84,8 +71,7 @@ export default function AdminComplaintsPage() {
 
         <button
           onClick={loadComplaints}
-          disabled={loading}
-          className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 flex items-center gap-1.5 self-start sm:self-auto disabled:opacity-50"
+          className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 flex items-center gap-1.5 self-start sm:self-auto"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           Refresh Desk
@@ -124,7 +110,7 @@ export default function AdminComplaintsPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-xs">
+            <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 text-slate-500 uppercase font-bold text-[10px]">
                 <tr>
                   <th className="p-3">Ticket ID</th>
@@ -164,11 +150,9 @@ export default function AdminComplaintsPage() {
                       {cmp.status === 'OPEN' || cmp.status === 'INVESTIGATING' ? (
                         <button
                           onClick={() => resolveComplaint(cmp.id)}
-                          disabled={resolvingId === cmp.id}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-[11px] flex items-center gap-1.5 disabled:opacity-50"
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-[11px]"
                         >
-                          {resolvingId === cmp.id && <RefreshCw className="w-3 h-3 animate-spin shrink-0" />}
-                          <span>{resolvingId === cmp.id ? 'Resolving...' : 'Resolve Ticket'}</span>
+                          Resolve Ticket
                         </button>
                       ) : (
                         <span className="text-slate-400 font-bold text-[11px]">Closed</span>

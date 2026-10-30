@@ -49,10 +49,10 @@ export async function PATCH(req: NextRequest) {
       const updatedAgent = await tx.agent.update({
         where: { id: authUser.agentId },
         data: { status: targetStatus },
-        include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } },
+        include: { user: true },
       });
       return { conflict: false as const, updatedAgent };
-    }, { isolationLevel: 'ReadCommitted', maxWait: 5000, timeout: 5000 });
+    }, { isolationLevel: 'Serializable' });
 
     if (updateResult.conflict) {
       return errorResponse('AGENT_HAS_ACTIVE_ORDER', 'Finish or cancel the active pickup before becoming available.', 409);
@@ -67,11 +67,9 @@ export async function PATCH(req: NextRequest) {
           .split(',')
           .map((s: string) => s.trim())
           .filter(Boolean);
-        const servesAllAreas = areas.some((a) => a.toLowerCase() === 'all');
-        await reconcileUndispatchedPaidOrders({
-          serviceAreas: servesAllAreas ? undefined : areas.length > 0 ? areas : undefined,
-          limit: 5,
-        });
+        for (const area of areas) {
+          await reconcileUndispatchedPaidOrders({ serviceArea: area, limit: 5 });
+        }
       } catch (err) {
         console.warn('[AGENT_STATUS] Opportunistic dispatch recovery encountered error:', err);
       }

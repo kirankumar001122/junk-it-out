@@ -16,20 +16,3 @@ export function isCustomerOrderOwner(
       (authUser.userId && order.customer?.userId === authUser.userId),
   );
 }
-
-export function isAgentOrderAssigned(
-  order: { agentId?: string | null },
-  authUser: { agentId?: string | null },
-): boolean {
-  return Boolean(authUser.agentId && order.agentId === authUser.agentId);
-}
-
-export function isOrderOpenForAssignment(order: {
-  agentId?: string | null;
-  status?: string | null;
-}): boolean {
-  return (
-    order.agentId === null &&
-    (order.status === 'BOOKING_RECEIVED' || order.status === 'AGENT_BEING_ASSIGNED')
-  );
-}

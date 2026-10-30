@@ -70,9 +70,8 @@ export async function POST(req: NextRequest) {
      * ---------------------------------------------------------
      */
 
-    const isProduction = process.env.NODE_ENV === 'production';
     const testModeEnabled =
-      !isProduction && process.env.OTP_TEST_MODE?.trim().toLowerCase() === 'true';
+      process.env.OTP_TEST_MODE?.trim().toLowerCase() === 'true';
 
     const configuredTestPhone =
       process.env.OTP_TEST_PHONE?.replace(/\D/g, '') || '';

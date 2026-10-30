@@ -2,13 +2,12 @@
 
 import Link from 'next/link';
 import { Leaf, ShieldCheck, Clock, Recycle, Award, Users, ArrowRight, CheckCircle2 } from 'lucide-react';
-import ScrollReveal from '@/components/ScrollReveal';
 
 export default function AboutPage() {
   return (
-    <div className="customer-page-cream w-full pb-16 space-y-12">
+    <div className="w-full bg-slate-50/60 pb-16 space-y-12">
       {/* Header Banner */}
-      <section className="customer-hero relative overflow-hidden bg-slate-900 py-14 px-6 text-center text-white sm:px-12">
+      <section className="bg-slate-900 text-white py-14 px-6 sm:px-12 text-center border-b border-slate-800">
         <div className="max-w-3xl mx-auto space-y-3">
           <span className="bg-emerald-500/10 text-emerald-400 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider border border-emerald-500/20">
             About Junk It Out
@@ -24,7 +23,7 @@ export default function AboutPage() {
       </section>
 
       {/* Our Mission & Vision */}
-      <ScrollReveal className="mx-auto max-w-6xl px-4 sm:px-6">
+      <section className="max-w-6xl mx-auto px-4 sm:px-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
           <div className="space-y-4">
             <span className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200/80">
@@ -56,7 +55,7 @@ export default function AboutPage() {
             </div>
           </div>
 
-          <div className="customer-feature-card rounded-2xl bg-slate-900 p-6 text-white shadow-md space-y-5 border border-slate-800">
+          <div className="bg-slate-900 rounded-2xl p-6 text-white shadow-md space-y-5 border border-slate-800">
             <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center border border-emerald-500/20">
               <Recycle className="w-5 h-5" />
             </div>
@@ -81,10 +80,10 @@ export default function AboutPage() {
             </div>
           </div>
         </div>
-      </ScrollReveal>
+      </section>
 
       {/* CTA Box */}
-      <ScrollReveal className="mx-auto max-w-6xl px-4 sm:px-6">
+      <section className="max-w-6xl mx-auto px-4 sm:px-6">
         <div className="bg-slate-900 rounded-2xl p-6 sm:p-8 text-center text-white space-y-4 shadow-md border border-slate-800">
           <h2 className="text-xl font-bold sm:text-2xl">Ready to Clear Household Scrap & Waste?</h2>
           <p className="text-slate-300 text-xs sm:text-sm max-w-lg mx-auto">
@@ -100,7 +99,7 @@ export default function AboutPage() {
             </Link>
           </div>
         </div>
-      </ScrollReveal>
+      </section>
     </div>
   );
 }

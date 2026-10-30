@@ -4,14 +4,13 @@ This matrix lists the route boundaries present in the checked-out repository. Ex
 
 | Route | Methods | Caller / access boundary | Main behavior |
 |---|---|---|---|
-| `/api/health` | GET | Public infrastructure probe; no session required | No-cache API/database readiness status; returns `503` when the database is unavailable |
 | `/api/auth/send-otp` | POST, OPTIONS | Customer/admin/agent login UI; trusted-origin check | Validate phone, send OTP or use guarded local test mode |
 | `/api/auth/verify-otp` | POST | Login UI; trusted-origin check and OTP verification | Create/find customer session |
 | `/api/auth/admin-login` | POST | Admin UI; OTP plus admin provisioning/role logic | Authenticate admin; review the role-mutation finding in audit |
 | `/api/auth/agent-login` | POST | Agent UI; OTP and agent profile | Authenticate agent |
 | `/api/auth/me`, `/api/auth/logout`, `/api/auth/otp` | GET/POST as implemented | Session or public login utility | Current user, logout, OTP helper |
 | `/api/orders` | GET, POST | Customer ownership for booking; agent assignment scope; admin sees operational set | Create with validation/idempotency; role-filtered list |
-| `/api/orders/[id]` | GET | Customer ownership; assigned agents; open pickup details only for available, unassigned agents with no active order and acceptance-eligible payment/service-area state; admins retain operational access | Pre-assignment agent responses contain only order number, service area, and estimated item data; assigned-agent and admin detail projections remain operationally scoped |
+| `/api/orders/[id]` | GET | Authenticated owner/assigned agent/admin rules in handler | Order detail |
 | `/api/orders/[id]/assign` | POST | Admin/dispatch rule | Transactional agent assignment |
 | `/api/orders/[id]/accept`, `/start`, `/arrive`, `/status`, `/weigh`, `/complete`, `/cancel` | POST/PATCH as implemented | Assigned agent or authorized admin; state and ownership checks vary by route | Order lifecycle changes; weighing and completion use transactions |
 | `/api/admin/stats` | GET | ADMIN or SUPER_ADMIN | Dashboard counters and financial/weight metrics |

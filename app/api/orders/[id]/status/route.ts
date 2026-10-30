@@ -3,8 +3,6 @@ import { db } from '@/lib/db';
 import { getAuthUser, requireAdminUser } from '@/lib/auth/middleware';
 import { broadcaster } from '@/lib/realtime';
 import { validateStatusTransition } from '@/lib/validations/schemas';
-import { transitionOrder } from '@/lib/services/orderLifecycle';
-import { runBackgroundTask } from '@/lib/utils/backgroundTask';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -17,7 +15,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const order = await db.order.findUnique({
       where: { id },
-      include: { customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } }, agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } } },
+      include: { customer: { include: { user: true } }, agent: { include: { user: true } } },
     });
 
     if (!order) {
@@ -41,64 +39,53 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ success: true, message: 'Status already updated', data: order });
     }
 
-    let agentState = 'ASSIGNED';
-    if (effectiveStatus === 'AGENT_ON_WAY') agentState = 'EN_ROUTE';
-    if (effectiveStatus === 'AGENT_ARRIVED') agentState = 'ARRIVED';
-    if (effectiveStatus === 'WEIGHING') agentState = 'WEIGHING';
-    if (effectiveStatus === 'PICKUP_COMPLETED' || effectiveStatus === 'SETTLEMENT_COMPLETED') agentState = 'AVAILABLE';
-
-    const transition = await transitionOrder<any>({
-      orderId: id,
-      expectedStatus: oldStatus,
-      newStatus: effectiveStatus,
-      changedByUserId: authUser.userId,
-      notes: notes || `Status changed from ${oldStatus} to ${effectiveStatus}`,
+    const updatedOrder = await db.order.update({
+      where: { id },
+      data: {
+        status: effectiveStatus,
+        statusHistory: {
+          create: {
+            oldStatus,
+            newStatus: effectiveStatus,
+            changedByUserId: authUser.userId,
+            notes: notes || `Status changed from ${oldStatus} to ${effectiveStatus}`,
+          },
+        },
+        notifications: {
+          create: {
+            userId: order.customer.userId,
+            type: 'WHATSAPP',
+            recipient: order.customer.user.phone,
+            content: `Pickup ${order.orderNumber} update: Status is now ${newStatus.replace(/_/g, ' ')}.`,
+            status: 'SENT',
+          },
+        },
+      },
       include: {
-        customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
-        agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
+        customer: { include: { user: true } },
+        agent: { include: { user: true } },
         address: true,
         items: { include: { category: true } },
         statusHistory: true,
         weightRecords: true,
       },
-      afterHistory: async (tx) => {
-        if (order.agentId) {
-          await tx.agent.update({
-            where: { id: order.agentId },
-            data: { status: agentState },
-          });
-        }
-      },
     });
 
-    if (!transition.changed || !transition.order) {
-      return NextResponse.json({ success: false, message: 'Order state changed concurrently; please refresh.' }, { status: 409 });
+    // Update agent status if applicable
+    if (order.agentId) {
+      let agentState = 'ASSIGNED';
+      if (newStatus === 'AGENT_ON_WAY') agentState = 'EN_ROUTE';
+      if (newStatus === 'AGENT_ARRIVED') agentState = 'ARRIVED';
+      if (newStatus === 'WEIGHING') agentState = 'WEIGHING';
+      if (newStatus === 'PICKUP_COMPLETED' || newStatus === 'SETTLEMENT_COMPLETED') agentState = 'AVAILABLE';
+
+      await db.agent.update({
+        where: { id: order.agentId },
+        data: { status: agentState },
+      });
     }
 
-    const updatedOrder = transition.order;
-
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
-
-    runBackgroundTask(async () => {
-      try {
-        const customerUserId = updatedOrder.customer?.userId || order.customer?.userId;
-        const customerPhone = updatedOrder.customer?.user?.phone || order.customer?.user?.phone;
-        if (!customerUserId || !customerPhone) return;
-
-        await db.notification.create({
-          data: {
-            userId: customerUserId,
-            orderId: id,
-            type: 'WHATSAPP',
-            recipient: customerPhone,
-            content: `Pickup ${order.orderNumber} update: Status is now ${newStatus.replace(/_/g, ' ')}.`,
-            status: 'SENT',
-          },
-        });
-      } catch (notifErr: any) {
-        console.warn('[STATUS NOTIFICATION NOTICE] Safe notification error:', notifErr?.message);
-      }
-    });
 
     return NextResponse.json({
       success: true,

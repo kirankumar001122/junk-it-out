@@ -6,7 +6,6 @@ import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
 import { refundAttemptId, refundEventId } from '@/lib/payments/refundWorkflow';
 import { createRefundRequestForCapturedPayment } from '@/lib/payments/refundRequests';
-import { getOrderIdentifierWhere, isCustomerOrderOwner } from '@/lib/orderAccess';
 
 class CancellationConflictError extends Error {}
 
@@ -39,31 +38,17 @@ export async function POST(
         : '';
     const reason = cancellationReason || 'Order cancellation requested.';
 
-    const order =
-      (await db.order.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          orderNumber: true,
-          customerId: true,
-          customer: { select: { userId: true } },
-          agentId: true,
-          status: true,
-          paymentStatus: true,
-        },
-      })) ||
-      (await db.order.findFirst({
-        where: getOrderIdentifierWhere(id),
-        select: {
-          id: true,
-          orderNumber: true,
-          customerId: true,
-          customer: { select: { userId: true } },
-          agentId: true,
-          status: true,
-          paymentStatus: true,
-        },
-      }));
+    const order = await db.order.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        orderNumber: true,
+        customerId: true,
+        agentId: true,
+        status: true,
+        paymentStatus: true,
+      },
+    });
 
     if (!order) {
       return NextResponse.json(
@@ -77,7 +62,7 @@ export async function POST(
     const isAuthorized =
       isAdmin ||
       (authUser.role === 'CUSTOMER' &&
-        isCustomerOrderOwner(order, authUser)) ||
+        authUser.customerId === order.customerId) ||
       (authUser.role === 'AGENT' &&
         Boolean(authUser.agentId && authUser.agentId === order.agentId));
 
@@ -274,7 +259,7 @@ export async function POST(
 
       return tx.order.findUnique({
         where: { id: order.id },
-        include: { customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } } },
+        include: { customer: { include: { user: true } } },
       });
     });
 
