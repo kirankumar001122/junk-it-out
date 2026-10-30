@@ -35,4 +35,3 @@ export async function GET(
     headers: PRIVATE_CACHE_HEADERS,
   });
 }
-
