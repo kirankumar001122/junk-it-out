@@ -16,19 +16,8 @@ export function setCachedWasteCategories(categories: any[], ttlMs: number = WAST
   if (!Array.isArray(categories)) {
     return;
   }
-  const now = Date.now();
-  const existing = (cachedCategories && now < cacheExpiry && Array.isArray(cachedCategories))
-    ? cachedCategories
-    : [];
-  const map = new Map<string, any>();
-  for (const c of existing) {
-    if (c?.id) map.set(c.id, c);
-  }
-  for (const c of categories) {
-    if (c?.id) map.set(c.id, c);
-  }
-  cachedCategories = Array.from(map.values());
-  cacheExpiry = now + ttlMs;
+  cachedCategories = [...categories];
+  cacheExpiry = Date.now() + ttlMs;
 }
 
 export function invalidateCategoriesCache(): void {

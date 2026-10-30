@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Plus, Trash2, Home, Briefcase, Lock } from 'lucide-react';
+import { Plus, Trash2, Home, Briefcase, Lock, X } from 'lucide-react';
 import CustomerOtpLogin from '@/components/CustomerOtpLogin';
 
 export default function CustomerAddressesPage() {
@@ -222,10 +222,32 @@ export default function CustomerAddressesPage() {
           role="dialog"
           aria-modal="true"
           aria-label="Add Saved Address"
-          className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6 overflow-y-auto pb-[calc(1rem+env(safe-area-inset-bottom,0px))]"
         >
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
-            <h3 className="text-lg font-bold text-slate-900">Add Saved Address</h3>
+          {/* Backdrop overlay: blurs background page content only, dismissible on click */}
+          <div
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm transition-opacity"
+            style={{ WebkitBackdropFilter: 'blur(4px)' }}
+            onClick={() => !saving && setShowAddModal(false)}
+            aria-hidden="true"
+          />
+
+          {/* Modal content: completely sharp, isolated from backdrop filter, scrollable on short mobile viewports */}
+          <div
+            className="relative z-10 bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl my-auto max-h-[calc(100dvh-2rem)] overflow-y-auto border border-slate-100"
+            style={{ transform: 'translateZ(0)' }}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-900">Add Saved Address</h3>
+              <button
+                type="button"
+                onClick={() => !saving && setShowAddModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+                aria-label="Close modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
             <div className="space-y-3">
               <div>
@@ -236,7 +258,7 @@ export default function CustomerAddressesPage() {
                       key={l}
                       type="button"
                       onClick={() => setNewLabel(l)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold ${
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
                         newLabel === l ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-700'
                       }`}
                     >
@@ -253,7 +275,7 @@ export default function CustomerAddressesPage() {
                   value={newHouse}
                   onChange={(e) => setNewHouse(e.target.value)}
                   placeholder="e.g. Flat 204, Royal Palms"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                 />
               </div>
 
@@ -264,22 +286,24 @@ export default function CustomerAddressesPage() {
                   value={newStreet}
                   onChange={(e) => setNewStreet(e.target.value)}
                   placeholder="e.g. 15th Cross, JP Nagar 7th Phase"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                 />
               </div>
             </div>
 
             <div className="flex gap-2 pt-2">
               <button
+                type="button"
                 onClick={() => setShowAddModal(false)}
-                className="w-1/2 bg-slate-100 text-slate-700 font-bold text-xs py-3 rounded-xl"
+                className="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 rounded-xl transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleAddAddress}
                 disabled={saving}
-                className="w-1/2 bg-emerald-600 text-white font-bold text-xs py-3 rounded-xl shadow-md disabled:opacity-60"
+                className="w-1/2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 rounded-xl shadow-md disabled:opacity-60 transition-colors cursor-pointer"
               >
                 {saving ? 'Saving...' : 'Save Address'}
               </button>

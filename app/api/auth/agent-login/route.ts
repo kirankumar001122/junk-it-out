@@ -99,7 +99,6 @@ export async function POST(req: NextRequest) {
           });
         }
       }
-
     }
 
     if (!user || user.role !== 'AGENT' || !user.agent) {
@@ -127,7 +126,7 @@ export async function POST(req: NextRequest) {
       customerId: null,
       agentId: user.agent.id,
       adminId: null,
-      tokenVersion: (user.agent as any).tokenVersion || 1,
+      tokenVersion: (user as any).tokenVersion ?? (user.agent as any)?.tokenVersion ?? 1,
     });
 
     const response = successResponse({

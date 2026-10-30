@@ -39,6 +39,13 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    if (agent.userId) {
+      await db.user.update({
+        where: { id: agent.userId },
+        data: { tokenVersion: { increment: 1 } },
+      }).catch(() => null);
+    }
+
     // Immutable audit log for destructive force-exit session revocation
     await db.auditLog.create({
       data: {

@@ -198,6 +198,7 @@ export async function POST(req: NextRequest) {
       customerId: user.customer?.id,
       agentId: null,
       adminId: null,
+      tokenVersion: (user as any).tokenVersion ?? 1,
     });
 
     // ---------------------------------------------------------

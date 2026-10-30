@@ -57,16 +57,22 @@ export default function MyPickupsPage() {
   const [cancelError, setCancelError] = useState<string | null>(null);
   const cancelInFlightRef = useRef(false);
 
-  // Keyboard accessibility: dismiss cancellation modal with Escape key
+  // Lock body scroll and handle Escape key while cancellation modal is open
   useEffect(() => {
     if (!cancellingOrder) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !cancelLoading) {
         setCancellingOrder(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, [cancellingOrder, cancelLoading]);
 
   const requestInFlight = useRef(false);
@@ -709,9 +715,21 @@ export default function MyPickupsPage() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="cancel-pickup-dialog-title"
-          className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in"
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6 overflow-y-auto pb-[calc(1rem+env(safe-area-inset-bottom,0px))]"
         >
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl border border-slate-100">
+          {/* Backdrop overlay: blurs background page content only, dismissible on click */}
+          <div
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm transition-opacity"
+            style={{ WebkitBackdropFilter: 'blur(4px)' }}
+            onClick={() => !cancelLoading && setCancellingOrder(null)}
+            aria-hidden="true"
+          />
+
+          {/* Modal content: completely sharp, isolated from backdrop filter, scrollable on short mobile viewports */}
+          <div
+            className="relative z-10 bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl border border-slate-100 my-auto max-h-[calc(100dvh-2rem)] overflow-y-auto"
+            style={{ transform: 'translateZ(0)' }}
+          >
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <div className="flex items-center gap-2 text-rose-600 font-extrabold text-base">
                 <AlertTriangle className="w-5 h-5" />

@@ -69,7 +69,7 @@ export default function AdminDashboardPage() {
 
       const [statsRes, ordersRes, agentsRes] = await Promise.all([
         fetch('/api/admin/stats').then((r) => r.json()).catch(() => ({ success: false })),
-        fetch('/api/orders?limit=100').then((r) => r.json()).catch(() => ({ success: false })),
+        fetch('/api/orders?limit=25').then((r) => r.json()).catch(() => ({ success: false })),
         fetch('/api/admin/agents').then((r) => r.json()).catch(() => ({ success: false })),
       ]);
 
@@ -313,11 +313,13 @@ export default function AdminDashboardPage() {
               <Package className="w-4 h-4" />
             </div>
           </div>
-          <span className="text-3xl font-black text-slate-900">{stats?.totalOrders ?? 0}</span>
+          <span className="text-3xl font-black text-slate-900">{stats?.todaysBookings ?? 0}</span>
           <div className="flex items-center gap-2 mt-2 text-xs">
             <span className="text-amber-600 font-bold">{stats?.activeOrders ?? 0} Active</span>
             <span className="text-slate-400">|</span>
             <span className="text-emerald-600 font-bold">{stats?.completedOrders ?? stats?.completedPickups ?? 0} Completed</span>
+            <span className="text-slate-400">|</span>
+            <span className="text-slate-500 font-medium">{stats?.totalOrders ?? 0} Total</span>
           </div>
         </div>
 
@@ -343,7 +345,11 @@ export default function AdminDashboardPage() {
           </div>
           <span className="text-3xl font-black text-slate-900">₹{stats?.totalRevenue ?? 0}</span>
           <div className="flex items-center gap-2 mt-2 text-xs">
-            <span className="text-emerald-600 font-bold">₹{stats?.totalCustomerPayouts ?? 0} Paid Out</span>
+            <span className="text-emerald-600 font-bold">₹{stats?.paidCustomerPayouts ?? stats?.totalCustomerPayouts ?? 0} Paid</span>
+            <span className="text-slate-300">|</span>
+            <span className="text-amber-600 font-bold">₹{stats?.approvedCustomerPayouts ?? 0} Approved</span>
+            <span className="text-slate-300">|</span>
+            <span className="text-blue-600 font-bold">₹{stats?.pendingCustomerPayouts ?? 0} Pending</span>
           </div>
         </div>
 
@@ -380,16 +386,14 @@ export default function AdminDashboardPage() {
           centerLng={77.5854}
           zoom={12}
           polygons={SOUTH_BENGALURU_ZONES.map((z) => ({ name: z.name, coordinates: z.boundaryPolygon }))}
-          markers={orders
-            .filter((o) => o.agent)
-            .map((o) => ({
-              id: o.id,
-              lat: o.agent.currentLat || 12.9077,
-              lng: o.agent.currentLng || 77.5854,
-              title: `${o.agent.user.name} (${o.agent.vehicleNumber})`,
-              subtitle: `Order: ${o.orderNumber} - ${o.status}`,
+          markers={agents.map((a) => ({
+              id: a.id,
+              lat: a.currentLat || 12.9077,
+              lng: a.currentLng || 77.5854,
+              title: `${a.name || a.user?.name || 'Agent'} (${a.vehicleNumber || 'Vehicle'})`,
+              subtitle: `Status: ${a.status} • Active: ${a.activeOrdersCount || 0}`,
               type: 'AGENT' as const,
-              status: o.agent.status,
+              status: a.status,
             }))}
           className="h-80 w-full rounded-2xl border border-slate-200 overflow-hidden shadow-inner"
         />
