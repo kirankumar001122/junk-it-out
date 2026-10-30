@@ -32,14 +32,23 @@ const originals = {
   agentFindUnique: database.agent.findUnique,
   orderFindFirst: database.order.findFirst,
   orderFindMany: database.order.findMany,
+  orderUpdateMany: database.order.updateMany,
   transaction: database.$transaction,
 };
 
+let orderAssignmentSideEffects = 0;
 database.user.findFirst = async () => user;
 database.agent.findUnique = async ({ where }: any) =>
   where.id === agent.id ? { tokenVersion: agent.tokenVersion } : null;
 database.order.findFirst = async () => null;
-database.order.findMany = async () => [];
+database.order.findMany = async () => {
+  orderAssignmentSideEffects += 1;
+  return [];
+};
+database.order.updateMany = async () => {
+  orderAssignmentSideEffects += 1;
+  throw new Error('agent login must not assign orders');
+};
 database.$transaction = async (callback: (tx: any) => unknown) => callback({
   order: { findFirst: async () => null },
   agent: {
@@ -62,6 +71,7 @@ async function run() {
   try {
     const firstLogin = await agentLogin(loginRequest());
     assert.equal(firstLogin.status, 200, 'an operationally offline agent can authenticate');
+    assert.equal(orderAssignmentSideEffects, 0, 'agent login must not assign or query orders');
 
     const firstCookie = firstLogin.headers.get('set-cookie')?.match(/jio_token=([^;]+)/)?.[1];
     assert.ok(firstCookie, 'login should issue the agent session cookie');
@@ -75,6 +85,7 @@ async function run() {
 
     const secondLogin = await agentLogin(loginRequest());
     assert.equal(secondLogin.status, 200, 'offline -> logout -> login must remain available');
+    assert.equal(orderAssignmentSideEffects, 0, 'repeated login must not assign or query orders');
     const secondCookie = secondLogin.headers.get('set-cookie')?.match(/jio_token=([^;]+)/)?.[1];
     assert.ok(secondCookie);
 
@@ -97,6 +108,7 @@ async function run() {
     database.agent.findUnique = originals.agentFindUnique;
     database.order.findFirst = originals.orderFindFirst;
     database.order.findMany = originals.orderFindMany;
+    database.order.updateMany = originals.orderUpdateMany;
     database.$transaction = originals.transaction;
   }
 }

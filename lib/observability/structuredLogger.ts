@@ -14,6 +14,9 @@ export interface StructuredLogFields {
   databaseModel?: string;
   databaseAction?: string;
   providerStatusCode?: number;
+  eligibleAgentCount?: number;
+  priorOfferPresent?: boolean;
+  selectionReason?: string;
 }
 
 export interface ApiRequestContext {

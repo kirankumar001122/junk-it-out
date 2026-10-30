@@ -7,6 +7,8 @@ const SEND_WINDOW_MS = 10 * 60_000;
 const MAX_SENDS_PER_WINDOW = 5;
 const VERIFY_WINDOW_MS = 10 * 60_000;
 const MAX_VERIFY_ATTEMPTS = 5;
+const OTP_SEND_FAILURE_MESSAGE = 'Unable to send OTP. Please try again.';
+const OTP_VERIFY_FAILURE_MESSAGE = 'The OTP is invalid or expired. Please request a new code and try again.';
 
 type SendLimit = { windowStartedAt: number; count: number; lastSentAt: number };
 type VerifyLimit = { windowStartedAt: number; count: number };
@@ -32,14 +34,24 @@ export async function sendOtp(phone: string, clientIp: string) {
     const provider = await sendFast2SmsOtp(phone.replace(/^\+91/, ''));
     if (!provider.ok) {
       logStructured('warn', 'auth.otp.send_failed', { dependency: 'fast2sms' });
-      return { success: false, status: 'provider_failed' as const, retryAfterSeconds: 0, errorDetails: provider.errorDetails };
+      return {
+        success: false,
+        status: 'provider_failed' as const,
+        retryAfterSeconds: 0,
+        errorDetails: OTP_SEND_FAILURE_MESSAGE,
+      };
     }
   } catch (err: any) {
     logStructured('error', 'auth.otp.send_exception', {
       dependency: 'fast2sms',
       errorType: getSafeErrorType(err),
     });
-    return { success: false, status: 'provider_failed' as const, retryAfterSeconds: 0, errorDetails: err.message };
+    return {
+      success: false,
+      status: 'provider_failed' as const,
+      retryAfterSeconds: 0,
+      errorDetails: OTP_SEND_FAILURE_MESSAGE,
+    };
   }
 
   sendLimits.set(key, existing && withinWindow(now, existing.windowStartedAt, SEND_WINDOW_MS)
@@ -66,13 +78,21 @@ export async function verifyOtp(phone: string, inputCode: string, clientIp: stri
       return { valid: true, status: 'verified' as const };
     }
     logStructured('warn', 'auth.otp.verify_failed', { dependency: 'fast2sms' });
-    return { valid: false, status: 'failed' as const, errorDetails: provider.errorDetails };
+    return {
+      valid: false,
+      status: 'failed' as const,
+      errorDetails: OTP_VERIFY_FAILURE_MESSAGE,
+    };
   } catch (err: any) {
     logStructured('error', 'auth.otp.verify_exception', {
       dependency: 'fast2sms',
       errorType: getSafeErrorType(err),
     });
-    return { valid: false, status: 'failed' as const, errorDetails: err.message };
+    return {
+      valid: false,
+      status: 'failed' as const,
+      errorDetails: OTP_VERIFY_FAILURE_MESSAGE,
+    };
   } finally {
     verifyLimits.set(
       key,

@@ -18,6 +18,7 @@ async function run() {
   const originalTransaction = (db as any).$transaction;
   const originalConsoleError = console.error;
   const notifications = new Map<string, any>();
+  const smsNotifications = new Map<string, any>();
   const events: unknown[] = [];
   const unsubscribe = broadcaster.subscribe((event) => {
     if (event.event === 'AGENT_BOOKING_ASSIGNED') events.push(event.payload);
@@ -81,6 +82,11 @@ async function run() {
       create: async () => ({ id: 'customer-notification-1' }),
       createMany: async ({ data }: any) => {
         const notification = data[0];
+        if (notification.id.startsWith('agent-assignment-sms-')) {
+          if (smsNotifications.has(notification.id)) return { count: 0 };
+          smsNotifications.set(notification.id, notification);
+          return { count: 1 };
+        }
         const agentForNotification = [...agents.values()].find((candidate) =>
           notification.id === getAgentBookingNotificationId(order.id, candidate.id));
         assert.ok(agentForNotification);

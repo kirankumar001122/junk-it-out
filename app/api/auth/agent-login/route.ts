@@ -100,16 +100,6 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Reassign any active unassigned/legacy agent orders to this agent
-      if (user?.agent?.id) {
-        await db.order.updateMany({
-          where: {
-            status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WEIGHING'] },
-            agentId: null,
-          },
-          data: { agentId: user.agent.id, status: 'AGENT_ASSIGNED' },
-        });
-      }
     }
 
     if (!user || user.role !== 'AGENT' || !user.agent) {

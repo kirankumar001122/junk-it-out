@@ -355,6 +355,7 @@ model Notification {
   status            String   @default("SENT")
   provider          String?  @default("FAST2SMS")
   providerRequestId String?
+  deliveryAttempts Int      @default(0)
   deliveryStatus    String?  @default("sent")
   statusDescription String?
   sentAt            DateTime @default(now())

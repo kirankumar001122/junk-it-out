@@ -1,37 +1,32 @@
+import { NextRequest } from 'next/server';
+import { getAuthUser, isAdminRole } from '@/lib/auth/middleware';
 import { broadcaster } from '@/lib/realtime';
+import { createSseResponse } from '@/lib/sse';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  const encoder = new TextEncoder();
+export async function GET(req: NextRequest) {
+  const authUser = await getAuthUser(req);
+  if (!authUser) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'Authentication required for realtime stream.' }),
+      { status: 401, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
 
-  const customStream = new ReadableStream({
-    start(controller) {
-      // Send initial heartbeat
-      controller.enqueue(encoder.encode(`event: connected\ndata: ${JSON.stringify({ status: 'connected' })}\n\n`));
+  if (!isAdminRole(authUser)) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'Administrator access required for realtime stream.' }),
+      { status: 403, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
 
-      const unsubscribe = broadcaster.subscribe((eventData) => {
-        try {
-          controller.enqueue(
-            encoder.encode(`event: ${eventData.event}\ndata: ${JSON.stringify(eventData.payload)}\n\n`)
-          );
-        } catch (err) {
-          console.error('SSE Stream error:', err);
-        }
-      });
-
-      // Cleanup on stream close
-      return () => {
-        unsubscribe();
-      };
-    },
-  });
-
-  return new Response(customStream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
+  return createSseResponse({
+    signal: req.signal,
+    subscribe: (listener) => broadcaster.subscribe(listener),
+    connectedPayload: { status: 'connected' },
+    onEvent(event, send) {
+      send(event.event, event.payload);
     },
   });
 }
