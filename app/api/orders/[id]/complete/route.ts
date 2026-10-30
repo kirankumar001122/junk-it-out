@@ -367,10 +367,6 @@ export async function POST(
       return successResponse(completionResult.order, 200, { message: 'Order was already completed.' });
     }
 
-    if (completionResult.kind === 'weighingRequired') {
-      return errorResponse('WEIGHING_REQUIRED', 'All order items must have valid recorded weights before completing pickup.', 400);
-    }
-
     if (completionResult.kind === 'invalidTransition') {
       return errorResponse(
         'INVALID_STATUS_TRANSITION',

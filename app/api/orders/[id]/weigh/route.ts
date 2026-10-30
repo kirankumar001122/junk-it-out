@@ -127,20 +127,6 @@ export async function POST(
         order.discountAmount
       );
 
-      for (let i = 0; i < actualWeights.length; i++) {
-        const itemInput = actualWeights[i];
-        const vi = valuation.items[i];
-        if (vi) {
-          await tx.orderItem.update({
-            where: { id: itemInput.itemId },
-            data: {
-              actualWeight: vi.weightKg,
-              subtotal: vi.subtotal,
-            },
-          });
-        }
-      }
-
       if (txMatchedItemIds.size !== order.items.length) {
         throw new Error('Incomplete weighing submission: all order items must be weighed.');
       }
