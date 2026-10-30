@@ -274,7 +274,7 @@ export async function POST(
 
       return tx.order.findUnique({
         where: { id: order.id },
-        include: { customer: { include: { user: true } } },
+        include: { customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } } },
       });
     });
 

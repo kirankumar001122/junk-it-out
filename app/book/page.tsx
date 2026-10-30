@@ -431,6 +431,13 @@ export default function BookingPage() {
     } catch {}
   }, []);
 
+  // Proactively warm up / ensure Razorpay SDK is loaded whenever customer reaches address (step 2) or checkout (step 3)
+  useEffect(() => {
+    if (step >= 2) {
+      loadRazorpayScript().catch(() => {});
+    }
+  }, [step]);
+
   const handleApplyCoupon = async (codeToApply?: string) => {
     const code = (codeToApply || couponInput).trim().toUpperCase();
     if (!code) {
@@ -762,6 +769,24 @@ export default function BookingPage() {
       }
 
       const orderData = data.data;
+
+      // If order does not require customer payment (e.g. JUNKITOUT_PAYS scrap payout or ZERO_BALANCE), confirm directly
+      if (orderData.financialDirection !== 'CUSTOMER_PAYS' || Number(orderData.finalAmount) === 0) {
+        idempotencyKeyRef.current = '';
+        lastPayloadSignatureRef.current = '';
+        setPendingOrder(null);
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('jio_pending_order');
+        }
+        setLoading(false);
+        isSubmittingRef.current = false;
+        setSuccessOrder({
+          ...orderData,
+          paymentStatus: 'NOT_APPLICABLE',
+          status: 'BOOKING_RECEIVED',
+        });
+        return;
+      }
 
       // 2. Check if paymentConfig was already provided in single round-trip by /api/orders
       let razorpayConfig = orderData.paymentConfig;

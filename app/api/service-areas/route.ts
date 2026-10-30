@@ -4,18 +4,12 @@ import { SOUTH_BENGALURU_ZONES } from '@/lib/geofence';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 
-let cachedZones: any = null;
-let cacheExpiry = 0;
-const CACHE_TTL_MS = 60_000;
-
-export function invalidateServiceAreasCache() {
-  cachedZones = null;
-  cacheExpiry = 0;
-}
+import { getCachedServiceAreas, setCachedServiceAreas, invalidateServiceAreasCache } from '@/lib/cache/serviceAreasCache';
 
 export async function GET(req: NextRequest) {
   try {
-    if (cachedZones && Date.now() < cacheExpiry) {
+    const cachedZones = getCachedServiceAreas();
+    if (cachedZones) {
       const cachedResponse = successResponse(cachedZones);
       cachedResponse.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
       cachedResponse.headers.set('X-Cache', 'HIT');
@@ -39,8 +33,7 @@ export async function GET(req: NextRequest) {
       return z;
     });
 
-    cachedZones = mergedZones;
-    cacheExpiry = Date.now() + CACHE_TTL_MS;
+    setCachedServiceAreas(mergedZones);
 
     const response = successResponse(mergedZones);
     response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');

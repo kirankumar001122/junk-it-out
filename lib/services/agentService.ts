@@ -20,9 +20,13 @@ export async function getActiveAgents(serviceAreaName?: string) {
           phone: true,
         },
       },
-      orders: {
-        where: {
-          status: { in: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WEIGHING'] },
+      _count: {
+        select: {
+          orders: {
+            where: {
+              status: { in: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WEIGHING'] },
+            },
+          },
         },
       },
     },
@@ -41,7 +45,7 @@ export async function getActiveAgents(serviceAreaName?: string) {
     currentLng: agent.currentLng,
     rating: agent.rating,
     serviceAreas: agent.serviceAreas,
-    activeOrdersCount: agent.orders.length,
+    activeOrdersCount: (agent as any)._count?.orders ?? (agent as any).orders?.length ?? 0,
     isAvailable: agent.status === 'AVAILABLE' || agent.status === 'OFFLINE',
   }));
 }

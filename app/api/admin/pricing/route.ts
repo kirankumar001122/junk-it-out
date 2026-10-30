@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
-import { invalidateServiceAreasCache } from '@/app/api/service-areas/route';
-import { invalidateAdminStatsCache } from '@/app/api/admin/stats/route';
+import { invalidateServiceAreasCache } from '@/lib/cache/serviceAreasCache';
+import { invalidateAdminStatsCache } from '@/lib/cache/adminStatsCache';
 
 const DEFAULT_PRICING = {
   basePickupCharge: 49,

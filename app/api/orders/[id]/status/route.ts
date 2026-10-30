@@ -17,7 +17,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const order = await db.order.findUnique({
       where: { id },
-      include: { customer: { include: { user: true } }, agent: { include: { user: true } } },
+      include: { customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } }, agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } } },
     });
 
     if (!order) {
@@ -54,8 +54,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       changedByUserId: authUser.userId,
       notes: notes || `Status changed from ${oldStatus} to ${effectiveStatus}`,
       include: {
-        customer: { include: { user: true } },
-        agent: { include: { user: true } },
+        customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
+        agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
         address: true,
         items: { include: { category: true } },
         statusHistory: true,

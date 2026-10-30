@@ -5,6 +5,8 @@ import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { runBackgroundTask } from '@/lib/utils/backgroundTask';
+import { calculateOrderValuation, calculateValuationAdjustment, type CalculationItemInput } from '@/lib/pricing';
+import { refundAttemptId } from '@/lib/payments/refundWorkflow';
 
 export async function POST(
   req: NextRequest,
@@ -24,8 +26,8 @@ export async function POST(
     const order = await db.order.findUnique({
       where: { id },
       include: {
-        agent: { include: { user: true } },
-        customer: { include: { user: true } },
+        agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
+        customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
         items: { include: { category: true } },
         weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
         invoices: { take: 1 },
@@ -90,33 +92,45 @@ export async function POST(
       return errorResponse('INVALID_STATUS_TRANSITION', `Cannot complete order from current status (${oldStatus}). Please complete weighing first.`, 400);
     }
 
-    const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
     let actualTotalRecyclable = order.actualTotal;
     let financialDirection = order.financialDirection;
     let finalAmount = order.finalAmount;
     let totalWeightKg = 0;
     const itemUpdates: Array<{ id: string; actualWeight: number; subtotal: number }> = [];
 
+    let completionValuation: any = null;
     if (hasWeightPayload) {
-      let calcRecyclable = 0;
-      let calcWasteCharge = 0;
+      const calculationItems: CalculationItemInput[] = [];
       for (const itemInput of actualWeights) {
         const dbItem = orderItemsById.get(itemInput.itemId);
         if (dbItem) {
-          const weightKg = itemInput.actualWeight;
-          const subtotal = round2(weightKg * dbItem.ratePerKg);
-          if (dbItem.category.type === 'WASTE_CHARGE') {
-            calcWasteCharge += subtotal;
-          } else {
-            calcRecyclable += subtotal;
-          }
-          itemUpdates.push({ id: dbItem.id, actualWeight: weightKg, subtotal });
+          calculationItems.push({
+            categoryId: dbItem.categoryId,
+            categoryName: dbItem.category?.name || dbItem.categoryId,
+            type: dbItem.category?.type || 'RECYCLABLE_BUY',
+            pricePerKg: dbItem.ratePerKg,
+            weightKg: itemInput.actualWeight,
+          });
         }
       }
-      actualTotalRecyclable = calcRecyclable;
-      const netAmount = actualTotalRecyclable - (calcWasteCharge + order.pickupCharge - order.discountAmount);
-      financialDirection = netAmount >= 0 ? 'JUNKITOUT_PAYS' : 'CUSTOMER_PAYS';
-      finalAmount = round2(Math.abs(netAmount));
+
+      completionValuation = calculateOrderValuation(
+        calculationItems,
+        order.pickupCharge,
+        order.discountAmount
+      );
+
+      for (let i = 0; i < actualWeights.length; i++) {
+        const itemInput = actualWeights[i];
+        const vi = completionValuation.items[i];
+        if (vi) {
+          itemUpdates.push({ id: itemInput.itemId, actualWeight: vi.weightKg, subtotal: vi.subtotal });
+        }
+      }
+
+      actualTotalRecyclable = completionValuation.totalRecyclableValue;
+      financialDirection = completionValuation.financialDirection;
+      finalAmount = completionValuation.netAmount;
       totalWeightKg = actualWeights.reduce((total: number, input: any) => total + input.actualWeight, 0);
     }
 
@@ -129,8 +143,8 @@ export async function POST(
       const currentOrder = await tx.order.findUnique({
         where: { id },
         include: {
-          agent: { include: { user: true } },
-          customer: { include: { user: true } },
+          agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
+          customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
           items: { include: { category: true } },
           weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
           invoices: { take: 1 },
@@ -181,6 +195,31 @@ export async function POST(
             notes: notes || 'Scale weights recorded at doorstep.',
           },
         });
+
+        if (completionValuation) {
+          const capturedPayment = (tx as any).payment?.findFirst ? await (tx as any).payment.findFirst({
+            where: { orderId: id, direction: 'CUSTOMER_PAYS', status: 'CAPTURED' },
+          }) : null;
+          const customerPaidAmount = capturedPayment ? Number(capturedPayment.amount) : 0;
+          const adjustment = calculateValuationAdjustment(customerPaidAmount, completionValuation);
+
+          if (capturedPayment && adjustment.refundAmount > 0) {
+            const attemptId = refundAttemptId(capturedPayment.id, `complete_${adjustment.adjustmentType.toLowerCase()}`);
+            if ((tx as any).refundAttempt?.createMany) {
+              await (tx as any).refundAttempt.createMany({
+                data: [{
+                  id: attemptId,
+                  orderId: id,
+                  paymentId: capturedPayment.id,
+                  amount: adjustment.refundAmount,
+                  status: 'PENDING',
+                  failureReason: adjustment.explanation,
+                }],
+                skipDuplicates: true,
+              });
+            }
+          }
+        }
 
         if (financialDirection === 'JUNKITOUT_PAYS' && finalAmount > 0) {
           await tx.settlement.upsert({
@@ -267,8 +306,8 @@ export async function POST(
         where: { id },
         data: orderUpdateData,
         include: {
-          agent: { include: { user: true } },
-          customer: { include: { user: true } },
+          agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
+          customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
           address: true,
           items: { include: { category: true } },
           weightRecords: true,

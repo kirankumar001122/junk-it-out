@@ -2,7 +2,12 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
-import { getOrderIdentifierWhere, isCustomerOrderOwner } from '@/lib/orderAccess';
+import {
+  getOrderIdentifierWhere,
+  isCustomerOrderOwner,
+  isAgentOrderAssigned,
+  isOrderOpenForAssignment,
+} from '@/lib/orderAccess';
 import { isAgentEligibleForServiceArea } from '@/lib/services/agentService';
 
 export async function GET(
@@ -94,10 +99,8 @@ export async function GET(
         return errorResponse('FORBIDDEN', 'You are not authorized to view details for this order.', 403);
       }
     } else if (authUser.role === 'AGENT') {
-      const isAssignedAgent = Boolean(authUser.agentId && order.agentId === authUser.agentId);
-      const isUnassignedOpen =
-        order.agentId === null &&
-        (order.status === 'BOOKING_RECEIVED' || order.status === 'AGENT_BEING_ASSIGNED');
+      const isAssignedAgent = isAgentOrderAssigned(order, authUser);
+      const isUnassignedOpen = isOrderOpenForAssignment(order);
       if (!isAssignedAgent && !isUnassignedOpen) {
         return errorResponse('FORBIDDEN', 'Order is not assigned to your agent profile.', 403);
       }

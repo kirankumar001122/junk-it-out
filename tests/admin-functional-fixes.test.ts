@@ -11,7 +11,7 @@ Module._resolveFilename = function (request: string, parent: any, isMain: boolea
   return originalResolve.call(this, request, parent, isMain, options);
 };
 
-process.env.JWT_SECRET = 'admin-functional-fixes-secret';
+process.env.JWT_SECRET = 'admin-functional-fixes-secret-min32bytes';
 
 async function run() {
   const { NextRequest } = await import('next/server');
@@ -204,7 +204,7 @@ async function run() {
 
     try {
       // Invalidate cache first
-      const { invalidateCategoriesCache } = await import('../app/api/waste-categories/route');
+      const { invalidateCategoriesCache } = await import('../lib/cache/wasteCategoriesCache');
       invalidateCategoriesCache();
 
       // Customer view (?customer=true) should only see active customer categories
