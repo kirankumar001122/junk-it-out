@@ -189,6 +189,7 @@ model Order {
   orderIdempotency   OrderIdempotency?
 
   @@index([customerId, createdAt])
+  @@index([createdAt(sort: Desc)])
   @@index([agentId, status, createdAt])
   @@index([status, createdAt])
   @@index([paymentStatus, createdAt])
@@ -219,6 +220,8 @@ model OrderItem {
   subtotal        Float         @default(0.0)
   category        WasteCategory @relation(fields: [categoryId], references: [id])
   order           Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
 }
 
 model WeightRecord {
@@ -348,6 +351,8 @@ model OrderStatusHistory {
   timestamp       DateTime @default(now())
   changedBy       User?    @relation(fields: [changedByUserId], references: [id])
   order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
 }
 
 model Notification {
