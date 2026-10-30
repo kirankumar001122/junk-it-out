@@ -13,6 +13,11 @@ import {
   getCachedWasteCategories,
   setCachedWasteCategories,
 } from '../cache/wasteCategoriesCache';
+import {
+  calculateOrderValuation,
+  type CalculationItemInput,
+  type FinancialDirection,
+} from '../pricing';
 
 export { InvalidCouponError };
 
@@ -410,40 +415,30 @@ export async function createOrder(
     }
   }
 
-  let totalWasteItemsValue = 0;
-
   const basePickupCharge =
     geofence.zone?.basePickupCharge ?? 69.0;
+  const urgentSurcharge = (input.pickupType as string) === 'URGENT' ? 29.0 : 0.0;
 
-  const orderItemsData =
-    input.items.map((item) => {
-      const category = dbCategories.find(
-        (cat) => cat.id === item.categoryId
-      );
+  const calculationItems: CalculationItemInput[] = input.items.map((item) => {
+    const category = dbCategories.find((cat) => cat.id === item.categoryId);
+    return {
+      categoryId: item.categoryId,
+      categoryName: category?.name || item.categoryId,
+      type: category?.type || 'RECYCLABLE_BUY',
+      pricePerKg: category?.pricePerKg ?? 20.0,
+      weightKg: item.estimatedWeight,
+    };
+  });
 
-      const ratePerKg = category!.pricePerKg;
+  let totalItemsEstimatedValue = 0;
+  for (const item of calculationItems) {
+    totalItemsEstimatedValue += Math.round((item.weightKg * item.pricePerKg + Number.EPSILON) * 100) / 100;
+  }
+  totalItemsEstimatedValue = Math.round(totalItemsEstimatedValue * 100) / 100;
 
-      const subtotal =
-        item.estimatedWeight * ratePerKg;
-
-      totalWasteItemsValue += subtotal;
-
-      return {
-        categoryId: item.categoryId,
-        estimatedWeight:
-          item.estimatedWeight,
-        ratePerKg,
-        subtotal,
-      };
-    });
-
-  // ---------------------------------------------------------
-  // 6. COUPON CALCULATION & SERVER-SIDE VALIDATION
-  // ---------------------------------------------------------
+  const preDiscountSubtotal = totalItemsEstimatedValue + basePickupCharge;
 
   let discountAmount = 0.0;
-  const preDiscountSubtotal = totalWasteItemsValue + basePickupCharge;
-
   if (input.couponCode && String(input.couponCode).trim()) {
     const couponValidation = await validateAndCalculateCoupon(
       input.couponCode,
@@ -463,28 +458,30 @@ export async function createOrder(
 
   timer?.recordPhase('coupon_validation');
 
-  // ---------------------------------------------------------
-  // 7. PAYMENT DIRECTION
-  // ---------------------------------------------------------
-  //
-  // Current customer booking flow is CUSTOMER_PAYS.
-  // Payment starts as PENDING.
-  //
-  // IMPORTANT:
-  // NO AGENT DISPATCH HAPPENS HERE.
-  //
-
-  const financialDirection:
-    'CUSTOMER_PAYS' = 'CUSTOMER_PAYS';
-
-  const rawPayable =
-    preDiscountSubtotal -
-    discountAmount;
-
-  const finalAmount = Math.max(
-    1,
-    Math.round(rawPayable * 100) / 100
+  // Authoritative valuation using standardized engine
+  const valuation = calculateOrderValuation(
+    calculationItems,
+    basePickupCharge,
+    discountAmount,
+    urgentSurcharge
   );
+
+  const orderItemsData = valuation.items.map((vi) => ({
+    categoryId: vi.categoryId,
+    estimatedWeight: vi.weightKg,
+    ratePerKg: vi.ratePerKg,
+    subtotal: vi.subtotal,
+  }));
+
+  const financialDirection = input.financialDirection === 'JUNKITOUT_PAYS'
+    ? valuation.financialDirection
+    : 'CUSTOMER_PAYS';
+
+  const estimatedTotal = totalItemsEstimatedValue;
+  const rawPayable = preDiscountSubtotal - discountAmount;
+  const finalAmount = financialDirection === 'CUSTOMER_PAYS'
+    ? Math.max(1, Math.round(rawPayable * 100) / 100)
+    : valuation.netAmount;
 
   const orderNumber =
     generateOrderNumber();
@@ -521,13 +518,13 @@ export async function createOrder(
 
             financialDirection,
 
-            estimatedTotal:
-              totalWasteItemsValue,
+            estimatedTotal,
 
             pickupCharge:
               basePickupCharge,
 
-            discountAmount,
+            discountAmount:
+              valuation.discountAmount,
 
             finalAmount,
 
@@ -573,7 +570,7 @@ export async function createOrder(
                   user.id,
 
                 notes:
-                  'Order placed by customer via web platform. Payment pending.',
+                  financialDirection === 'CUSTOMER_PAYS' ? 'Order placed by customer via web platform. Payment pending.' : `Order placed by customer via web platform. Estimated scrap payout: ₹${finalAmount.toFixed(2)}.`,
               },
             },
           },

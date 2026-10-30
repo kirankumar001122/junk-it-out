@@ -43,6 +43,8 @@ export default defineConfig({
       'tests/response-shape-security.test.ts',
       'tests/realtime-admin-stream.test.ts',
       'tests/payment-delay-diagnostics.test.ts',
+      'tests/pricing.test.ts',
+      'tests/financial-correctness.test.ts',
     ],
   },
 });
