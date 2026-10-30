@@ -4,60 +4,11 @@ import { executeAgentAcceptTransaction } from '@/lib/services/agentService';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
+import { SAFE_HYDRATED_ORDER_INCLUDE, formatOrderResponse } from '@/lib/orders/orderFormat';
 import {
   broadcastAgentBookingNotification,
   persistAgentBookingNotificationOnce,
 } from '@/lib/services/agentBookingNotification';
-
-const SAFE_HYDRATED_ORDER_INCLUDE = {
-  agent: {
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          phone: true,
-        },
-      },
-    },
-  },
-  customer: {
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          phone: true,
-        },
-      },
-    },
-  },
-  address: true,
-  items: {
-    include: {
-      category: true,
-    },
-  },
-};
-
-function formatOrderResponse(
-  orderData: any,
-  fallback: { id: string; orderNumber: string; agentId?: string | null; status: string }
-) {
-  if (!orderData) {
-    return {
-      id: fallback.id,
-      orderId: fallback.id,
-      orderNumber: fallback.orderNumber,
-      agentId: fallback.agentId,
-      status: fallback.status,
-    };
-  }
-  return {
-    ...orderData,
-    orderId: orderData.id ?? fallback.id,
-  };
-}
 
 export async function POST(
   req: NextRequest,

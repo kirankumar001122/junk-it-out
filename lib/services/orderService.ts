@@ -9,6 +9,15 @@ import {
   InvalidCouponError,
 } from './couponService';
 import { calculateTotalBookingWeight } from '../validations/schemas';
+import {
+  getCachedWasteCategories,
+  setCachedWasteCategories,
+} from '../cache/wasteCategoriesCache';
+import {
+  calculateOrderValuation,
+  type CalculationItemInput,
+  type FinancialDirection,
+} from '../pricing';
 
 export { InvalidCouponError };
 
@@ -147,7 +156,8 @@ export async function createOrder(
   authUser?: {
     userId: string;
     customerId?: string | null;
-  } | null
+  } | null,
+  timer?: { recordPhase: (phase: string) => number }
 ) {
   // ---------------------------------------------------------
   // 1. IDEMPOTENCY CHECK
@@ -158,6 +168,33 @@ export async function createOrder(
   const customerId = authUser?.customerId;
   const durableIdempotency = (db as any).orderIdempotency;
   let durableIdempotencyAvailable = Boolean(durableIdempotency);
+
+  if (normalizedIdempotencyKey) {
+    const inFlight = inFlightOrders.get(normalizedIdempotencyKey);
+    if (inFlight) {
+      return await inFlight;
+    }
+
+    const cached = idempotencyStore.get(`${customerId || 'anonymous'}:${normalizedIdempotencyKey}`);
+
+    if (
+      cached &&
+      Date.now() - cached.timestamp <
+        IDEMPOTENCY_TTL_MS
+    ) {
+      if (cached.payloadHash && cached.payloadHash !== payloadHash) {
+        throw new OrderIdempotencyConflictError(
+          'Idempotency key was already used for a different booking payload. Please start a new booking or retry with the original details.'
+        );
+      }
+
+      console.log(
+        `[IDEMPOTENCY] Returning existing order #${cached.orderId}`
+      );
+
+      return cached.responseData;
+    }
+  }
 
   if (normalizedIdempotencyKey && customerId && durableIdempotencyAvailable) {
     try {
@@ -186,6 +223,11 @@ export async function createOrder(
             address: true,
             items: { include: { category: true } },
             statusHistory: true,
+            payments: {
+              where: { direction: 'CUSTOMER_PAYS' },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
           },
         });
         if (!persistedOrder) {
@@ -201,43 +243,21 @@ export async function createOrder(
     }
   }
 
-  if (normalizedIdempotencyKey) {
-    const cached = idempotencyStore.get(`${customerId || 'anonymous'}:${normalizedIdempotencyKey}`);
-
-    if (
-      cached &&
-      Date.now() - cached.timestamp <
-        IDEMPOTENCY_TTL_MS
-    ) {
-      if (cached.payloadHash && cached.payloadHash !== payloadHash) {
-        throw new OrderIdempotencyConflictError(
-          'Idempotency key was already used for a different booking payload. Please start a new booking or retry with the original details.'
-        );
-      }
-
-      console.log(
-        `[IDEMPOTENCY] Returning existing order #${cached.orderId}`
-      );
-
-      return cached.responseData;
-    }
-
-    const inFlight = inFlightOrders.get(normalizedIdempotencyKey);
-    if (inFlight) {
-      return await inFlight;
-    }
-  }
-
   const execute = async () => {
+    timer?.recordPhase('idempotency_lookup');
 
   // ---------------------------------------------------------
-  // 2. PARALLEL LOOKUP: GEOFENCE, USER PROFILE, AND WASTE CATEGORIES
+  // 2. PARALLEL LOOKUP: GEOFENCE, USER PROFILE, WASTE CATEGORIES, AND COUPON
   // ---------------------------------------------------------
   const categoryIds = input.items.map(
     (item) => item.categoryId
   );
 
-  const [geofence, initialUser, dbCategories] = await Promise.all([
+  const couponCode = input.couponCode && String(input.couponCode).trim()
+    ? String(input.couponCode).trim().toUpperCase()
+    : null;
+
+  const [geofence, initialUser, dbCategories, couponRecord] = await Promise.all([
     checkGeofenceServiceability(
       input.address.lat,
       input.address.lng,
@@ -250,19 +270,40 @@ export async function createOrder(
           },
           include: {
             customer: true,
+            addresses: {
+              where: { isDefault: true },
+              take: 1,
+            },
           },
         })
-      : Promise.resolve(null),
-    db.wasteCategory.findMany({
-      where: {
-        id: {
-          in: categoryIds,
+      : findOrCreateUserCustomer(input.phone, input.name),
+    (async () => {
+      const cached = getCachedWasteCategories();
+      if (cached && Array.isArray(cached)) {
+        const matching = cached.filter((c: any) => c.active && categoryIds.includes(c.id));
+        if (matching.length === categoryIds.length) {
+          return matching;
+        }
+      }
+      const fetched = await db.wasteCategory.findMany({
+        where: {
+          id: {
+            in: categoryIds,
+          },
+          active: true,
         },
-        active: true,
-      },
-    }),
+      });
+      if (fetched && fetched.length > 0) {
+        setCachedWasteCategories(fetched);
+      }
+      return fetched;
+    })(),
+    couponCode
+      ? db.coupon.findUnique({ where: { code: couponCode } }).catch(() => null)
+      : Promise.resolve(null),
   ]);
 
+  timer?.recordPhase('parallel_lookups');
   if (!geofence.serviceable) {
     throw new Error(
       geofence.message ||
@@ -290,27 +331,45 @@ export async function createOrder(
   }
 
   // ---------------------------------------------------------
-  // 4. SAVE PICKUP ADDRESS
+  // 4. SAVE PICKUP ADDRESS (Reuses existing default if identical, skips redundant updateMany)
   // ---------------------------------------------------------
 
-  const savedAddress =
-    await saveCustomerAddress(user.id, {
-      label: input.address.label || 'Home',
-      name: input.name,
-      phone: input.phone,
-      houseNo: input.address.houseNo,
-      building: input.address.building,
-      street: input.address.street,
-      area: input.address.area,
-      landmark: input.address.landmark,
-      pincode: input.address.pincode,
-      lat: input.address.lat,
-      lng: input.address.lng,
-      googlePlaceId:
-        input.address.googlePlaceId ||
-        undefined,
-      isDefault: true,
-    });
+  const existingDefaultAddr = user.addresses?.[0];
+  const hasExistingDefault = Boolean(existingDefaultAddr);
+  const isIdenticalAddress =
+    existingDefaultAddr &&
+    existingDefaultAddr.houseNo?.trim().toLowerCase() === input.address.houseNo?.trim().toLowerCase() &&
+    existingDefaultAddr.street?.trim().toLowerCase() === input.address.street?.trim().toLowerCase() &&
+    existingDefaultAddr.area?.trim().toLowerCase() === input.address.area?.trim().toLowerCase() &&
+    existingDefaultAddr.pincode?.trim() === input.address.pincode?.trim() &&
+    (input.address.building ? (existingDefaultAddr.building || '').trim().toLowerCase() === input.address.building.trim().toLowerCase() : true) &&
+    (input.address.landmark ? (existingDefaultAddr.landmark || '').trim().toLowerCase() === input.address.landmark.trim().toLowerCase() : true);
+
+  const savedAddress = isIdenticalAddress
+    ? existingDefaultAddr
+    : await saveCustomerAddress(
+        user.id,
+        {
+          label: input.address.label || 'Home',
+          name: input.name,
+          phone: input.phone,
+          houseNo: input.address.houseNo,
+          building: input.address.building,
+          street: input.address.street,
+          area: input.address.area,
+          landmark: input.address.landmark,
+          pincode: input.address.pincode,
+          lat: input.address.lat,
+          lng: input.address.lng,
+          googlePlaceId:
+            input.address.googlePlaceId ||
+            undefined,
+          isDefault: true,
+        },
+        { hasExistingDefault }
+      );
+
+  timer?.recordPhase('save_customer_address');
 
   // ---------------------------------------------------------
   // 5. VALIDATE WASTE CATEGORIES & WEIGHT
@@ -356,45 +415,36 @@ export async function createOrder(
     }
   }
 
-  let totalWasteItemsValue = 0;
-
   const basePickupCharge =
     geofence.zone?.basePickupCharge ?? 69.0;
+  const urgentSurcharge = (input.pickupType as string) === 'URGENT' ? 29.0 : 0.0;
 
-  const orderItemsData =
-    input.items.map((item) => {
-      const category = dbCategories.find(
-        (cat) => cat.id === item.categoryId
-      );
+  const calculationItems: CalculationItemInput[] = input.items.map((item) => {
+    const category = dbCategories.find((cat) => cat.id === item.categoryId);
+    return {
+      categoryId: item.categoryId,
+      categoryName: category?.name || item.categoryId,
+      type: category?.type || 'RECYCLABLE_BUY',
+      pricePerKg: category?.pricePerKg ?? 20.0,
+      weightKg: item.estimatedWeight,
+    };
+  });
 
-      const ratePerKg = category!.pricePerKg;
+  let totalItemsEstimatedValue = 0;
+  for (const item of calculationItems) {
+    totalItemsEstimatedValue += Math.round((item.weightKg * item.pricePerKg + Number.EPSILON) * 100) / 100;
+  }
+  totalItemsEstimatedValue = Math.round(totalItemsEstimatedValue * 100) / 100;
 
-      const subtotal =
-        item.estimatedWeight * ratePerKg;
-
-      totalWasteItemsValue += subtotal;
-
-      return {
-        categoryId: item.categoryId,
-        estimatedWeight:
-          item.estimatedWeight,
-        ratePerKg,
-        subtotal,
-      };
-    });
-
-  // ---------------------------------------------------------
-  // 6. COUPON CALCULATION & SERVER-SIDE VALIDATION
-  // ---------------------------------------------------------
+  const preDiscountSubtotal = totalItemsEstimatedValue + basePickupCharge;
 
   let discountAmount = 0.0;
-  const preDiscountSubtotal = totalWasteItemsValue + basePickupCharge;
-
   if (input.couponCode && String(input.couponCode).trim()) {
     const couponValidation = await validateAndCalculateCoupon(
       input.couponCode,
       preDiscountSubtotal,
-      user.customer?.id
+      user.customer?.id,
+      couponRecord
     );
 
     if (!couponValidation.valid) {
@@ -406,28 +456,32 @@ export async function createOrder(
     discountAmount = couponValidation.discountAmount;
   }
 
-  // ---------------------------------------------------------
-  // 7. PAYMENT DIRECTION
-  // ---------------------------------------------------------
-  //
-  // Current customer booking flow is CUSTOMER_PAYS.
-  // Payment starts as PENDING.
-  //
-  // IMPORTANT:
-  // NO AGENT DISPATCH HAPPENS HERE.
-  //
+  timer?.recordPhase('coupon_validation');
 
-  const financialDirection:
-    'CUSTOMER_PAYS' = 'CUSTOMER_PAYS';
-
-  const rawPayable =
-    preDiscountSubtotal -
-    discountAmount;
-
-  const finalAmount = Math.max(
-    1,
-    Math.round(rawPayable * 100) / 100
+  // Authoritative valuation using standardized engine
+  const valuation = calculateOrderValuation(
+    calculationItems,
+    basePickupCharge,
+    discountAmount,
+    urgentSurcharge
   );
+
+  const orderItemsData = valuation.items.map((vi) => ({
+    categoryId: vi.categoryId,
+    estimatedWeight: vi.weightKg,
+    ratePerKg: vi.ratePerKg,
+    subtotal: vi.subtotal,
+  }));
+
+  const financialDirection = input.financialDirection === 'JUNKITOUT_PAYS'
+    ? valuation.financialDirection
+    : 'CUSTOMER_PAYS';
+
+  const estimatedTotal = totalItemsEstimatedValue;
+  const rawPayable = preDiscountSubtotal - discountAmount;
+  const finalAmount = financialDirection === 'CUSTOMER_PAYS'
+    ? Math.max(1, Math.round(rawPayable * 100) / 100)
+    : valuation.netAmount;
 
   const orderNumber =
     generateOrderNumber();
@@ -464,13 +518,13 @@ export async function createOrder(
 
             financialDirection,
 
-            estimatedTotal:
-              totalWasteItemsValue,
+            estimatedTotal,
 
             pickupCharge:
               basePickupCharge,
 
-            discountAmount,
+            discountAmount:
+              valuation.discountAmount,
 
             finalAmount,
 
@@ -478,6 +532,19 @@ export async function createOrder(
             // Order starts unpaid.
             paymentStatus:
               'PENDING',
+
+            ...(financialDirection === 'CUSTOMER_PAYS' && finalAmount > 0
+              ? {
+                  payments: {
+                    create: {
+                      amount: finalAmount,
+                      direction: 'CUSTOMER_PAYS',
+                      gateway: 'RAZORPAY',
+                      status: 'CREATION_PENDING',
+                    },
+                  },
+                }
+              : {}),
 
             wastePhotos:
               JSON.stringify(
@@ -503,34 +570,18 @@ export async function createOrder(
                   user.id,
 
                 notes:
-                  'Order placed by customer via web platform. Payment pending.',
+                  financialDirection === 'CUSTOMER_PAYS' ? 'Order placed by customer via web platform. Payment pending.' : `Order placed by customer via web platform. Estimated scrap payout: ₹${finalAmount.toFixed(2)}.`,
               },
             },
           },
 
           include: {
-            customer: {
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    name: true,
-                    phone: true,
-                    email: true,
-                  },
-                },
-              },
+            items: true,
+            payments: {
+              where: { direction: 'CUSTOMER_PAYS' },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
             },
-
-            address: true,
-
-            items: {
-              include: {
-                category: true,
-              },
-            },
-
-            statusHistory: true,
           },
         });
 
@@ -546,13 +597,54 @@ export async function createOrder(
           });
         }
 
-        return createdOrder;
+        const assembledCustomer = user?.customer
+          ? {
+              ...user.customer,
+              user: user
+                ? {
+                    id: user.id,
+                    name: user.name || '',
+                    phone: user.phone || '',
+                    email: user.email || null,
+                  }
+                : null,
+            }
+          : (createdOrder as any).customer || null;
+
+        const assembledOrder = {
+          ...createdOrder,
+          customer: assembledCustomer,
+          address: savedAddress || (createdOrder as any).address || null,
+          items: (createdOrder.items || []).map((item: any) => ({
+            ...item,
+            category: item.category || dbCategories.find((c: any) => c.id === item.categoryId) || null,
+          })),
+          statusHistory:
+            (createdOrder as any).statusHistory && (createdOrder as any).statusHistory.length > 0
+              ? (createdOrder as any).statusHistory
+              : [
+                  {
+                    id: `hist-${createdOrder.id}`,
+                    orderId: createdOrder.id,
+                    oldStatus: null,
+                    newStatus: 'BOOKING_RECEIVED',
+                    status: 'BOOKING_RECEIVED',
+                    changedByUserId: user?.id || null,
+                    notes: 'Order placed by customer via web platform. Payment pending.',
+                    timestamp: createdOrder.createdAt,
+                    createdAt: createdOrder.createdAt,
+                  },
+                ],
+        };
+
+        return assembledOrder;
       },
       {
         maxWait: 5000,
         timeout: 15000,
       }
     );
+    timer?.recordPhase('order_creation_tx');
   } catch (error: any) {
     if (
       normalizedIdempotencyKey &&
@@ -585,6 +677,11 @@ export async function createOrder(
             address: true,
             items: { include: { category: true } },
             statusHistory: true,
+            payments: {
+              where: { direction: 'CUSTOMER_PAYS' },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
           },
         });
         if (persistedOrder) return persistedOrder;

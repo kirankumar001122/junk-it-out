@@ -4,6 +4,8 @@ import { getAuthUser } from '@/lib/auth/middleware';
 import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
+import { calculateOrderValuation, calculateValuationAdjustment, type CalculationItemInput } from '@/lib/pricing';
+import { refundAttemptId } from '@/lib/payments/refundWorkflow';
 
 export async function POST(
   req: NextRequest,
@@ -75,8 +77,7 @@ export async function POST(
 
     // Execute Weighing Update in Transaction
     const updatedOrder = await db.$transaction(async (tx) => {
-      let actualTotalRecyclable = 0;
-      let actualTotalWasteCharge = 0;
+      const calculationItems: CalculationItemInput[] = [];
       const txMatchedItemIds = new Set<string>();
 
       for (const itemInput of actualWeights) {
@@ -89,27 +90,39 @@ export async function POST(
           }
           txMatchedItemIds.add(dbItem.id);
           const weightKg = itemInput.actualWeight;
-          const subtotal = round2(weightKg * dbItem.ratePerKg);
+          calculationItems.push({
+            categoryId: dbItem.categoryId,
+            categoryName: dbItem.category?.name || dbItem.categoryId,
+            type: dbItem.category?.type || 'RECYCLABLE_BUY',
+            pricePerKg: dbItem.ratePerKg,
+            weightKg,
+          });
+        }
+      }
 
-          if (dbItem.category.type === 'WASTE_CHARGE') {
-            actualTotalWasteCharge += subtotal;
-          } else {
-            actualTotalRecyclable += subtotal;
-          }
+      const valuation = calculateOrderValuation(
+        calculationItems,
+        order.pickupCharge,
+        order.discountAmount
+      );
 
+      for (let i = 0; i < actualWeights.length; i++) {
+        const itemInput = actualWeights[i];
+        const vi = valuation.items[i];
+        if (vi) {
           await tx.orderItem.update({
-            where: { id: dbItem.id },
+            where: { id: itemInput.itemId },
             data: {
-              actualWeight: weightKg,
-              subtotal,
+              actualWeight: vi.weightKg,
+              subtotal: vi.subtotal,
             },
           });
         }
       }
 
-      const netAmount = actualTotalRecyclable - (actualTotalWasteCharge + order.pickupCharge - order.discountAmount);
-      const financialDirection = netAmount >= 0 ? 'JUNKITOUT_PAYS' : 'CUSTOMER_PAYS';
-      const finalAmount = round2(Math.abs(netAmount));
+      const actualTotalRecyclable = valuation.totalRecyclableValue;
+      const financialDirection = valuation.financialDirection;
+      const finalAmount = valuation.netAmount;
       const totalWeightKg = actualWeights.reduce((total: number, input: any) => total + input.actualWeight, 0);
 
       // Create WeightRecord
@@ -188,6 +201,31 @@ export async function POST(
             },
           },
         });
+      }
+
+      // Valuation adjustment check against captured payments
+      const capturedPayment = (tx as any).payment?.findFirst ? await (tx as any).payment.findFirst({
+        where: { orderId: id, direction: 'CUSTOMER_PAYS', status: 'CAPTURED' },
+      }) : null;
+      const customerPaidAmount = capturedPayment ? Number(capturedPayment.amount) : 0;
+      const adjustment = calculateValuationAdjustment(customerPaidAmount, valuation);
+
+      // Record any required refund attempt (partial or full)
+      if (capturedPayment && adjustment.refundAmount > 0) {
+        const attemptId = refundAttemptId(capturedPayment.id, `weigh_${adjustment.adjustmentType.toLowerCase()}`);
+        if ((tx as any).refundAttempt?.createMany) {
+          await (tx as any).refundAttempt.createMany({
+            data: [{
+              id: attemptId,
+              orderId: id,
+              paymentId: capturedPayment.id,
+              amount: adjustment.refundAmount,
+              status: 'PENDING',
+              failureReason: adjustment.explanation,
+            }],
+            skipDuplicates: true,
+          });
+        }
       }
 
       if (financialDirection === 'JUNKITOUT_PAYS' && finalAmount > 0) {

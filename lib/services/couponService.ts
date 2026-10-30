@@ -53,7 +53,8 @@ const KNOWN_COUPONS: Record<string, {
 export async function validateAndCalculateCoupon(
   rawCode: string | null | undefined,
   subtotal: number,
-  customerId?: string | null
+  customerId?: string | null,
+  prefetchedCoupon?: any
 ): Promise<CouponValidationResult> {
   const safeSubtotal = Math.max(0, Number(subtotal) || 0);
 
@@ -68,14 +69,16 @@ export async function validateAndCalculateCoupon(
 
   const code = rawCode.trim().toUpperCase();
 
-  // 1. Look up in database
-  let coupon: any = null;
-  try {
-    coupon = await db.coupon.findUnique({
-      where: { code },
-    });
-  } catch (err) {
-    console.warn('[COUPON] Database lookup error, checking known coupons fallback:', err);
+  // 1. Look up in database (or reuse prefetched coupon when resolved in parallel pre-flight)
+  let coupon: any = prefetchedCoupon;
+  if (coupon === undefined) {
+    try {
+      coupon = await db.coupon.findUnique({
+        where: { code },
+      });
+    } catch (err) {
+      console.warn('[COUPON] Database lookup error, checking known coupons fallback:', err);
+    }
   }
 
   // 2. Fallback to known seeded coupons if database record not found

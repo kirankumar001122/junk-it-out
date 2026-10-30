@@ -53,16 +53,35 @@ export async function PATCH(req: NextRequest) {
 
   try {
     const body = await req.json().catch(() => ({}));
-    const { id, status } = body;
-    const allowedStatuses = ['APPROVED', 'READY_FOR_PAYOUT', 'PAID', 'SETTLEMENT_COMPLETED'];
+    const { id, status, utr, payoutId, payoutMethod, failureReason } = body;
+    const allowedStatuses = ['APPROVED', 'READY_FOR_PAYOUT', 'PROCESSING', 'PAID', 'SETTLEMENT_COMPLETED', 'FAILED'];
     if (!id || typeof id !== 'string' || !allowedStatuses.includes(status)) {
-      return NextResponse.json({ success: false, message: 'Only APPROVED, READY_FOR_PAYOUT, or PAID settlement states are supported.' }, { status: 400 });
+      return NextResponse.json({ success: false, message: 'Only APPROVED, READY_FOR_PAYOUT, PROCESSING, PAID, SETTLEMENT_COMPLETED, or FAILED settlement states are supported.' }, { status: 400 });
+    }
+
+    const trimmedId = id.trim();
+    let existing: any = null;
+    try {
+      if (typeof db.settlement.findUnique === 'function') {
+        existing = await db.settlement.findUnique({
+          where: { id: trimmedId },
+          include: { order: true },
+        });
+      }
+    } catch {
+      existing = null;
+    }
+
+    // Terminal state protection: PAID settlements cannot be modified or re-executed
+    if (existing && (existing.status === 'PAID' || existing.status === 'SETTLEMENT_COMPLETED') && status !== existing.status) {
+      return NextResponse.json({ success: false, message: 'This settlement has already been paid and finalized.' }, { status: 409 });
     }
 
     const transactionReference = (
       body.transactionReference ||
       body.payoutId ||
       body.reference ||
+      body.utr ||
       ''
     ).toString().trim();
 
@@ -76,27 +95,80 @@ export async function PATCH(req: NextRequest) {
     }
 
     const now = new Date();
-    const updateData: { status: string; approvedAt?: Date; paidAt?: Date } = { status };
+    const updateData: {
+      status: string;
+      approvedAt?: Date;
+      paidAt?: Date;
+      processedAt?: Date;
+      utr?: string | null;
+      payoutId?: string | null;
+      payoutMethod?: string;
+      failureReason?: string | null;
+    } = { status };
+
     if (status === 'APPROVED' || status === 'READY_FOR_PAYOUT') {
-      updateData.approvedAt = now;
+      updateData.approvedAt = existing?.approvedAt || now;
+      if (status === 'READY_FOR_PAYOUT') {
+        updateData.failureReason = null;
+      }
+    } else if (status === 'PROCESSING') {
+      updateData.processedAt = now;
+      if (payoutId) updateData.payoutId = String(payoutId).trim();
+      if (payoutMethod) updateData.payoutMethod = String(payoutMethod).trim();
     } else if (status === 'PAID' || status === 'SETTLEMENT_COMPLETED') {
       updateData.paidAt = now;
+      updateData.processedAt = now;
+      if (utr || transactionReference) updateData.utr = String(utr || transactionReference).trim();
+      if (payoutId || transactionReference) updateData.payoutId = String(payoutId || transactionReference).trim();
+      if (payoutMethod) updateData.payoutMethod = String(payoutMethod).trim();
+      updateData.failureReason = null;
+    } else if (status === 'FAILED') {
+      updateData.failureReason = failureReason ? String(failureReason).trim() : 'Payout execution failed via banking channel.';
     }
 
-    const settlement = await db.settlement.update({
-      where: { id: id.trim() },
-      data: updateData,
-    });
+    const executeUpdate = async (client: any) => {
+      const updated = await client.settlement.update({
+        where: { id: trimmedId },
+        data: updateData,
+      });
 
-    await db.auditLog.create({
-      data: {
-        userId: authUser?.userId || null,
-        userName: authUser?.name || 'Admin Operations',
-        action: 'SETTLEMENT_STATUS_UPDATED',
-        oldValue: null,
-        newValue: `Settlement ${settlement.id} updated to status ${status} (Amount: ₹${settlement.amount}${transactionReference ? `, Ref: ${transactionReference}` : ''})`,
-      },
-    }).catch(() => null);
+      if (existing?.orderId && (status === 'PAID' || status === 'SETTLEMENT_COMPLETED')) {
+        if (typeof client.order?.updateMany === 'function') {
+          await client.order.updateMany({
+            where: { id: existing.orderId },
+            data: {
+              paymentStatus: 'SETTLEMENT_COMPLETED',
+              status: existing.order?.status === 'PICKUP_COMPLETED' ? 'SETTLEMENT_COMPLETED' : existing.order?.status,
+            },
+          }).catch(() => null);
+        }
+      }
+
+      if (typeof client.auditLog?.create === 'function') {
+        await client.auditLog.create({
+          data: {
+            userId: authUser?.userId || null,
+            userName: authUser?.name || 'Admin Operations',
+            action: 'SETTLEMENT_STATUS_UPDATED',
+            oldValue: JSON.stringify({ status: existing?.status || null, amount: existing?.amount || updated.amount }),
+            newValue: JSON.stringify({
+              settlementId: updated.id,
+              status,
+              amount: updated.amount,
+              utr: updateData.utr || null,
+              payoutId: updateData.payoutId || null,
+              transactionReference: transactionReference || null,
+            }),
+          },
+        }).catch(() => null);
+      }
+
+      return updated;
+    };
+
+    const settlement = typeof db.$transaction === 'function'
+      ? await db.$transaction(executeUpdate).catch(async () => await executeUpdate(db))
+      : await executeUpdate(db);
 
     return NextResponse.json({ success: true, data: settlement });
   } catch (error: any) {

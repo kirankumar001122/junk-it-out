@@ -11,12 +11,63 @@ const VERIFY_WINDOW_MS = 10 * 60_000;
 const MAX_VERIFY_ATTEMPTS_PER_PHONE = 5;
 const MAX_VERIFY_ATTEMPTS_PER_IP = 25;
 
-type SendLimit = { windowStartedAt: number; count: number; lastSentAt: number };
-type VerifyLimit = { windowStartedAt: number; count: number };
+export const OTP_SEND_FAILURE_MESSAGE = 'Unable to send OTP. Please try again.';
+export const OTP_VERIFY_FAILURE_MESSAGE = 'The OTP is invalid or expired. Please request a new code and try again.';
 
-// Abuse protection rate limits
-const sendLimits = new Map<string, SendLimit>();
-const verifyLimits = new Map<string, VerifyLimit>();
+export type SendLimit = { windowStartedAt: number; count: number; lastSentAt: number };
+export type VerifyLimit = { windowStartedAt: number; count: number };
+
+/**
+ * Pluggable rate limit store interface to allow swapping in-memory maps
+ * with distributed stores (e.g. Redis / Upstash) for horizontal scaling.
+ */
+export interface RateLimitStore<T> {
+  get(key: string): Promise<T | undefined> | (T | undefined);
+  set(key: string, value: T): Promise<void> | void;
+  delete(key: string): Promise<void> | void;
+}
+
+export class InMemoryRateLimitStore<T> implements RateLimitStore<T> {
+  private store: Map<string, T>;
+
+  constructor(sharedMap?: Map<string, T>) {
+    this.store = sharedMap ?? new Map<string, T>();
+  }
+
+  get(key: string): T | undefined {
+    return this.store.get(key);
+  }
+
+  set(key: string, value: T): void {
+    this.store.set(key, value);
+  }
+
+  delete(key: string): void {
+    this.store.delete(key);
+  }
+
+  clear(): void {
+    this.store.clear();
+  }
+
+  getMap(): Map<string, T> {
+    return this.store;
+  }
+}
+
+// Global singletons to prevent throttle resets across Next.js dev reloads
+const globalStore = globalThis as unknown as {
+  __jioSendLimits?: Map<string, SendLimit>;
+  __jioVerifyLimits?: Map<string, VerifyLimit>;
+};
+
+const sendLimitStore: RateLimitStore<SendLimit> = new InMemoryRateLimitStore(
+  globalStore.__jioSendLimits ?? (globalStore.__jioSendLimits = new Map<string, SendLimit>())
+);
+
+const verifyLimitStore: RateLimitStore<VerifyLimit> = new InMemoryRateLimitStore(
+  globalStore.__jioVerifyLimits ?? (globalStore.__jioVerifyLimits = new Map<string, VerifyLimit>())
+);
 
 function withinWindow(now: number, startedAt: number, windowMs: number): boolean {
   return now - startedAt < windowMs;
@@ -46,7 +97,7 @@ export async function sendOtp(phone: string, clientIp: string) {
   const ipKey = isTrustedIp ? `ip:${opaqueKey(clientIp)}` : null;
 
   // 1. Enforce phone-level send rate limit
-  const phoneRecord = sendLimits.get(phoneKey);
+  const phoneRecord = await sendLimitStore.get(phoneKey);
   if (phoneRecord && withinWindow(now, phoneRecord.windowStartedAt, SEND_WINDOW_MS)) {
     if (now - phoneRecord.lastSentAt < RESEND_COOLDOWN_MS) {
       return {
@@ -65,8 +116,9 @@ export async function sendOtp(phone: string, clientIp: string) {
   }
 
   // 2. Enforce IP-level send rate limit (when trusted client IP is present)
+  let ipRecord: SendLimit | undefined;
   if (ipKey) {
-    const ipRecord = sendLimits.get(ipKey);
+    ipRecord = await sendLimitStore.get(ipKey);
     if (ipRecord && withinWindow(now, ipRecord.windowStartedAt, SEND_WINDOW_MS)) {
       if (ipRecord.count >= MAX_SENDS_PER_IP_WINDOW) {
         return {
@@ -82,18 +134,28 @@ export async function sendOtp(phone: string, clientIp: string) {
     const provider = await sendFast2SmsOtp(cleanPhoneDigits);
     if (!provider.ok) {
       logStructured('warn', 'auth.otp.send_failed', { dependency: 'fast2sms' });
-      return { success: false, status: 'provider_failed' as const, retryAfterSeconds: 0, errorDetails: provider.errorDetails };
+      return {
+        success: false,
+        status: 'provider_failed' as const,
+        retryAfterSeconds: 0,
+        errorDetails: OTP_SEND_FAILURE_MESSAGE,
+      };
     }
   } catch (err: any) {
     logStructured('error', 'auth.otp.send_exception', {
       dependency: 'fast2sms',
       errorType: getSafeErrorType(err),
     });
-    return { success: false, status: 'provider_failed' as const, retryAfterSeconds: 0, errorDetails: err.message };
+    return {
+      success: false,
+      status: 'provider_failed' as const,
+      retryAfterSeconds: 0,
+      errorDetails: OTP_SEND_FAILURE_MESSAGE,
+    };
   }
 
   // 3. Record send timestamps and increment counts
-  sendLimits.set(
+  await sendLimitStore.set(
     phoneKey,
     phoneRecord && withinWindow(now, phoneRecord.windowStartedAt, SEND_WINDOW_MS)
       ? { ...phoneRecord, count: phoneRecord.count + 1, lastSentAt: now }
@@ -101,8 +163,7 @@ export async function sendOtp(phone: string, clientIp: string) {
   );
 
   if (ipKey) {
-    const ipRecord = sendLimits.get(ipKey);
-    sendLimits.set(
+    await sendLimitStore.set(
       ipKey,
       ipRecord && withinWindow(now, ipRecord.windowStartedAt, SEND_WINDOW_MS)
         ? { ...ipRecord, count: ipRecord.count + 1, lastSentAt: now }
@@ -110,7 +171,10 @@ export async function sendOtp(phone: string, clientIp: string) {
     );
   }
 
-  pruneLimits(sendLimits, SEND_WINDOW_MS);
+  if (globalStore.__jioSendLimits) {
+    pruneLimits(globalStore.__jioSendLimits, SEND_WINDOW_MS);
+  }
+
   return { success: true, cooldownSeconds: RESEND_COOLDOWN_MS / 1000 };
 }
 
@@ -123,14 +187,15 @@ export async function verifyOtp(phone: string, inputCode: string, clientIp: stri
   const ipKey = isTrustedIp ? `ip:${opaqueKey(clientIp)}` : null;
 
   // 1. Enforce phone-level verify attempt limit (blocks brute force even if attacker rotates IPs)
-  const phoneRecord = verifyLimits.get(phoneKey);
+  const phoneRecord = await verifyLimitStore.get(phoneKey);
   if (phoneRecord && withinWindow(now, phoneRecord.windowStartedAt, VERIFY_WINDOW_MS) && phoneRecord.count >= MAX_VERIFY_ATTEMPTS_PER_PHONE) {
     return { valid: false, status: 'rate_limited' as const };
   }
 
   // 2. Enforce IP-level verify attempt limit
+  let ipRecord: VerifyLimit | undefined;
   if (ipKey) {
-    const ipRecord = verifyLimits.get(ipKey);
+    ipRecord = await verifyLimitStore.get(ipKey);
     if (ipRecord && withinWindow(now, ipRecord.windowStartedAt, VERIFY_WINDOW_MS) && ipRecord.count >= MAX_VERIFY_ATTEMPTS_PER_IP) {
       return { valid: false, status: 'rate_limited' as const };
     }
@@ -140,40 +205,53 @@ export async function verifyOtp(phone: string, inputCode: string, clientIp: stri
     const provider = await verifyFast2SmsOtp(cleanPhoneDigits, cleanCode);
     if (provider.ok) {
       // Clear verification rate limit state on successful login
-      verifyLimits.delete(phoneKey);
+      await verifyLimitStore.delete(phoneKey);
       return { valid: true, status: 'verified' as const };
     }
     logStructured('warn', 'auth.otp.verify_failed', { dependency: 'fast2sms' });
-    return { valid: false, status: 'failed' as const, errorDetails: provider.errorDetails };
+    return {
+      valid: false,
+      status: 'failed' as const,
+      errorDetails: OTP_VERIFY_FAILURE_MESSAGE,
+    };
   } catch (err: any) {
     logStructured('error', 'auth.otp.verify_exception', {
       dependency: 'fast2sms',
       errorType: getSafeErrorType(err),
     });
-    return { valid: false, status: 'failed' as const, errorDetails: err.message };
+    return {
+      valid: false,
+      status: 'failed' as const,
+      errorDetails: OTP_VERIFY_FAILURE_MESSAGE,
+    };
   } finally {
     // Record failed verification attempt
-    verifyLimits.set(
+    await verifyLimitStore.set(
       phoneKey,
       phoneRecord && withinWindow(now, phoneRecord.windowStartedAt, VERIFY_WINDOW_MS)
         ? { ...phoneRecord, count: phoneRecord.count + 1 }
         : { windowStartedAt: now, count: 1 }
     );
     if (ipKey) {
-      const ipRecord = verifyLimits.get(ipKey);
-      verifyLimits.set(
+      await verifyLimitStore.set(
         ipKey,
         ipRecord && withinWindow(now, ipRecord.windowStartedAt, VERIFY_WINDOW_MS)
           ? { ...ipRecord, count: ipRecord.count + 1 }
           : { windowStartedAt: now, count: 1 }
       );
     }
-    pruneLimits(verifyLimits, VERIFY_WINDOW_MS);
+    if (globalStore.__jioVerifyLimits) {
+      pruneLimits(globalStore.__jioVerifyLimits, VERIFY_WINDOW_MS);
+    }
   }
 }
 
 /** Exported strictly for testing resets */
 export function _resetOtpRateLimitsForTesting(): void {
-  sendLimits.clear();
-  verifyLimits.clear();
+  if (globalStore.__jioSendLimits) {
+    globalStore.__jioSendLimits.clear();
+  }
+  if (globalStore.__jioVerifyLimits) {
+    globalStore.__jioVerifyLimits.clear();
+  }
 }
