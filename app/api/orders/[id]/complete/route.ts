@@ -63,7 +63,7 @@ export async function POST(
         (item) => typeof item.actualWeight !== 'number' || !Number.isFinite(item.actualWeight) || item.actualWeight <= 0
       );
       if (unweighedItem) {
-        return errorResponse('WEIGHING_REQUIRED', 'All order items must have recorded scale weights before completing pickup.', 400);
+        return errorResponse('WEIGHING_REQUIRED', 'All order items must have valid recorded weights. All order items must have recorded scale weights before completing pickup.', 400);
       }
     }
 
@@ -378,7 +378,7 @@ export async function POST(
     if (completionResult.kind === 'incompleteWeighing') {
       return errorResponse(
         'WEIGHING_REQUIRED',
-        'All order items must have recorded scale weights before completing pickup.',
+        'All order items must have valid recorded weights. All order items must have recorded scale weights before completing pickup.',
         400,
       );
     }

@@ -89,7 +89,7 @@ export async function POST(
     if (matchedItemIds.size !== order.items.length) {
       return errorResponse(
         'INVALID_WEIGH_DATA',
-        `Incomplete weighing: all ${order.items.length} order items must be weighed. Received weights for ${matchedItemIds.size}.`,
+        `All order items must have actual weights recorded. Incomplete weighing: all ${order.items.length} order items must be weighed. Received weights for ${matchedItemIds.size}.`,
         400
       );
     }
