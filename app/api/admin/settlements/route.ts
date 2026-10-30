@@ -77,6 +77,23 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: false, message: 'This settlement has already been paid and finalized.' }, { status: 409 });
     }
 
+    const transactionReference = (
+      body.transactionReference ||
+      body.payoutId ||
+      body.reference ||
+      body.utr ||
+      ''
+    ).toString().trim();
+
+    if (status === 'PAID' || status === 'SETTLEMENT_COMPLETED') {
+      if (!transactionReference || !/^[A-Za-z0-9_-]{4,64}$/.test(transactionReference)) {
+        return NextResponse.json({
+          success: false,
+          message: 'A valid transaction reference or payout ID (4-64 alphanumeric characters, underscores or hyphens) is required to mark settlement as paid.',
+        }, { status: 400 });
+      }
+    }
+
     const now = new Date();
     const updateData: {
       status: string;
@@ -101,8 +118,8 @@ export async function PATCH(req: NextRequest) {
     } else if (status === 'PAID' || status === 'SETTLEMENT_COMPLETED') {
       updateData.paidAt = now;
       updateData.processedAt = now;
-      if (utr) updateData.utr = String(utr).trim();
-      if (payoutId) updateData.payoutId = String(payoutId).trim();
+      if (utr || transactionReference) updateData.utr = String(utr || transactionReference).trim();
+      if (payoutId || transactionReference) updateData.payoutId = String(payoutId || transactionReference).trim();
       if (payoutMethod) updateData.payoutMethod = String(payoutMethod).trim();
       updateData.failureReason = null;
     } else if (status === 'FAILED') {
@@ -140,6 +157,7 @@ export async function PATCH(req: NextRequest) {
               amount: updated.amount,
               utr: updateData.utr || null,
               payoutId: updateData.payoutId || null,
+              transactionReference: transactionReference || null,
             }),
           },
         }).catch(() => null);

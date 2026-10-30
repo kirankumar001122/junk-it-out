@@ -123,6 +123,8 @@ async function runBenchmark() {
 
   // Mock database calls with high-performance in-memory state
   database.user.findFirst = async () => ({ ...agentUser, agent: agentRecord });
+  database.user.findUnique = async () => ({ id: agentUser.id, tokenVersion: 1 });
+  database.user.update = async () => ({ id: agentUser.id, tokenVersion: 2 });
   database.agent.findUnique = async ({ where }: any) => {
     if (where.id === agentRecord.id) return agentRecord;
     return null;

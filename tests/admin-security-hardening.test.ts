@@ -55,9 +55,11 @@ test('Admin Role Enforcement: Reject unauthenticated with 401 and non-admins wit
   const customerToken = makeToken('CUSTOMER', { customerId: 'cust-1' });
   const agentToken = makeToken('AGENT', { agentId: 'agent-1' });
 
-  // Mock db.agent.findUnique for agent tokenVersion validation in validatePayload
+  // Mock db.agent.findUnique and db.user.findUnique for tokenVersion validation in validatePayload
   const origAgentFind = (db.agent as any).findUnique;
+  const origUserFind = (db.user as any).findUnique;
   (db.agent as any).findUnique = async () => ({ tokenVersion: 1 });
+  (db.user as any).findUnique = async () => ({ tokenVersion: 1 });
 
   const endpoints: Array<{ name: string; handler: (req: NextRequest) => Promise<Response>; method: string; url: string }> = [
     { name: 'GET /api/admin/admin-users', handler: getAdminUsers, method: 'GET', url: '/api/admin/admin-users' },
@@ -119,12 +121,15 @@ test('Admin Role Enforcement: Reject unauthenticated with 401 and non-admins wit
     }
   } finally {
     (db.agent as any).findUnique = origAgentFind;
+    (db.user as any).findUnique = origUserFind;
   }
 });
 
 test('Super Admin Privilege Check: sync-schema strictly forbids regular ADMIN (403) and allows SUPER_ADMIN (200)', async () => {
   const adminToken = makeToken('ADMIN');
   const superAdminToken = makeToken('SUPER_ADMIN');
+  const origUserFind = (db.user as any).findUnique;
+  (db.user as any).findUnique = async () => ({ tokenVersion: 1 });
 
   // ADMIN -> 403
   const adminRes = await getSyncSchema(makeReq('/api/admin/sync-schema', 'GET', adminToken));
@@ -161,38 +166,46 @@ test('Super Admin Privilege Check: sync-schema strictly forbids regular ADMIN (4
     (db.customer as any).count = origCustomerCount;
     (db.user as any).count = origUserCount;
     (db.auditLog as any).create = origAuditCreate;
+    (db.user as any).findUnique = origUserFind;
   }
 });
 
 test('Input Validation & Sanitization: Rejects invalid payloads with 400', async () => {
   const adminToken = makeToken('ADMIN');
+  const superAdminToken = makeToken('SUPER_ADMIN');
+  const origUserFind = (db.user as any).findUnique;
+  (db.user as any).findUnique = async () => ({ tokenVersion: 1 });
 
-  // 1. Invalid phone number for admin user
-  const badPhoneRes = await postAdminUsers(makeReq('/api/admin/admin-users', 'POST', adminToken, {
-    name: 'Test Admin',
-    phone: '123', // invalid length
-  }));
-  assert.equal(badPhoneRes.status, 400, 'Invalid phone number must be rejected with 400');
+  try {
+    // 1. Invalid phone number for admin user
+    const badPhoneRes = await postAdminUsers(makeReq('/api/admin/admin-users', 'POST', superAdminToken, {
+      name: 'Test Admin',
+      phone: '123', // invalid length
+    }));
+    assert.equal(badPhoneRes.status, 400, 'Invalid phone number must be rejected with 400');
 
-  // 2. Invalid pricing numeric values
-  const badPricingRes = await putPricing(makeReq('/api/admin/pricing', 'PUT', adminToken, {
-    basePickupCharge: -10, // negative price
-  }));
-  assert.equal(badPricingRes.status, 400, 'Negative pricing value must be rejected with 400');
+    // 2. Invalid pricing numeric values
+    const badPricingRes = await putPricing(makeReq('/api/admin/pricing', 'PUT', adminToken, {
+      basePickupCharge: -10, // negative price
+    }));
+    assert.equal(badPricingRes.status, 400, 'Negative pricing value must be rejected with 400');
 
-  // 3. Invalid coupon code
-  const badCouponRes = await postCoupons(makeReq('/api/admin/coupons', 'POST', adminToken, {
-    code: 'A', // too short
-    discountValue: 50,
-  }));
-  assert.equal(badCouponRes.status, 400, 'Invalid coupon code must be rejected with 400');
+    // 3. Invalid coupon code
+    const badCouponRes = await postCoupons(makeReq('/api/admin/coupons', 'POST', adminToken, {
+      code: 'A', // too short
+      discountValue: 50,
+    }));
+    assert.equal(badCouponRes.status, 400, 'Invalid coupon code must be rejected with 400');
 
-  // 4. Invalid complaint status
-  const badComplaintRes = await putComplaints(makeReq('/api/admin/complaints', 'PUT', adminToken, {
-    id: 'complaint-1',
-    status: 'NON_EXISTENT_STATUS',
-  }));
-  assert.equal(badComplaintRes.status, 400, 'Invalid complaint status must be rejected with 400');
+    // 4. Invalid complaint status
+    const badComplaintRes = await putComplaints(makeReq('/api/admin/complaints', 'PUT', adminToken, {
+      id: 'complaint-1',
+      status: 'NON_EXISTENT_STATUS',
+    }));
+    assert.equal(badComplaintRes.status, 400, 'Invalid complaint status must be rejected with 400');
+  } finally {
+    (db.user as any).findUnique = origUserFind;
+  }
 });
 
 test('Destructive Action Audit Logging: Force-exit agent records immutable audit log', async () => {
@@ -202,8 +215,12 @@ test('Destructive Action Audit Logging: Force-exit agent records immutable audit
 
   const origAgentFind = (db.agent as any).findUnique;
   const origAgentUpdate = (db.agent as any).update;
+  const origUserFind = (db.user as any).findUnique;
+  const origUserUpdate = (db.user as any).update;
   const origAuditCreate = (db.auditLog as any).create;
 
+  (db.user as any).findUnique = async () => ({ tokenVersion: 1 });
+  (db.user as any).update = async () => ({ tokenVersion: 2 });
   (db.agent as any).findUnique = async () => ({
     id: 'agent-101',
     status: 'AVAILABLE',
@@ -227,6 +244,8 @@ test('Destructive Action Audit Logging: Force-exit agent records immutable audit
   } finally {
     (db.agent as any).findUnique = origAgentFind;
     (db.agent as any).update = origAgentUpdate;
+    (db.user as any).findUnique = origUserFind;
+    (db.user as any).update = origUserUpdate;
     (db.auditLog as any).create = origAuditCreate;
   }
 });

@@ -1,11 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { timingSafeEqual } from 'crypto';
 import { db } from '@/lib/db';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
+
+function safeCompareSecrets(incoming: string, expected: string): boolean {
+  if (!incoming || !expected) return false;
+  let cleanIncoming = incoming;
+  if (cleanIncoming.toLowerCase().startsWith('bearer ')) {
+    cleanIncoming = cleanIncoming.substring(7).trim();
+  }
+  const incomingBuf = Buffer.from(cleanIncoming);
+  const expectedBuf = Buffer.from(expected);
+  if (incomingBuf.length !== expectedBuf.length) {
+    return false;
+  }
+  return timingSafeEqual(incomingBuf, expectedBuf);
+}
 
 export async function POST(req: NextRequest) {
   try {
     // 1. Webhook Secret Authentication Check
+    const isProduction = process.env.NODE_ENV === 'production';
     const webhookSecret = process.env.FAST2SMS_WHATSAPP_WEBHOOK_SECRET?.trim();
+
+    if (isProduction && !webhookSecret) {
+      console.error('[FAST2SMS_WEBHOOK_CONFIGURATION_ERROR] Webhook secret not configured in production.');
+      return errorResponse('UNAUTHORIZED', 'Webhook secret authentication is not configured in production.', 401);
+    }
+
     if (webhookSecret) {
       const incomingSecret = (
         req.headers.get('x-fast2sms-secret') ||
@@ -14,7 +36,7 @@ export async function POST(req: NextRequest) {
         ''
       ).trim();
 
-      if (incomingSecret !== webhookSecret) {
+      if (!safeCompareSecrets(incomingSecret, webhookSecret)) {
         console.warn('[FAST2SMS_WEBHOOK_UNAUTHORIZED] Invalid or missing webhook secret header.');
         return errorResponse('UNAUTHORIZED', 'Invalid webhook secret authentication.', 401);
       }

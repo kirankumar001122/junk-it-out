@@ -31,22 +31,7 @@ export async function GET(req: NextRequest) {
       return errorResponse('USER_NOT_FOUND', 'User profile not found.', 444);
     }
 
-    // Auto-heal missing Agent record if role is AGENT
-    if (user.role === 'AGENT' && !user.agent) {
-      const createdAgent = await db.agent.create({
-        data: {
-          userId: user.id,
-          vehicleType: 'Piaggio Ape Auto Loader (KA-05-JK-1024)',
-          vehicleNumber: 'KA-05-JK-1024',
-          status: 'AVAILABLE',
-          serviceAreas: 'JP Nagar, Jayanagar, Koramangala, Electronic City',
-        },
-      });
-      user = {
-        ...user,
-        agent: createdAgent,
-      };
-    }
+    const agentProfileComplete = user.role !== 'AGENT' || Boolean(user.agent);
 
     return successResponse({
       user: {
@@ -60,6 +45,10 @@ export async function GET(req: NextRequest) {
         admin: user.admin,
         addresses: user.addresses,
       },
+      agentProfileComplete,
+      ...(user.role === 'AGENT' && !user.agent
+        ? { message: 'Agent profile is incomplete. Please contact administrator.' }
+        : {}),
     });
   } catch (err: any) {
     console.error('Auth me error:', err);
