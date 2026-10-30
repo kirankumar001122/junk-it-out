@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import {
   Package,
@@ -8,6 +8,8 @@ import {
   RefreshCw,
   Eye,
   UserPlus,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 export default function AdminOrdersPage() {
@@ -18,6 +20,11 @@ export default function AdminOrdersPage() {
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('ALL');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalOrders, setTotalOrders] = useState(0);
+  const limit = 25;
+
   const [selectedOrderForAssign, setSelectedOrderForAssign] = useState<any>(null);
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [assignLoading, setAssignLoading] = useState(false);
@@ -26,18 +33,34 @@ export default function AdminOrdersPage() {
   const assignInFlightRef = useRef(false);
   const loadingRef = useRef(false);
   const agentsLoadingRef = useRef(false);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const loadOrders = async () => {
-    if (loadingRef.current) return;
+  const loadOrders = useCallback(async (targetPage = 1, search = searchTerm, status = filterStatus) => {
     loadingRef.current = true;
+    setLoading(true);
     try {
-      setLoading(true);
-      const ordersRes = await fetch('/api/orders?limit=100')
+      const params = new URLSearchParams({
+        page: String(targetPage),
+        limit: String(limit),
+      });
+      if (search.trim()) params.set('search', search.trim());
+      if (status !== 'ALL') params.set('status', status);
+
+      const res = await fetch(`/api/orders?${params.toString()}`)
         .then((r) => r.json())
         .catch(() => ({ success: false }));
 
-      if (ordersRes.success) {
-        setOrders(ordersRes.data || []);
+      if (res.success) {
+        setOrders(res.data || []);
+        if (res.meta) {
+          setPage(res.meta.page || targetPage);
+          setTotalPages(res.meta.totalPages || 1);
+          setTotalOrders(res.meta.total !== undefined ? res.meta.total : (res.data?.length ?? 0));
+        } else {
+          setPage(targetPage);
+          setTotalPages(1);
+          setTotalOrders(res.data?.length ?? 0);
+        }
       }
     } catch (e: any) {
       console.error('Error loading orders:', e);
@@ -45,7 +68,7 @@ export default function AdminOrdersPage() {
       setLoading(false);
       loadingRef.current = false;
     }
-  };
+  }, [searchTerm, filterStatus]);
 
   const loadAgents = async () => {
     if (agentsLoadingRef.current) return;
@@ -71,15 +94,35 @@ export default function AdminOrdersPage() {
     }
   };
 
-  const loadOrdersAndAgents = async () => {
-    await Promise.all([loadOrders(), loadAgents()]);
+  const loadOrdersAndAgents = () => {
+    loadOrders(page, searchTerm, filterStatus);
+    loadAgents();
   };
 
   useEffect(() => {
-    // Unblock orders table immediately; fetch field agents in background
-    loadOrders();
+    // Initial fetch
+    loadOrders(1, '', 'ALL');
     loadAgents();
   }, []);
+
+  // Debounce search and status filter changes to trigger server-side query across full history
+  const handleSearchChange = (val: string) => {
+    setSearchTerm(val);
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
+      loadOrders(1, val, filterStatus);
+    }, 350);
+  };
+
+  const handleStatusChange = (val: string) => {
+    setFilterStatus(val);
+    loadOrders(1, searchTerm, val);
+  };
+
+  const handlePageChange = (newPage: number) => {
+    if (newPage < 1 || newPage > totalPages) return;
+    loadOrders(newPage, searchTerm, filterStatus);
+  };
 
   // Keyboard accessibility and body scroll lock for modal
   useEffect(() => {
@@ -96,6 +139,7 @@ export default function AdminOrdersPage() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       document.body.style.overflow = '';
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     };
   }, [selectedOrderForAssign]);
 
@@ -154,7 +198,7 @@ export default function AdminOrdersPage() {
       if (res.ok && data.success) {
         setSelectedOrderForAssign(null);
         setSelectedAgentId('');
-        await loadOrdersAndAgents();
+        loadOrdersAndAgents();
       } else {
         setAssignError(data.error?.message || data.message || 'Failed to assign agent to this order.');
       }
@@ -166,16 +210,6 @@ export default function AdminOrdersPage() {
       setAssignLoading(false);
     }
   };
-
-  const filteredOrders = orders.filter((o) => {
-    const matchesStatus = filterStatus === 'ALL' || o.status === filterStatus;
-    const matchesSearch =
-      o.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      o.customer?.user?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      o.customer?.user?.phone?.includes(searchTerm) ||
-      o.address?.area?.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesStatus && matchesSearch;
-  });
 
   return (
     <div className="space-y-6">
@@ -208,7 +242,7 @@ export default function AdminOrdersPage() {
               type="text"
               placeholder="Search Order # / Customer / Phone / Area"
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-10 pr-4 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
             />
           </div>
@@ -216,7 +250,7 @@ export default function AdminOrdersPage() {
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <select
               value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
+              onChange={(e) => handleStatusChange(e.target.value)}
               className="w-full sm:w-auto bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
             >
               <option value="ALL">All Order Statuses</option>
@@ -248,7 +282,13 @@ export default function AdminOrdersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
-              {filteredOrders.length === 0 ? (
+              {loading && orders.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="p-8 text-center text-slate-400 font-semibold">
+                    Loading orders...
+                  </td>
+                </tr>
+              ) : orders.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-slate-400 space-y-2">
                     <Package className="w-8 h-8 mx-auto text-slate-300" />
@@ -257,7 +297,7 @@ export default function AdminOrdersPage() {
                   </td>
                 </tr>
               ) : (
-                filteredOrders.map((o) => (
+                orders.map((o) => (
                   <tr key={o.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="p-3 font-mono font-bold text-slate-900">{o.orderNumber}</td>
                     <td className="p-3">
@@ -322,6 +362,35 @@ export default function AdminOrdersPage() {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Pagination Controls */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-100 text-xs text-slate-500">
+          <div>
+            Showing page <span className="font-bold text-slate-800">{page}</span> of{' '}
+            <span className="font-bold text-slate-800">{totalPages}</span> ({totalOrders} total orders)
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handlePageChange(page - 1)}
+              disabled={page <= 1 || loading}
+              className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              Previous
+            </button>
+            <span className="px-2 font-bold text-slate-700">
+              {page} / {totalPages}
+            </span>
+            <button
+              onClick={() => handlePageChange(page + 1)}
+              disabled={page >= totalPages || loading}
+              className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              Next
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 

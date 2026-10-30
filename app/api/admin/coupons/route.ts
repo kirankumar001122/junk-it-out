@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
       active: c.active,
       expiryDate: c.expiryDate
         ? new Date(c.expiryDate).toISOString().split('T')[0]
-        : '2026-12-31',
+        : null,
     }));
 
     return NextResponse.json({ success: true, data: formatted, page, pageSize });
@@ -156,6 +156,47 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ success: true, data: updated });
   } catch (error: any) {
     console.error('Update coupon error:', error);
+    return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const authUser = await getAuthUser(req);
+    const authorizationStatus = getAdminAuthorizationStatus(authUser);
+    if (authorizationStatus === 401) {
+      return NextResponse.json({ success: false, message: 'Authentication is required.' }, { status: 401 });
+    }
+    if (authorizationStatus === 403) {
+      return NextResponse.json({ success: false, message: 'Admin access required.' }, { status: 403 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+    if (!id || typeof id !== 'string') {
+      return NextResponse.json({ success: false, message: 'Valid coupon ID required.' }, { status: 400 });
+    }
+
+    const existing = await db.coupon.findUnique({ where: { id: id.trim() } });
+    if (!existing) {
+      return NextResponse.json({ success: false, message: 'Coupon not found.' }, { status: 404 });
+    }
+
+    await db.coupon.delete({ where: { id: id.trim() } });
+
+    await db.auditLog.create({
+      data: {
+        userId: authUser?.userId || null,
+        userName: authUser?.name || 'Admin Operations',
+        action: 'COUPON_DELETED',
+        oldValue: `Deleted coupon ${existing.code}`,
+        newValue: null,
+      },
+    }).catch(() => null);
+
+    return NextResponse.json({ success: true, message: `Coupon ${existing.code} successfully deleted.` });
+  } catch (error: any) {
+    console.error('Delete coupon error:', error);
     return NextResponse.json({ success: false, message: error.message }, { status: 500 });
   }
 }

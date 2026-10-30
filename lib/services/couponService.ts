@@ -17,38 +17,13 @@ export type CouponValidationResult = {
   minOrderValue?: number;
   message?: string;
   error?: string;
-};
-
-// Known coupon definitions (used as fallbacks if database table has not been seeded)
-const KNOWN_COUPONS: Record<string, {
-  code: string;
-  discountType: 'FLAT' | 'PERCENTAGE';
-  discountValue: number;
-  minOrderValue: number;
-  maxDiscount?: number;
-  active: boolean;
-}> = {
-  WELCOME50: {
-    code: 'WELCOME50',
-    discountType: 'FLAT',
-    discountValue: 50.0,
-    minOrderValue: 100.0,
-    maxDiscount: 100.0,
-    active: true,
-  },
-  SOUTHBLR20: {
-    code: 'SOUTHBLR20',
-    discountType: 'PERCENTAGE',
-    discountValue: 20.0,
-    minOrderValue: 200.0,
-    maxDiscount: 100.0,
-    active: true,
-  },
+  isDbError?: boolean;
 };
 
 /**
  * Validate coupon code and calculate discount amount server-side.
  * Never trust a discount amount supplied only by the client.
+ * Strictly checks the database; no hardcoded fallbacks that could bypass deactivated/deleted state.
  */
 export async function validateAndCalculateCoupon(
   rawCode: string | null | undefined,
@@ -76,17 +51,19 @@ export async function validateAndCalculateCoupon(
       coupon = await db.coupon.findUnique({
         where: { code },
       });
-    } catch (err) {
-      console.warn('[COUPON] Database lookup error, checking known coupons fallback:', err);
+    } catch (err: any) {
+      console.error('[COUPON] Database lookup error:', err);
+      return {
+        valid: false,
+        discountAmount: 0,
+        finalAmount: Math.max(1, Math.round(safeSubtotal * 100) / 100),
+        error: 'Database error occurred while looking up coupon.',
+        isDbError: true,
+      };
     }
   }
 
-  // 2. Fallback to known seeded coupons if database record not found
-  if (!coupon && KNOWN_COUPONS[code]) {
-    coupon = KNOWN_COUPONS[code];
-  }
-
-  // 3. Existence check
+  // 2. Existence check (no hardcoded fallback)
   if (!coupon) {
     return {
       valid: false,
@@ -96,7 +73,7 @@ export async function validateAndCalculateCoupon(
     };
   }
 
-  // 4. Active status check
+  // 3. Active status check
   if (!coupon.active) {
     return {
       valid: false,
@@ -106,7 +83,7 @@ export async function validateAndCalculateCoupon(
     };
   }
 
-  // 5. Expiry date check
+  // 4. Expiry date check
   if (coupon.expiryDate) {
     const expiry = new Date(coupon.expiryDate);
     if (!isNaN(expiry.getTime()) && expiry.getTime() < Date.now()) {
@@ -119,7 +96,7 @@ export async function validateAndCalculateCoupon(
     }
   }
 
-  // 6. Minimum order value requirement
+  // 5. Minimum order value requirement
   const minOrder = Number(coupon.minOrderValue) || 0;
   if (minOrder > 0 && safeSubtotal < minOrder) {
     return {
@@ -130,7 +107,7 @@ export async function validateAndCalculateCoupon(
     };
   }
 
-  // 7. Customer eligibility check (WELCOME50 is only for first pickup order)
+  // 6. Customer eligibility check (WELCOME50 is only for first pickup order)
   if (code === 'WELCOME50' && customerId) {
     try {
       const priorOrdersCount = await db.order.count({
@@ -149,12 +126,19 @@ export async function validateAndCalculateCoupon(
           error: 'Coupon WELCOME50 is only valid for your first pickup booking.',
         };
       }
-    } catch (err) {
-      console.warn('[COUPON] Prior orders count check skipped:', err);
+    } catch (err: any) {
+      console.error('[COUPON] Prior orders count check error:', err);
+      return {
+        valid: false,
+        discountAmount: 0,
+        finalAmount: Math.max(1, Math.round(safeSubtotal * 100) / 100),
+        error: 'Database error occurred while verifying coupon eligibility.',
+        isDbError: true,
+      };
     }
   }
 
-  // 8. Discount calculation
+  // 7. Discount calculation
   let discount = 0;
   if (coupon.discountType === 'FLAT') {
     discount = Number(coupon.discountValue) || 0;

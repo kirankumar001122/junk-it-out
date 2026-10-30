@@ -201,3 +201,45 @@ export async function POST(req: NextRequest) {
     return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to create waste category.', 500);
   }
 }
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const authUser = await getAuthUser(req);
+    const authorizationStatus = getAdminAuthorizationStatus(authUser);
+    if (authorizationStatus === 401) {
+      return errorResponse('UNAUTHORIZED', 'Authentication is required.', 401);
+    }
+    if (authorizationStatus === 403) {
+      return errorResponse('FORBIDDEN', 'Admin access required.', 403);
+    }
+
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+    if (!id || typeof id !== 'string') {
+      return errorResponse('INVALID_INPUT', 'Waste category id is required.', 400);
+    }
+
+    const existing = await db.wasteCategory.findUnique({ where: { id: id.trim() } });
+    if (!existing) {
+      return errorResponse('NOT_FOUND', `Waste category #${id} not found.`, 404);
+    }
+
+    await db.wasteCategory.delete({ where: { id: id.trim() } });
+
+    await db.auditLog.create({
+      data: {
+        userId: authUser?.userId || null,
+        userName: authUser?.name || 'Admin Operations',
+        action: 'DELETE_WASTE_CATEGORY',
+        oldValue: `${existing.name}: ₹${existing.pricePerKg}/kg (Active: ${existing.active})`,
+        newValue: null,
+      },
+    }).catch(() => null);
+
+    invalidateCategoriesCache();
+    return successResponse({ message: `Waste category ${existing.name} successfully deleted.` });
+  } catch (err: any) {
+    console.error('Delete waste category error:', err);
+    return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to delete waste category.', 500);
+  }
+}
