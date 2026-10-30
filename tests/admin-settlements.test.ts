@@ -80,8 +80,12 @@ async function run() {
     assert.equal(readyRes.status, 200);
     assert.equal(currentSettlement.status, 'READY_FOR_PAYOUT');
 
-    // 6. Update to PAID
-    const paidRes = await updateSettlement(makeRequest({ id: 'settlement-1', status: 'PAID' }, 'PATCH'));
+    // 6. Reject PAID without transaction reference (SEC-12)
+    const missingRefRes = await updateSettlement(makeRequest({ id: 'settlement-1', status: 'PAID' }, 'PATCH'));
+    assert.equal(missingRefRes.status, 400, 'PAID status without transaction reference must return 400');
+
+    // 7. Update to PAID with valid transaction reference
+    const paidRes = await updateSettlement(makeRequest({ id: 'settlement-1', status: 'PAID', transactionReference: 'TXN_PAYOUT_987654' }, 'PATCH'));
     assert.equal(paidRes.status, 200);
     assert.equal(currentSettlement.status, 'PAID');
     assert.ok(currentSettlement.paidAt instanceof Date, 'paidAt should be set on payment');

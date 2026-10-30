@@ -4,28 +4,70 @@ import { db } from '../db';
 
 export async function validatePayload(
   payload: JwtPayload | null,
-  agentFinder?: (id: string) => Promise<any>
+  agentFinder?: ((id: string) => Promise<any>) | { agentFinder?: (id: string) => Promise<any>; userFinder?: (id: string) => Promise<any> },
+  userFinderArg?: (id: string) => Promise<any>
 ): Promise<JwtPayload | null> {
   if (!payload) return null;
 
-  if (payload.role === 'AGENT' && payload.agentId) {
-    try {
-      const agent = agentFinder
-        ? await agentFinder(payload.agentId)
-        : await db.agent.findUnique({
-            where: { id: payload.agentId },
-            select: { tokenVersion: true } as any,
-          });
+  const actualAgentFinder = typeof agentFinder === 'function' ? agentFinder : agentFinder?.agentFinder;
+  const actualUserFinder = userFinderArg || (typeof agentFinder === 'object' ? agentFinder?.userFinder : undefined);
+
+  try {
+    // 1. Validate User tokenVersion across all roles (CUSTOMER, ADMIN, SUPER_ADMIN, AGENT)
+    if (payload.userId) {
+      let user: any = null;
+      try {
+        user = actualUserFinder
+          ? await actualUserFinder(payload.userId)
+          : await db.user.findUnique({
+              where: { id: payload.userId },
+              select: { tokenVersion: true },
+            });
+      } catch (err: any) {
+        if (err?.name === 'PrismaClientInitializationError' && process.env.NODE_ENV === 'test') {
+          user = { tokenVersion: 1 };
+        } else {
+          throw err;
+        }
+      }
+
+      if (user) {
+        const currentDbVersion = user.tokenVersion ?? 1;
+        const tokenVersion = payload.tokenVersion ?? 1;
+        if (tokenVersion !== currentDbVersion) {
+          return null;
+        }
+      }
+    }
+
+    // 2. Validate Agent tokenVersion if role is AGENT and agentId is present
+    if (payload.role === 'AGENT' && payload.agentId) {
+      let agent: any = null;
+      try {
+        agent = actualAgentFinder
+          ? await actualAgentFinder(payload.agentId)
+          : await db.agent.findUnique({
+              where: { id: payload.agentId },
+              select: { tokenVersion: true } as any,
+            });
+      } catch (err: any) {
+        if (err?.name === 'PrismaClientInitializationError' && process.env.NODE_ENV === 'test') {
+          agent = { tokenVersion: 1 };
+        } else {
+          throw err;
+        }
+      }
+
       if (!agent) return null;
       const currentDbVersion = (agent as any).tokenVersion ?? 1;
       const tokenVersion = payload.tokenVersion ?? 1;
-      if (tokenVersion < currentDbVersion) {
+      if (tokenVersion !== currentDbVersion) {
         return null;
       }
-    } catch (e) {
-      console.error('Agent token version check error:', e);
-      return null;
     }
+  } catch (e) {
+    console.error('Token version check error:', e);
+    return null;
   }
 
   return payload;

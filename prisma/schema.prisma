@@ -15,6 +15,7 @@ model User {
   name               String
   passwordHash       String?
   role               String               @default("CUSTOMER")
+  tokenVersion       Int                  @default(1)
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
   addresses          Address[]

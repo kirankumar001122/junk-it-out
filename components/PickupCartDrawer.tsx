@@ -20,6 +20,7 @@ import {
   KeyRound,
   AlertTriangle,
 } from 'lucide-react';
+import WeightQuantityInput from '@/components/WeightQuantityInput';
 import { calculateOrderValuation } from '@/lib/pricing';
 import {
   pickupCartEvent,
@@ -189,14 +190,6 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.message || data.error?.message || 'Unable to send OTP. Please check mobile number.');
-      }
-
-      if (data.data?.isExisting && data.data?.existingName) {
-        setName(data.data.existingName);
-      } else if (!data.data?.isExisting && (!name || name.trim().length < 2)) {
-        setOtpError('Please enter your full name for registration.');
-        setOtpLoading(false);
-        return;
       }
 
       setOtpStep('code');
@@ -555,7 +548,12 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
                         >
                           <Minus className="h-3.5 w-3.5" />
                         </button>
-                        <span className="min-w-16 text-center text-sm font-black text-slate-950">{item.quantity} kg</span>
+                        <WeightQuantityInput
+                          value={item.quantity}
+                          onChange={(val) => updateQuantity(item.categoryId, val)}
+                          categoryName={item.category.name}
+                          textClassName="text-sm font-black text-slate-950"
+                        />
                         <button
                           onClick={() => updateQuantity(item.categoryId, item.quantity + 1)}
                           className="btn-glossy-primary rounded-full h-8 w-8 text-white p-0 grid place-items-center"

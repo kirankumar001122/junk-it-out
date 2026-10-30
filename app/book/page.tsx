@@ -24,6 +24,7 @@ import {
   X,
 } from 'lucide-react';
 import CustomerOtpLogin from '@/components/CustomerOtpLogin';
+import WeightQuantityInput from '@/components/WeightQuantityInput';
 import LocationSearchModal from '@/components/LocationSearchModal';
 import InteractiveMap, { loadGoogleMaps } from '@/components/InteractiveMap';
 import { readPickupCart } from '@/lib/pickupCart';
@@ -1167,7 +1168,12 @@ export default function BookingPage() {
                         >
                           <Minus className="h-3.5 w-3.5" />
                         </button>
-                        <span className="text-xs font-extrabold text-emerald-950 px-2">{quantity} kg</span>
+                        <WeightQuantityInput
+                          value={quantity}
+                          onChange={(val) => updateItemWeight(cat.id, val)}
+                          categoryName={cat.name}
+                          textClassName="text-xs font-extrabold text-emerald-950"
+                        />
                         <button
                           type="button"
                           onClick={() => updateItemWeight(cat.id, quantity + 1)}

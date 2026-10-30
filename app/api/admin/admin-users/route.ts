@@ -53,8 +53,8 @@ export async function POST(req: NextRequest) {
     if (authorizationStatus === 401) {
       return NextResponse.json({ success: false, message: 'Authentication is required.' }, { status: 401 });
     }
-    if (authorizationStatus === 403) {
-      return NextResponse.json({ success: false, message: 'Admin access required.' }, { status: 403 });
+    if (authorizationStatus === 403 || authUser?.role !== 'SUPER_ADMIN') {
+      return NextResponse.json({ success: false, message: 'Super Admin access required to provision administrators.' }, { status: 403 });
     }
 
     const body = await req.json().catch(() => ({}));
@@ -78,6 +78,16 @@ export async function POST(req: NextRequest) {
 
     // Check if user already exists
     let user = await db.user.findUnique({ where: { phone: cleanPhone } });
+    if (user && (user.role === 'CUSTOMER' || user.role === 'AGENT')) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: 'This phone number belongs to an existing customer or agent account and cannot be converted to an administrator.',
+        },
+        { status: 409 }
+      );
+    }
+
     if (!user) {
       user = await db.user.create({
         data: {

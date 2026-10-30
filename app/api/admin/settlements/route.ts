@@ -52,10 +52,27 @@ export async function PATCH(req: NextRequest) {
   }
 
   try {
-    const { id, status } = await req.json().catch(() => ({}));
+    const body = await req.json().catch(() => ({}));
+    const { id, status } = body;
     const allowedStatuses = ['APPROVED', 'READY_FOR_PAYOUT', 'PAID', 'SETTLEMENT_COMPLETED'];
     if (!id || typeof id !== 'string' || !allowedStatuses.includes(status)) {
       return NextResponse.json({ success: false, message: 'Only APPROVED, READY_FOR_PAYOUT, or PAID settlement states are supported.' }, { status: 400 });
+    }
+
+    const transactionReference = (
+      body.transactionReference ||
+      body.payoutId ||
+      body.reference ||
+      ''
+    ).toString().trim();
+
+    if (status === 'PAID' || status === 'SETTLEMENT_COMPLETED') {
+      if (!transactionReference || !/^[A-Za-z0-9_-]{4,64}$/.test(transactionReference)) {
+        return NextResponse.json({
+          success: false,
+          message: 'A valid transaction reference or payout ID (4-64 alphanumeric characters, underscores or hyphens) is required to mark settlement as paid.',
+        }, { status: 400 });
+      }
     }
 
     const now = new Date();
@@ -77,7 +94,7 @@ export async function PATCH(req: NextRequest) {
         userName: authUser?.name || 'Admin Operations',
         action: 'SETTLEMENT_STATUS_UPDATED',
         oldValue: null,
-        newValue: `Settlement ${settlement.id} updated to status ${status} (Amount: ₹${settlement.amount})`,
+        newValue: `Settlement ${settlement.id} updated to status ${status} (Amount: ₹${settlement.amount}${transactionReference ? `, Ref: ${transactionReference}` : ''})`,
       },
     }).catch(() => null);
 

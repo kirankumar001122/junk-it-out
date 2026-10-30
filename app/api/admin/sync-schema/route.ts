@@ -15,32 +15,14 @@ export async function GET(req: NextRequest) {
       }, { status: 403 });
     }
 
-    // 1. Production Schema Safety Check
+    // 1. Read-only Schema Inspection (Runtime DDL is removed for security)
     const columnCheck: any[] = await db.$queryRawUnsafe(`
       SELECT table_name, column_name, is_nullable, data_type 
       FROM information_schema.columns 
       WHERE table_name = 'Complaint' AND column_name = 'orderId';
     `);
 
-    const initialNullable = columnCheck[0]?.is_nullable === 'YES';
-
-    let syncExecuted = false;
-
-    if (!initialNullable) {
-      // 2. Non-destructive Additive Schema Synchronization
-      // ALTER COLUMN orderId DROP NOT NULL makes orderId nullable without deleting any records or dropping tables.
-      await db.$executeRawUnsafe(`ALTER TABLE "Complaint" ALTER COLUMN "orderId" DROP NOT NULL;`);
-      syncExecuted = true;
-    }
-
-    // 3. Post-Sync Verification
-    const postColumnCheck: any[] = await db.$queryRawUnsafe(`
-      SELECT table_name, column_name, is_nullable, data_type 
-      FROM information_schema.columns 
-      WHERE table_name = 'Complaint' AND column_name = 'orderId';
-    `);
-
-    const isNowNullable = postColumnCheck[0]?.is_nullable === 'YES';
+    const isNullable = columnCheck[0]?.is_nullable === 'YES';
 
     const [complaintCount, orderCount, customerCount, userCount] = await Promise.all([
       db.complaint.count(),
@@ -53,21 +35,22 @@ export async function GET(req: NextRequest) {
       data: {
         userId: authUser.userId,
         userName: authUser.name,
-        action: 'SCHEMA_SYNC_EXECUTED',
-        oldValue: `Initial orderId nullable: ${initialNullable}`,
-        newValue: `Sync executed: ${syncExecuted}, Current nullable: ${isNowNullable}`,
+        action: 'SCHEMA_STATUS_INSPECTED',
+        oldValue: null,
+        newValue: `Complaint.orderId nullable: ${isNullable}. Runtime DDL execution retired; use version-controlled Prisma migrations.`,
       },
     }).catch(() => null);
 
     return NextResponse.json({
       success: true,
-      message: 'Production complaint schema check and synchronization complete.',
+      message: 'Schema inspection complete. Runtime DDL execution is disabled; schema migrations are managed via version-controlled Prisma migrations.',
       details: {
         targetTable: 'Complaint',
         targetColumn: 'orderId',
-        initialNullable,
-        syncExecuted,
-        isNullable: isNowNullable,
+        initialNullable: isNullable,
+        syncExecuted: false,
+        isNullable,
+        migrationStrategy: 'PRISMA_MIGRATIONS',
         recordsPreserved: {
           complaints: complaintCount,
           orders: orderCount,

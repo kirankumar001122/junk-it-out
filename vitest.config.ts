@@ -42,6 +42,9 @@ export default defineConfig({
       'tests/security-hardening.test.ts',
       'tests/response-shape-security.test.ts',
       'tests/realtime-admin-stream.test.ts',
+      'tests/security-phase2a.test.ts',
+      'tests/security-phase2b.test.ts',
+      'tests/security-phase2c.test.ts',
     ],
   },
 });
