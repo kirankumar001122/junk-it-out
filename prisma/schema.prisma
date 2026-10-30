@@ -193,6 +193,7 @@ model Order {
   @@index([agentId, status, createdAt])
   @@index([status, createdAt])
   @@index([paymentStatus, createdAt])
+  @@index([financialDirection, status, createdAt])
 }
 
 model OrderIdempotency {
@@ -317,6 +318,11 @@ model Settlement {
   amount        Float
   breakdownJson String
   status        String    @default("PENDING")
+  payoutId      String?
+  utr           String?
+  payoutMethod  String?   @default("BANK_TRANSFER")
+  failureReason String?
+  processedAt   DateTime?
   createdAt     DateTime  @default(now())
   approvedAt    DateTime?
   paidAt        DateTime?

@@ -770,6 +770,24 @@ export default function BookingPage() {
 
       const orderData = data.data;
 
+      // If order does not require customer payment (e.g. JUNKITOUT_PAYS scrap payout or ZERO_BALANCE), confirm directly
+      if (orderData.financialDirection !== 'CUSTOMER_PAYS' || Number(orderData.finalAmount) === 0) {
+        idempotencyKeyRef.current = '';
+        lastPayloadSignatureRef.current = '';
+        setPendingOrder(null);
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('jio_pending_order');
+        }
+        setLoading(false);
+        isSubmittingRef.current = false;
+        setSuccessOrder({
+          ...orderData,
+          paymentStatus: 'NOT_APPLICABLE',
+          status: 'BOOKING_RECEIVED',
+        });
+        return;
+      }
+
       // 2. Check if paymentConfig was already provided in single round-trip by /api/orders
       let razorpayConfig = orderData.paymentConfig;
 
