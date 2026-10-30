@@ -62,6 +62,8 @@ function formatAgentPhoneForTemplate(phone: string): string {
 export async function sendDispatchUpdate(
   input: SendDispatchUpdateInput
 ): Promise<WhatsAppServiceResult> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
   try {
     const apiKey = (
       process.env.FAST2SMS_WHATSAPP_API_KEY ||
@@ -117,7 +119,7 @@ export async function sendDispatchUpdate(
     const targetUrl = `${FAST2SMS_WHATSAPP_URL}?${params.toString()}`;
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
     logStructured('info', 'notification.whatsapp.request_started', { dependency: 'fast2sms' });
 
@@ -130,8 +132,6 @@ export async function sendDispatchUpdate(
       cache: 'no-store',
       signal: controller.signal,
     });
-
-    clearTimeout(timeout);
 
     const responseText = await response.text();
     let responseData: any = {};
@@ -167,16 +167,10 @@ export async function sendDispatchUpdate(
         message: 'WhatsApp Dispatch Update delivered successfully.',
       };
     } else {
-      const errMsg =
-        responseData.message ||
-        responseData.error ||
-        responseData.detail ||
-        `HTTP ${response.status}`;
-
       return {
         success: false,
         requestId,
-        error: typeof errMsg === 'object' ? JSON.stringify(errMsg) : String(errMsg),
+        error: 'Fast2SMS did not accept the WhatsApp dispatch update.',
       };
     }
   } catch (err: any) {
@@ -187,8 +181,10 @@ export async function sendDispatchUpdate(
 
     return {
       success: false,
-      error: err.message || 'Network exception calling Fast2SMS API.',
+      error: 'Fast2SMS WhatsApp request failed.',
     };
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 
