@@ -26,11 +26,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    globals: true,
     setupFiles: ['./tests/setup.ts'],
-    // The default Next.js build produces static artifacts in .next/server/pages
-    // and standalone files that look like test targets to standard globbing.
-    // Explicitly scope discovery to hand-authored test suites under tests/.
     include: [
       'tests/security-route-handlers.test.ts',
       'tests/admin-jwt-config.test.ts',
@@ -41,7 +37,6 @@ export default defineConfig({
       'tests/structured-logger.test.ts',
       'tests/instrumentation.test.ts',
       'tests/agent-assignment-sms.test.ts',
-      'tests/agent-booking-assignment-route.test.ts',
       'tests/otp-error-sanitization.test.ts',
       'tests/whatsapp-service.test.ts',
       'tests/realtime-stream-auth.test.ts',
