@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
         uploadedUrls.push(proxyUrl);
       } else {
         // Fallback for local development when BLOB_READ_WRITE_TOKEN is not set
-        const uploadDir = path.resolve(process.cwd(), 'public', 'uploads');
+        const uploadDir = path.resolve(process.cwd(), 'storage', 'uploads');
         await mkdir(uploadDir, { recursive: true });
         const filePath = path.resolve(uploadDir, filename);
 
