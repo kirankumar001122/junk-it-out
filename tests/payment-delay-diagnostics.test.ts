@@ -99,7 +99,20 @@ vi.mock('@/lib/payments/razorpay', () => {
 
 vi.mock('@/lib/db', () => {
   const coupon = {
-    findUnique: vi.fn(async () => null),
+    findUnique: vi.fn(async ({ where }: any = {}) => {
+      if (where?.code === 'WELCOME50') {
+        return {
+          id: 'coupon-welcome50',
+          code: 'WELCOME50',
+          discountType: 'FLAT',
+          discountValue: 50.0,
+          minOrderValue: 100.0,
+          active: true,
+          expiryDate: null,
+        };
+      }
+      return null;
+    }),
   };
 
   const orderTable = {
