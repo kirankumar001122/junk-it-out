@@ -47,14 +47,17 @@ export async function POST(req: NextRequest) {
 
     // 2. Lookup & Provision Agent User (Authorized Agents: 9353276638, 7842259582)
     const rawDigits = normalized.replace(/\D/g, '').slice(-10);
-    const isAuthorizedAgentNumber = rawDigits === '9353276638' || rawDigits === '7842259582';
+    const isAuthorizedAgentNumber =
+      rawDigits === '9353276638' ||
+      rawDigits === '7842259582' ||
+      rawDigits === '7479895482';
     const phoneVariants = Array.from(
       new Set([normalized, rawDigits, `+91${rawDigits}`, `0${rawDigits}`])
     );
 
     let user = await db.user.findFirst({
       where: { phone: { in: phoneVariants } },
-      include: { agent: true },
+      include: { agent: true, admin: true },
     });
 
     if (isAuthorizedAgentNumber) {
@@ -75,33 +78,38 @@ export async function POST(req: NextRequest) {
               },
             },
           },
-          include: { agent: true },
+          include: { agent: true, admin: true },
         });
       } else {
-        // Ensure user has AGENT role & active agent profile
-        if (user.role !== 'AGENT' || !user.agent) {
-          let agentRecord = user.agent;
-          if (!agentRecord) {
-            agentRecord = await db.agent.create({
-              data: {
-                userId: user.id,
-                vehicleType: 'Piaggio Ape Auto Loader (KA-05-JK-1024)',
-                vehicleNumber: 'KA-05-JK-1024',
-                status: 'AVAILABLE',
-                serviceAreas: 'JP Nagar, Jayanagar, Koramangala, Electronic City',
-              },
-            });
-          }
+        // Ensure user has active agent profile without stripping administrative roles
+        if (!user.agent) {
+          const agentRecord = await db.agent.create({
+            data: {
+              userId: user.id,
+              vehicleType: 'Piaggio Ape Auto Loader (KA-05-JK-1024)',
+              vehicleNumber: 'KA-05-JK-1024',
+              status: 'AVAILABLE',
+              serviceAreas: 'JP Nagar, Jayanagar, Koramangala, Electronic City',
+            },
+          });
+          user.agent = agentRecord;
+        }
+
+        if (user.role !== 'AGENT' && !['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
           user = await db.user.update({
             where: { id: user.id },
             data: { role: 'AGENT' },
-            include: { agent: true },
+            include: { agent: true, admin: true },
           });
         }
       }
     }
 
-    if (!user || user.role !== 'AGENT' || !user.agent) {
+    const hasAgentAccess =
+      user?.agent &&
+      (user.role === 'AGENT' || isAuthorizedAgentNumber || ['ADMIN', 'SUPER_ADMIN'].includes(user.role));
+
+    if (!user || !hasAgentAccess || !user.agent) {
       return errorResponse(
         'FORBIDDEN',
         `No registered agent account found for ${normalized}. Agent Portal access is restricted to authorized field agents.`,

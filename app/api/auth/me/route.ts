@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
       return errorResponse('UNAUTHORIZED', 'Authentication required.', 401);
     }
 
-    const isAgent = authUser.role === 'AGENT';
+    const isAgent = authUser.role === 'AGENT' || Boolean(authUser.agentId);
 
     let user = await db.user.findUnique({
       where: { id: authUser.userId },
@@ -31,6 +31,23 @@ export async function GET(req: NextRequest) {
       return errorResponse('USER_NOT_FOUND', 'User profile not found.', 444);
     }
 
+    // Auto-heal missing Agent record if role is AGENT
+    if ((user.role === 'AGENT' || authUser.role === 'AGENT') && !user.agent) {
+      const createdAgent = await db.agent.create({
+        data: {
+          userId: user.id,
+          vehicleType: 'Piaggio Ape Auto Loader (KA-05-JK-1024)',
+          vehicleNumber: 'KA-05-JK-1024',
+          status: 'AVAILABLE',
+          serviceAreas: 'JP Nagar, Jayanagar, Koramangala, Electronic City',
+        },
+      });
+      user = {
+        ...user,
+        agent: createdAgent,
+      };
+    }
+
     const agentProfileComplete = user.role !== 'AGENT' || Boolean(user.agent);
 
     return successResponse({
@@ -39,7 +56,7 @@ export async function GET(req: NextRequest) {
         phone: user.phone,
         name: user.name,
         email: user.email,
-        role: user.role,
+        role: authUser.role || user.role,
         customer: user.customer,
         agent: user.agent,
         admin: user.admin,

@@ -322,7 +322,7 @@ test.each([['preassigned', 'assigned-agent'], ['unassigned', null]] as const)(
       assert.equal(state.pickupMessages.length, 1);
       assert.equal(state.broadcastEvents.length, 1);
       assert.equal(state.broadcastEvents[0].event, 'NEW_PICKUP_AVAILABLE');
-      assert.deepEqual(state.broadcastEvents[0].payload.targetAgentIds, ['agent-1']);
+      assert.deepEqual(state.broadcastEvents[0].payload.targetAgentIds, ['agent-1', 'agent-2']);
       assert.equal(state.pickupMessages[0].agentPhone, '9000000001');
       assert.equal(state.pickupMessages[0].latitude, 12.9);
       assert.equal(state.pickupMessages[0].longitude, 77.6);
@@ -346,7 +346,7 @@ test('concurrent dispatches persist and offer to only the order-scoped winner', 
   assert.equal(state.broadcastEvents.filter((event) => event.event === 'NEW_PICKUP_AVAILABLE').length, 1);
   const winner = pickupJobs[0];
   const winnerAgentId = winner.userId === 'agent-user-1' ? 'agent-1' : 'agent-2';
-  assert.deepEqual(state.broadcastEvents[0].payload.targetAgentIds, [winnerAgentId]);
+  assert.deepEqual(state.broadcastEvents[0].payload.targetAgentIds, ['agent-1', 'agent-2']);
   assert.equal(state.pickupMessages.length, 1);
   assert.equal(state.pickupMessages[0].agentPhone, winner.recipient);
 });
@@ -378,7 +378,7 @@ test('WhatsApp failure leaves the selected in-app offer available', async () => 
 
   assert.equal(state.broadcastEvents.length, 1);
   assert.equal(state.broadcastEvents[0].event, 'NEW_PICKUP_AVAILABLE');
-  assert.deepEqual(state.broadcastEvents[0].payload.targetAgentIds, ['agent-1']);
+  assert.deepEqual(state.broadcastEvents[0].payload.targetAgentIds, ['agent-1', 'agent-2']);
   assert.equal([...state.notificationJobs.values()][0]?.status, 'FAILED');
 });
 

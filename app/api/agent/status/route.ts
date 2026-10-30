@@ -4,7 +4,7 @@ import { getAuthUser } from '@/lib/auth/middleware';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { reconcileUndispatchedPaidOrders } from '@/lib/payments/dispatchRecovery';
 
-const ALLOWED_STATUSES = ['AVAILABLE', 'OFFLINE'];
+const ALLOWED_STATUSES = ['AVAILABLE', 'OFFLINE', 'ASSIGNED'];
 
 export async function PATCH(req: NextRequest) {
   const startedAt = Date.now();
@@ -32,18 +32,29 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    const targetStatus = status.toUpperCase();
+    let targetStatus = status.toUpperCase();
 
     const updateResult = await db.$transaction(async (tx) => {
       if (targetStatus === 'AVAILABLE') {
         const activeOrder = await tx.order.findFirst({
           where: {
             agentId: authUser.agentId,
-            status: { in: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WASTE_VERIFICATION', 'WEIGHING'] },
+            status: { in: ['AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WASTE_VERIFICATION', 'WEIGHING'] },
           },
           select: { id: true },
         });
         if (activeOrder) return { conflict: true as const };
+      } else if (targetStatus === 'ASSIGNED') {
+        const hasAssignment = await tx.order.findFirst({
+          where: {
+            agentId: authUser.agentId,
+            status: { in: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WASTE_VERIFICATION', 'WEIGHING'] },
+          },
+          select: { id: true },
+        });
+        if (!hasAssignment) {
+          targetStatus = 'AVAILABLE';
+        }
       }
 
       const updatedAgent = await tx.agent.update({

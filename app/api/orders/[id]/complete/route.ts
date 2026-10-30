@@ -190,7 +190,7 @@ export async function POST(
       if (!hasWeightPayload) {
         const itemsToCheck = currentOrder.items && currentOrder.items.length > 0 ? currentOrder.items : order.items;
         const unweighed = itemsToCheck.find(
-          (item) => typeof item.actualWeight !== 'number' || !Number.isFinite(item.actualWeight) || item.actualWeight <= 0
+          (item: any) => typeof item.actualWeight !== 'number' || !Number.isFinite(item.actualWeight) || item.actualWeight <= 0
         );
         const wrCount = currentOrder.weightRecords?.length ?? order.weightRecords.length;
         if (unweighed || wrCount === 0) {
@@ -352,7 +352,7 @@ export async function POST(
       return { kind: 'completed' as const, order: updated };
     }, {
       maxWait: 10000,
-      timeout: 15000,
+      timeout: 25000,
     });
 
     if (completionResult.kind === 'notFound') {
@@ -365,6 +365,10 @@ export async function POST(
 
     if (completionResult.kind === 'alreadyCompleted') {
       return successResponse(completionResult.order, 200, { message: 'Order was already completed.' });
+    }
+
+    if (completionResult.kind === 'weighingRequired') {
+      return errorResponse('WEIGHING_REQUIRED', 'All order items must have valid recorded weights before completing pickup.', 400);
     }
 
     if (completionResult.kind === 'invalidTransition') {

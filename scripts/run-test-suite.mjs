@@ -34,6 +34,7 @@ const standaloneTests = [
   'tests/agent-accept-concurrency.test.ts',
   'tests/agent-geolocation.test.ts',
   'tests/agent-login-recovery.test.ts',
+  'tests/agent-whitelisting-and-visibility.test.ts',
   'tests/agent-order-access.test.ts',
   'tests/agent-accept-workflow.test.ts',
   'tests/agent-completion-workflow.test.ts',
@@ -51,6 +52,8 @@ const standaloneTests = [
   'tests/order-tracking-access.test.ts',
   'tests/order-idempotency.test.ts',
   'tests/booking-payload-idempotency.test.ts',
+  'tests/customer-addresses-security.test.ts',
+  'tests/backend-order-dispatch-hardening.test.ts',
 ];
 const standaloneOnly = process.argv.includes('--standalone-only');
 

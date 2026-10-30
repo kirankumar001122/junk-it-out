@@ -30,8 +30,10 @@ async function testCustomerAddressesSecurity() {
 
   const originalFindMany = addressDelegate.findMany;
   const originalCreate = addressDelegate.create;
+  const originalUpdateMany = addressDelegate.updateMany;
   const originalDeleteMany = addressDelegate.deleteMany;
   const originalFindUnique = userDelegate.findUnique;
+  const originalTransaction = (db as any).$transaction;
 
   const queriedUserIds: string[] = [];
   const createdAddresses: any[] = [];
@@ -61,6 +63,9 @@ async function testCustomerAddressesSecurity() {
     createdAddresses.push(data);
     return { id: `addr-new-${createdAddresses.length}`, ...data };
   };
+
+  addressDelegate.updateMany = async () => ({ count: 1 });
+  (db as any).$transaction = async (cb: any) => cb(db);
 
   addressDelegate.deleteMany = async ({ where }: any) => {
     deletedAddressQueries.push(where);
@@ -133,6 +138,8 @@ async function testCustomerAddressesSecurity() {
         street: 'Bannerghatta Rd',
         area: 'JP Nagar 4th Phase',
         pincode: '560076',
+        lat: 12.9081,
+        lng: 77.5852,
         phone: '9999922222', // Attempted forged phone of customer 2
         userId: 'cust-2',    // Attempted forged userId
       }),
@@ -149,10 +156,12 @@ async function testCustomerAddressesSecurity() {
       headers: { Cookie: `jio_token=${cust1Token}` },
     });
     const cust1DeleteRes = await DELETE(cust1DeleteReq);
-    assert.equal(cust1DeleteRes.status, 404, 'Attempting to delete another customer address returns 404');
-    assert.deepEqual(deletedAddressQueries[0], { id: 'addr-2', userId: 'cust-1' }, 'Delete scoped to caller userId');
+    assert.equal(cust1DeleteRes.status, 404, 'Cannot delete an address belonging to another user');
+    assert.equal(deletedAddressQueries.length, 1);
+    assert.equal(deletedAddressQueries[0].id, 'addr-2');
+    assert.equal(deletedAddressQueries[0].userId, 'cust-1', 'Delete query scoped strictly to session user');
 
-    // 9. Legitimate address DELETE succeeds
+    // 9. Legitimate owner DELETE succeeds with 200
     const legitDeleteReq = new NextRequest('http://localhost/api/customer/addresses?id=addr-1', {
       method: 'DELETE',
       headers: { Cookie: `jio_token=${cust1Token}` },
@@ -164,8 +173,10 @@ async function testCustomerAddressesSecurity() {
   } finally {
     addressDelegate.findMany = originalFindMany;
     addressDelegate.create = originalCreate;
+    addressDelegate.updateMany = originalUpdateMany;
     addressDelegate.deleteMany = originalDeleteMany;
     userDelegate.findUnique = originalFindUnique;
+    (db as any).$transaction = originalTransaction;
   }
 }
 

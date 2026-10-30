@@ -362,9 +362,16 @@ export async function dispatchPaidOrderToAgents(
 
     try {
       if (notificationCreated) {
+        const targetAgentIds = Array.from(
+          new Set([
+            ...((eligibleAgents || []).map((a: any) => a.id)),
+            deliveryAgent.id,
+          ])
+        );
+
         broadcaster.broadcast('NEW_PICKUP_AVAILABLE', {
           type: 'NEW_PICKUP_AVAILABLE',
-          targetAgentIds: [deliveryAgent.id],
+          targetAgentIds,
           orderId: order.id,
           orderNumber: order.orderNumber,
           serviceArea: targetServiceArea,

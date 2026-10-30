@@ -21,7 +21,7 @@ export async function validatePayload(
           ? await actualUserFinder(payload.userId)
           : await db.user.findUnique({
               where: { id: payload.userId },
-              select: { tokenVersion: true },
+              select: { tokenVersion: true } as any,
             });
       } catch (err: any) {
         if (err?.name === 'PrismaClientInitializationError' && process.env.NODE_ENV === 'test') {
@@ -82,10 +82,67 @@ export async function getAuthUser(req: NextRequest): Promise<JwtPayload | null> 
     if (payload) return validatePayload(payload);
   }
 
+  const pathname = req.nextUrl?.pathname || '';
+  const referer = req.headers.get('referer') || '';
+  const isAdminContext =
+    pathname.startsWith('/api/admin') ||
+    pathname.includes('/assign') ||
+    referer.includes('/admin');
+  const isAgentContext =
+    pathname.startsWith('/api/agent') ||
+    referer.includes('/agent');
+
+  // If in admin context, prioritize jio_admin_token if present
+  if (isAdminContext) {
+    const adminCookie = req.cookies.get('jio_admin_token')?.value;
+    if (adminCookie) {
+      const payload = verifyToken(adminCookie);
+      if (payload && (isAdminRole(payload) || Boolean(payload.adminId))) {
+        return validatePayload(payload);
+      }
+    }
+  }
+
+  // If in agent context, prioritize jio_agent_token if present
+  if (isAgentContext) {
+    const agentCookie = req.cookies.get('jio_agent_token')?.value;
+    if (agentCookie) {
+      const payload = verifyToken(agentCookie);
+      if (payload && (payload.role === 'AGENT' || Boolean(payload.agentId))) {
+        return validatePayload(payload);
+      }
+    }
+  }
+
   // Check Cookies for `jio_token`
   const tokenCookie = req.cookies.get('jio_token')?.value;
   if (tokenCookie) {
     const payload = verifyToken(tokenCookie);
+    if (payload) {
+      // If in admin context but jio_token is non-admin, fall back to jio_admin_token if present
+      if (isAdminContext && !isAdminRole(payload) && !payload.adminId) {
+        const adminCookie = req.cookies.get('jio_admin_token')?.value;
+        if (adminCookie) {
+          const adminPayload = verifyToken(adminCookie);
+          if (adminPayload && (isAdminRole(adminPayload) || Boolean(adminPayload.adminId))) {
+            return validatePayload(adminPayload);
+          }
+        }
+      }
+      return validatePayload(payload);
+    }
+  }
+
+  // Fallback to jio_admin_token or jio_agent_token if jio_token is missing
+  const adminCookie = req.cookies.get('jio_admin_token')?.value;
+  if (adminCookie) {
+    const payload = verifyToken(adminCookie);
+    if (payload) return validatePayload(payload);
+  }
+
+  const agentCookie = req.cookies.get('jio_agent_token')?.value;
+  if (agentCookie) {
+    const payload = verifyToken(agentCookie);
     if (payload) return validatePayload(payload);
   }
 
@@ -99,7 +156,10 @@ export function hasRole(user: JwtPayload | null, allowedRoles: string[]): boolea
 }
 
 export function isAdminRole(user: JwtPayload | null): boolean {
-  return hasRole(user, ['ADMIN', 'SUPER_ADMIN']);
+  if (!user) return false;
+  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return true;
+  if (Boolean(user.adminId)) return true;
+  return false;
 }
 
 export function requireAdminUser(user: JwtPayload | null): JwtPayload | null {
