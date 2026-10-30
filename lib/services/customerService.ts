@@ -15,7 +15,15 @@ export async function findOrCreateUserCustomer(phone: string, name = 'Customer',
   
   let user = await db.user.findFirst({
     where: { phone: { in: phoneVariants } },
-    include: { customer: true, agent: true, admin: true },
+    include: {
+      customer: true,
+      agent: true,
+      admin: true,
+      addresses: {
+        where: { isDefault: true },
+        take: 1,
+      },
+    },
   });
 
   console.log('[CUSTOMER_SERVICE] Found user:', user ? user.id : null, 'current name:', user?.name);
@@ -34,7 +42,15 @@ export async function findOrCreateUserCustomer(phone: string, name = 'Customer',
           },
         },
       },
-      include: { customer: true, agent: true, admin: true },
+      include: {
+        customer: true,
+        agent: true,
+        admin: true,
+        addresses: {
+          where: { isDefault: true },
+          take: 1,
+        },
+      },
     });
     console.log('[CUSTOMER_SERVICE] Created user with name:', user.name);
   } else if (user.role !== 'CUSTOMER') {
@@ -55,7 +71,15 @@ export async function findOrCreateUserCustomer(phone: string, name = 'Customer',
       user = await db.user.update({
         where: { id: user.id },
         data: { name },
-        include: { customer: true, agent: true, admin: true },
+        include: {
+          customer: true,
+          agent: true,
+          admin: true,
+          addresses: {
+            where: { isDefault: true },
+            take: 1,
+          },
+        },
       });
       console.log('[CUSTOMER_SERVICE] Updated user name to:', user.name);
     } else {
@@ -67,22 +91,35 @@ export async function findOrCreateUserCustomer(phone: string, name = 'Customer',
   return user;
 }
 
-export async function saveCustomerAddress(userId: string, addressData: {
-  label?: string;
-  name: string;
-  phone: string;
-  houseNo: string;
-  building?: string;
-  street: string;
-  area: string;
-  landmark?: string;
-  pincode: string;
-  lat: number;
-  lng: number;
-  googlePlaceId?: string | null;
-  isDefault?: boolean;
-}) {
-  if (addressData.isDefault) {
+export async function saveCustomerAddress(
+  userId: string,
+  addressData: {
+    label?: string;
+    name: string;
+    phone: string;
+    houseNo: string;
+    building?: string;
+    street: string;
+    area: string;
+    landmark?: string;
+    pincode: string;
+    lat: number;
+    lng: number;
+    googlePlaceId?: string | null;
+    isDefault?: boolean;
+  },
+  options?: {
+    hasExistingDefault?: boolean;
+  }
+) {
+  // Only execute updateMany if there is an existing default address to unset.
+  // Skipping updateMany when the customer has no existing default address eliminates
+  // an empty database write roundtrip over pooled connections.
+  const shouldResetExisting =
+    addressData.isDefault !== false &&
+    options?.hasExistingDefault !== false;
+
+  if (shouldResetExisting) {
     await db.address.updateMany({
       where: { userId },
       data: { isDefault: false },

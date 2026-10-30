@@ -409,6 +409,13 @@ export default function BookingPage() {
     } catch {}
   }, []);
 
+  // Proactively warm up / ensure Razorpay SDK is loaded whenever customer reaches address (step 2) or checkout (step 3)
+  useEffect(() => {
+    if (step >= 2) {
+      loadRazorpayScript().catch(() => {});
+    }
+  }, [step]);
+
   const handleApplyCoupon = async (codeToApply?: string) => {
     const code = (codeToApply || couponInput).trim().toUpperCase();
     if (!code) {
