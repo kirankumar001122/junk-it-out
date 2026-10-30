@@ -242,13 +242,17 @@ export async function createOrder(
     timer?.recordPhase('idempotency_lookup');
 
   // ---------------------------------------------------------
-  // 2. PARALLEL LOOKUP: GEOFENCE, USER PROFILE, AND WASTE CATEGORIES
+  // 2. PARALLEL LOOKUP: GEOFENCE, USER PROFILE, WASTE CATEGORIES, AND COUPON
   // ---------------------------------------------------------
   const categoryIds = input.items.map(
     (item) => item.categoryId
   );
 
-  const [geofence, initialUser, dbCategories] = await Promise.all([
+  const couponCode = input.couponCode && String(input.couponCode).trim()
+    ? String(input.couponCode).trim().toUpperCase()
+    : null;
+
+  const [geofence, initialUser, dbCategories, couponRecord] = await Promise.all([
     checkGeofenceServiceability(
       input.address.lat,
       input.address.lng,
@@ -267,7 +271,7 @@ export async function createOrder(
             },
           },
         })
-      : Promise.resolve(null),
+      : findOrCreateUserCustomer(input.phone, input.name),
     (async () => {
       const cached = getCachedWasteCategories();
       if (cached && Array.isArray(cached)) {
@@ -289,6 +293,9 @@ export async function createOrder(
       }
       return fetched;
     })(),
+    couponCode
+      ? db.coupon.findUnique({ where: { code: couponCode } }).catch(() => null)
+      : Promise.resolve(null),
   ]);
 
   timer?.recordPhase('parallel_lookups');
@@ -319,10 +326,11 @@ export async function createOrder(
   }
 
   // ---------------------------------------------------------
-  // 4. SAVE PICKUP ADDRESS (Reuses existing default if identical)
+  // 4. SAVE PICKUP ADDRESS (Reuses existing default if identical, skips redundant updateMany)
   // ---------------------------------------------------------
 
   const existingDefaultAddr = user.addresses?.[0];
+  const hasExistingDefault = Boolean(existingDefaultAddr);
   const isIdenticalAddress =
     existingDefaultAddr &&
     existingDefaultAddr.houseNo?.trim().toLowerCase() === input.address.houseNo?.trim().toLowerCase() &&
@@ -334,23 +342,27 @@ export async function createOrder(
 
   const savedAddress = isIdenticalAddress
     ? existingDefaultAddr
-    : await saveCustomerAddress(user.id, {
-        label: input.address.label || 'Home',
-        name: input.name,
-        phone: input.phone,
-        houseNo: input.address.houseNo,
-        building: input.address.building,
-        street: input.address.street,
-        area: input.address.area,
-        landmark: input.address.landmark,
-        pincode: input.address.pincode,
-        lat: input.address.lat,
-        lng: input.address.lng,
-        googlePlaceId:
-          input.address.googlePlaceId ||
-          undefined,
-        isDefault: true,
-      });
+    : await saveCustomerAddress(
+        user.id,
+        {
+          label: input.address.label || 'Home',
+          name: input.name,
+          phone: input.phone,
+          houseNo: input.address.houseNo,
+          building: input.address.building,
+          street: input.address.street,
+          area: input.address.area,
+          landmark: input.address.landmark,
+          pincode: input.address.pincode,
+          lat: input.address.lat,
+          lng: input.address.lng,
+          googlePlaceId:
+            input.address.googlePlaceId ||
+            undefined,
+          isDefault: true,
+        },
+        { hasExistingDefault }
+      );
 
   timer?.recordPhase('save_customer_address');
 
@@ -436,7 +448,8 @@ export async function createOrder(
     const couponValidation = await validateAndCalculateCoupon(
       input.couponCode,
       preDiscountSubtotal,
-      user.customer?.id
+      user.customer?.id,
+      couponRecord
     );
 
     if (!couponValidation.valid) {

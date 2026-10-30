@@ -23,6 +23,7 @@ const state = {
   logs: [] as any[],
   serviceAreaFindManyCalls: 0,
   addressCreateCalls: 0,
+  addressUpdateManyCalls: 0,
   wasteCategoryFindManyCalls: 0,
   ordersById: new Map<string, any>(),
 };
@@ -244,7 +245,10 @@ vi.mock('@/lib/db', () => {
   };
 
   const address = {
-    updateMany: vi.fn(async () => ({ count: 0 })),
+    updateMany: vi.fn(async () => {
+      state.addressUpdateManyCalls += 1;
+      return { count: 0 };
+    }),
     create: vi.fn(async ({ data }: any) => {
       state.addressCreateCalls += 1;
       return {
@@ -319,6 +323,7 @@ describe('Payment Delay Diagnostics & Timing Telemetry', () => {
     state.logs = [];
     state.serviceAreaFindManyCalls = 0;
     state.addressCreateCalls = 0;
+    state.addressUpdateManyCalls = 0;
     state.wasteCategoryFindManyCalls = 0;
     state.ordersById.clear();
     state.currentUser.addresses = [];
@@ -829,5 +834,47 @@ describe('Payment Delay Diagnostics & Timing Telemetry', () => {
     assert.ok(body.data.items?.[0]?.category, 'Category object assembled');
     assert.ok(body.data.statusHistory?.[0]?.status || body.data.statusHistory?.[0]?.newStatus, 'Status history assembled');
     assert.equal(body.data.paymentStatus, 'INITIATED');
+  });
+
+  it('skips redundant default address updateMany DB query when user has no existing default address', async () => {
+    state.currentUser.addresses = [];
+    state.addressCreateCalls = 0;
+    state.addressUpdateManyCalls = 0;
+
+    const payload = {
+      ...validBookingPayload,
+      address: {
+        houseNo: 'BrandNew-101',
+        street: 'BrandNew Street',
+        area: 'JP Nagar',
+        pincode: '560078',
+        lat: 12.9077,
+        lng: 77.5854,
+      },
+    };
+
+    const res = await createOrderRoute(
+      createPostRequest('/api/orders', payload, { 'Idempotency-Key': `idem-addr-opt-${Date.now()}` })
+    );
+
+    assert.equal(res.status, 201);
+    assert.equal(state.addressCreateCalls, 1, 'New address must be created');
+    assert.equal(state.addressUpdateManyCalls, 0, 'updateMany must be skipped when customer has no existing default address');
+  });
+
+  it('performs parallel pre-flight validation including coupon lookup without breaking coupon application', async () => {
+    const payloadWithCoupon = {
+      ...validBookingPayload,
+      couponCode: 'WELCOME50',
+    };
+
+    const res = await createOrderRoute(
+      createPostRequest('/api/orders', payloadWithCoupon, { 'Idempotency-Key': `idem-coupon-par-${Date.now()}` })
+    );
+
+    assert.equal(res.status, 201);
+    const body = await res.json();
+    assert.equal(body.success, true);
+    assert.ok(body.data.paymentConfig, 'paymentConfig must be generated with coupon applied');
   });
 });
