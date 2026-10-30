@@ -58,7 +58,7 @@ export default function AdminDashboardPage() {
 
       const [statsResult, ordersResult, agentsResult] = await Promise.all([
         fetchAdminData('/api/admin/stats'),
-        fetchAdminData('/api/orders'),
+        fetchAdminData('/api/orders?limit=25'),
         fetchAdminData('/api/admin/agents'),
       ]);
 
@@ -318,16 +318,14 @@ export default function AdminDashboardPage() {
           centerLng={77.5854}
           zoom={12}
           polygons={SOUTH_BENGALURU_ZONES.map((z) => ({ name: z.name, coordinates: z.boundaryPolygon }))}
-          markers={orders
-            .filter((o) => o.agent)
-            .map((o) => ({
-              id: o.id,
-              lat: o.agent.currentLat || 12.9077,
-              lng: o.agent.currentLng || 77.5854,
-              title: `${o.agent.user.name} (${o.agent.vehicleNumber})`,
-              subtitle: `Order: ${o.orderNumber} - ${o.status}`,
+          markers={agents.map((a) => ({
+              id: a.id,
+              lat: a.currentLat || 12.9077,
+              lng: a.currentLng || 77.5854,
+              title: `${a.name || a.user?.name || 'Agent'} (${a.vehicleNumber || 'Vehicle'})`,
+              subtitle: `Status: ${a.status} • Active: ${a.activeOrdersCount || 0}`,
               type: 'AGENT' as const,
-              status: o.agent.status,
+              status: a.status,
             }))}
           className="h-80 w-full rounded-2xl border border-slate-200 overflow-hidden shadow-inner"
         />

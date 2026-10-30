@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import {
   Package,
@@ -9,6 +9,8 @@ import {
   RefreshCw,
   Eye,
   UserPlus,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { adminFetch } from '@/lib/api';
 
@@ -20,25 +22,50 @@ export default function AdminOrdersPage() {
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('ALL');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalOrders, setTotalOrders] = useState(0);
+  const limit = 25;
+
   const [selectedOrderForAssign, setSelectedOrderForAssign] = useState<any>(null);
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
 
-  const loadOrders = async () => {
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const loadOrders = useCallback(async (targetPage = 1, search = searchTerm, status = filterStatus) => {
     try {
       setLoading(true);
-      const ordersRes = await adminFetch('/api/orders')
+      const params = new URLSearchParams({
+        page: String(targetPage),
+        limit: String(limit),
+      });
+      if (search.trim()) params.set('search', search.trim());
+      if (status !== 'ALL') params.set('status', status);
+
+      const ordersRes = await adminFetch(`/api/orders?${params.toString()}`)
         .then((r) => r.json())
         .catch(() => ({ success: false }));
 
-      if (ordersRes.success) setOrders(ordersRes.data || []);
+      if (ordersRes.success) {
+        setOrders(ordersRes.data || []);
+        if (ordersRes.meta) {
+          setPage(ordersRes.meta.page || targetPage);
+          setTotalPages(ordersRes.meta.totalPages || 1);
+          setTotalOrders(ordersRes.meta.total !== undefined ? ordersRes.meta.total : (ordersRes.data?.length ?? 0));
+        } else {
+          setPage(targetPage);
+          setTotalPages(1);
+          setTotalOrders(ordersRes.data?.length ?? 0);
+        }
+      }
     } catch (e: any) {
       console.error('Error loading orders:', e);
     } finally {
       setLoading(false);
     }
-  };
+  }, [searchTerm, filterStatus]);
 
   const loadAgents = async () => {
     try {
@@ -61,14 +88,33 @@ export default function AdminOrdersPage() {
     }
   };
 
-  const loadOrdersAndAgents = async () => {
-    await Promise.all([loadOrders(), loadAgents()]);
+  const loadOrdersAndAgents = () => {
+    loadOrders(page, searchTerm, filterStatus);
+    loadAgents();
   };
 
   useEffect(() => {
-    loadOrders();
+    loadOrders(1, '', 'ALL');
     loadAgents();
   }, []);
+
+  const handleSearchChange = (val: string) => {
+    setSearchTerm(val);
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
+      loadOrders(1, val, filterStatus);
+    }, 350);
+  };
+
+  const handleStatusChange = (val: string) => {
+    setFilterStatus(val);
+    loadOrders(1, searchTerm, val);
+  };
+
+  const handlePageChange = (newPage: number) => {
+    if (newPage < 1 || newPage > totalPages) return;
+    loadOrders(newPage, searchTerm, filterStatus);
+  };
 
   useEffect(() => {
     if (selectedOrderForAssign && !selectedAgentId && agents.length > 0) {
@@ -99,11 +145,6 @@ export default function AdminOrdersPage() {
       setAssignError('Please select a valid registered field agent from the dropdown.');
       return;
     }
-    const targetAgent = agents.find((a) => a.id === selectedAgentId);
-    if (!targetAgent) {
-      setAssignError('Selected agent is invalid or no longer registered.');
-      return;
-    }
 
     setAssignLoading(true);
     setAssignError(null);
@@ -118,7 +159,7 @@ export default function AdminOrdersPage() {
       if (res.ok && data.success) {
         setSelectedOrderForAssign(null);
         setSelectedAgentId('');
-        await loadOrdersAndAgents();
+        loadOrdersAndAgents();
       } else {
         setAssignError(data.error?.message || data.message || 'Failed to assign agent to this order.');
       }
@@ -130,72 +171,62 @@ export default function AdminOrdersPage() {
     }
   };
 
-  const filteredOrders = orders.filter((o) => {
-    const matchesStatus = filterStatus === 'ALL' || o.status === filterStatus;
-    const matchesSearch =
-      (o.orderNumber && o.orderNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (o.customer?.user?.name && o.customer.user.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (o.address?.area && o.address.area.toLowerCase().includes(searchTerm.toLowerCase()));
-    return matchesStatus && matchesSearch;
-  });
-
   return (
     <div className="space-y-6">
       {/* HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
         <div>
           <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-3 py-1 rounded-full uppercase">
-            Orders Center
+            Operations Roster
           </span>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-1">Orders Management</h1>
-          <p className="text-xs text-slate-500">Monitor all customer pickups, agent assignments, and status updates.</p>
+          <p className="text-xs text-slate-500">Live operational pickups, scheduled dispatch slots, and active agent assignments</p>
         </div>
 
         <button
           onClick={loadOrdersAndAgents}
-          className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 self-start sm:self-auto"
+          disabled={loading}
+          className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 flex items-center gap-1.5 self-start sm:self-auto disabled:opacity-50"
         >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh Orders
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
         </button>
       </div>
 
-      {/* FILTER & SEARCH BAR */}
-      <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="relative flex-1 w-full">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Search Order Number, Customer Name, or Area..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-10 pr-4 py-2.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          />
+      {/* SEARCH AND FILTERS */}
+      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="relative w-full sm:w-80">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              placeholder="Search Order # / Customer / Phone / Area"
+              value={searchTerm}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-10 pr-4 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+            />
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <select
+              value={filterStatus}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              className="w-full sm:w-auto bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+            >
+              <option value="ALL">All Order Statuses</option>
+              <option value="BOOKING_RECEIVED">Booking Received</option>
+              <option value="AGENT_BEING_ASSIGNED">Agent Being Assigned</option>
+              <option value="AGENT_ASSIGNED">Agent Assigned</option>
+              <option value="AGENT_ON_WAY">Agent On Way</option>
+              <option value="AGENT_ARRIVED">Agent Arrived</option>
+              <option value="WEIGHING">Weighing</option>
+              <option value="PICKUP_COMPLETED">Completed</option>
+              <option value="CANCELLED">Cancelled</option>
+            </select>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <Filter className="w-4 h-4 text-slate-400 shrink-0" />
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="w-full sm:w-auto bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          >
-            <option value="ALL">All Statuses ({orders.length})</option>
-            <option value="BOOKING_RECEIVED">Booking Received</option>
-            <option value="AGENT_ASSIGNED">Agent Assigned</option>
-            <option value="AGENT_ACCEPTED">Agent Accepted</option>
-            <option value="AGENT_ON_WAY">Agent On Way</option>
-            <option value="AGENT_ARRIVED">Agent Arrived</option>
-            <option value="WEIGHING">Weighing</option>
-            <option value="PICKUP_COMPLETED">Completed</option>
-            <option value="SETTLEMENT_COMPLETED">Settlement Completed</option>
-            <option value="CANCELLED">Cancelled</option>
-          </select>
-        </div>
-      </div>
-
-      {/* ORDERS TABLE */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-6">
+        {/* ORDERS TABLE */}
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 text-slate-500 uppercase font-bold text-[10px]">
@@ -210,20 +241,20 @@ export default function AdminOrdersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
-              {loading ? (
+              {loading && orders.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="text-center p-8 text-slate-400 font-semibold">
                     Loading orders database...
                   </td>
                 </tr>
-              ) : filteredOrders.length === 0 ? (
+              ) : orders.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="text-center p-8 text-slate-400 font-semibold">
                     No orders found matching search criteria.
                   </td>
                 </tr>
               ) : (
-                filteredOrders.map((o) => (
+                orders.map((o) => (
                   <tr key={o.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="p-3 font-mono font-bold text-slate-900">{o.orderNumber}</td>
                     <td className="p-3">
@@ -283,6 +314,35 @@ export default function AdminOrdersPage() {
             </tbody>
           </table>
         </div>
+
+        {/* PAGINATION CONTROLS */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-100 text-xs text-slate-500">
+          <div>
+            Showing page <span className="font-bold text-slate-800">{page}</span> of{' '}
+            <span className="font-bold text-slate-800">{totalPages}</span> ({totalOrders} total orders)
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handlePageChange(page - 1)}
+              disabled={page <= 1 || loading}
+              className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              Previous
+            </button>
+            <span className="px-2 font-bold text-slate-700">
+              {page} / {totalPages}
+            </span>
+            <button
+              onClick={() => handlePageChange(page + 1)}
+              disabled={page >= totalPages || loading}
+              className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              Next
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* ASSIGNMENT MODAL */}
@@ -319,7 +379,7 @@ export default function AdminOrdersPage() {
               <label className="block text-xs font-bold text-slate-700">Select Field Agent:</label>
               {agentsLoading ? (
                 <div className="p-3 bg-slate-50 rounded-xl text-xs font-medium text-slate-500">
-                  Loading registered field agents...
+                  Loading field agents...
                 </div>
               ) : agentsError ? (
                 <div className="p-3 bg-rose-50 rounded-xl text-xs font-semibold text-rose-600">
@@ -327,10 +387,7 @@ export default function AdminOrdersPage() {
                 </div>
               ) : agents.length === 0 ? (
                 <div className="p-3 bg-amber-50 rounded-xl text-xs font-semibold text-amber-800">
-                  No active field agents registered in system.{' '}
-                  <Link href="/agents" className="underline font-bold text-amber-900">
-                    Add Field Agent
-                  </Link>
+                  No active field agents registered.
                 </div>
               ) : (
                 <select
@@ -339,9 +396,9 @@ export default function AdminOrdersPage() {
                   disabled={assignLoading}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none disabled:opacity-50"
                 >
-                  {agents.map((ag) => (
+                  {agents.map((ag: any) => (
                     <option key={ag.id} value={ag.id}>
-                      {ag.name} ({ag.vehicleType} • {ag.vehicleNumber}) - {ag.status} [★{ag.rating} | {ag.phone}]
+                      {ag.status === 'AVAILABLE' ? '🟢' : '⚪'} {ag.name || ag.user?.name} ({ag.vehicleNumber || 'Vehicle'})
                     </option>
                   ))}
                 </select>
@@ -356,7 +413,7 @@ export default function AdminOrdersPage() {
                   setAssignError(null);
                 }}
                 disabled={assignLoading}
-                className="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 rounded-xl disabled:opacity-50"
+                className="w-1/2 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50"
               >
                 Cancel
               </button>
@@ -364,9 +421,9 @@ export default function AdminOrdersPage() {
                 type="button"
                 onClick={handleAssignAgent}
                 disabled={assignLoading || agents.length === 0 || !selectedAgentId}
-                className="w-1/2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 rounded-xl shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-1/2 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {assignLoading ? 'Assigning...' : 'Confirm Assignment'}
+                {assignLoading ? 'Assigning...' : 'Confirm'}
               </button>
             </div>
           </div>

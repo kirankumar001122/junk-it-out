@@ -416,6 +416,8 @@ export async function GET(req: NextRequest) {
       100
     );
     const skip = (page - 1) * limit;
+    const search = searchParams.get('search')?.trim() || '';
+    const statusParam = searchParams.get('status')?.trim() || '';
 
     let whereClause: any = {};
 
@@ -506,13 +508,33 @@ export async function GET(req: NextRequest) {
     }
 
     // =====================================================
-    // ADMIN / SUPER ADMIN
+    // ADMIN / SUPER ADMIN & SEARCH / STATUS FILTERS
     // =====================================================
     //
     // Admins continue to see all orders, including pending
     // orders. This is important for operational visibility.
     //
     // =====================================================
+
+    const extraConditions: any[] = [];
+    if (statusParam && statusParam !== 'ALL') {
+      extraConditions.push({ status: statusParam });
+    }
+    if (search) {
+      extraConditions.push({
+        OR: [
+          { orderNumber: { contains: search, mode: 'insensitive' } },
+          { customer: { user: { name: { contains: search, mode: 'insensitive' } } } },
+          { customer: { user: { phone: { contains: search, mode: 'insensitive' } } } },
+          { address: { area: { contains: search, mode: 'insensitive' } } },
+          { address: { city: { contains: search, mode: 'insensitive' } } },
+        ],
+      });
+    }
+
+    if (extraConditions.length > 0) {
+      whereClause.AND = [...(whereClause.AND || []), ...extraConditions];
+    }
 
     const AGENT_ACTIVE_STATUSES = [
       'AGENT_ASSIGNED',
@@ -675,8 +697,17 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    const total = await db.order.count({ where: whereClause }).catch(() => orders.length);
+
     return successResponse(
-      orders
+      orders,
+      200,
+      {
+        page,
+        limit,
+        total: Math.max(total, orders.length),
+        totalPages: Math.max(1, Math.ceil(Math.max(total, orders.length) / limit)),
+      }
     );
   } catch (err: any) {
     console.error(

@@ -254,6 +254,7 @@ model Payment {
   @@index([gatewayOrderId, direction])
   @@index([paymentId])
   @@index([orderId, direction, status])
+  @@index([status, amount])
 }
 
 model RefundRequest {
@@ -324,6 +325,7 @@ model Settlement {
   failureReason String?
   processedAt   DateTime?
   createdAt     DateTime  @default(now())
+
   approvedAt    DateTime?
   paidAt        DateTime?
   customer      Customer  @relation(fields: [customerId], references: [id])
@@ -389,6 +391,8 @@ model Coupon {
   active        Boolean   @default(true)
   expiryDate    DateTime?
   createdAt     DateTime  @default(now())
+
+  @@index([active, expiryDate])
 }
 
 model Complaint {

@@ -39,53 +39,47 @@ export async function GET(req: NextRequest) {
     const endOfDay = new Date(`${kolkataDateStr}T23:59:59.999+05:30`);
     const slaWindowStart = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
 
-    // Execute independent aggregation and metric queries in parallel to minimize round-trip latency
-    const [
-      orderStatusGroups,
-      agentStatusGroups,
-      settlementGroups,
-      todaysBookings,
-      unassignedPickups,
-      customerCount,
-      paymentRevenueAgg,
-      totalWeightKg,
-      completedOrdersDates,
-    ] = await Promise.all([
+    // Execute independent aggregation and metric queries using allSettled to distinguish failures from genuine zeroes
+    const settledResults = await Promise.allSettled([
+      // 0: Order status groups
       db.order.groupBy({
         by: ['status'],
         _count: { _all: true },
-      }).catch(() => [] as Array<{ status: any; _count: { _all: number } }>),
-
+      }),
+      // 1: Agent status groups
       db.agent.groupBy({
         by: ['status'],
         _count: { _all: true },
-      }).catch(() => [] as Array<{ status: any; _count: { _all: number } }>),
-
+      }),
+      // 2: Settlement groups
       db.settlement.groupBy({
         by: ['status'],
         _sum: { amount: true },
-      }).catch(() => [] as Array<{ status: any; _sum: { amount: number | null } }>),
-
+      }),
+      // 3: Today's bookings count
       db.order.count({
         where: { createdAt: { gte: startOfDay, lte: endOfDay } },
-      }).catch(() => 0),
-
+      }),
+      // 4: Unassigned bookings awaiting agent dispatch
       db.order.count({
-        where: { agentId: null, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
-      }).catch(() => 0),
-
-      db.customer.count().catch(() => 0),
-
+        where: {
+          agentId: null,
+          status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED'] },
+        },
+      }),
+      // 5: Customer count
+      db.customer.count(),
+      // 6: Total revenue from captured customer payments
       db.payment.aggregate({
         _sum: { amount: true },
         where: { status: { in: ['CAPTURED', 'SETTLEMENT_COMPLETED'] } },
-      }).catch(() => ({ _sum: { amount: 0 } })),
-
+      }),
+      // 7: Total weight collected
       db.orderItem.aggregate({
         _sum: { actualWeight: true },
         where: { actualWeight: { not: null } },
-      }).catch(() => ({ _sum: { actualWeight: 0 } })),
-
+      }),
+      // 8: SLA completion dates
       db.order.findMany({
         where: {
           status: { in: ['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'] },
@@ -93,10 +87,52 @@ export async function GET(req: NextRequest) {
         },
         select: { createdAt: true, updatedAt: true },
         take: 200,
-      }).catch(() => [] as Array<{ createdAt: Date; updatedAt: Date }>),
+      }),
     ]);
 
-    // Aggregate order status metrics
+    // Check query failures
+    const failedIndices = settledResults
+      .map((r, i) => (r.status === 'rejected' ? i : -1))
+      .filter((i) => i !== -1);
+
+    // If core database queries failed completely, never silently return fake zeroes
+    if (failedIndices.length >= 5 || (failedIndices.includes(0) && failedIndices.includes(2) && failedIndices.includes(6))) {
+      return errorResponse(
+        'DATABASE_ERROR',
+        'Failed to calculate dashboard metrics due to database query failure.',
+        500
+      );
+    }
+
+    const partialErrors: string[] = [];
+    if (failedIndices.includes(0)) partialErrors.push('orders');
+    if (failedIndices.includes(1)) partialErrors.push('agents');
+    if (failedIndices.includes(2)) partialErrors.push('settlements');
+    if (failedIndices.includes(3)) partialErrors.push('todaysBookings');
+    if (failedIndices.includes(4)) partialErrors.push('unassignedPickups');
+    if (failedIndices.includes(5)) partialErrors.push('customers');
+    if (failedIndices.includes(6)) partialErrors.push('revenue');
+    if (failedIndices.includes(7)) partialErrors.push('totalWeight');
+    if (failedIndices.includes(8)) partialErrors.push('sla');
+
+    const orderStatusGroups = settledResults[0].status === 'fulfilled' ? (settledResults[0].value as any[]) : [];
+    const agentStatusGroups = settledResults[1].status === 'fulfilled' ? (settledResults[1].value as any[]) : [];
+    const settlementGroups = settledResults[2].status === 'fulfilled' ? (settledResults[2].value as any[]) : [];
+    const todaysBookings = settledResults[3].status === 'fulfilled' ? Number(settledResults[3].value || 0) : 0;
+    const unassignedPickups = settledResults[4].status === 'fulfilled' ? Number(settledResults[4].value || 0) : 0;
+    const customerCount = settledResults[5].status === 'fulfilled' ? Number(settledResults[5].value || 0) : 0;
+    const paymentRevenueAgg = settledResults[6].status === 'fulfilled' ? (settledResults[6].value as any) : { _sum: { amount: 0 } };
+    const totalWeightKgAgg = settledResults[7].status === 'fulfilled' ? (settledResults[7].value as any) : { _sum: { actualWeight: 0 } };
+    const completedOrdersDates = settledResults[8].status === 'fulfilled' ? (settledResults[8].value as any[]) : [];
+
+    // Aggregate order status metrics strictly aligned with the order lifecycle
+    // PENDING BOOKINGS: Orders awaiting agent assignment
+    const PENDING_STATUSES = ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED'];
+    // ACTIVE PICKUPS: Orders actively in progress by an assigned agent
+    const ACTIVE_STATUSES = ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WASTE_VERIFICATION', 'WEIGHING'];
+    // COMPLETED: Pickups completed or settlement completed
+    const COMPLETED_STATUSES = ['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'];
+
     let totalBookings = 0;
     let pendingBookings = 0;
     let activePickups = 0;
@@ -104,18 +140,15 @@ export async function GET(req: NextRequest) {
     let cancelledOrders = 0;
 
     for (const group of orderStatusGroups) {
-      const count = group._count._all;
+      const count = Number(group._count?._all || 0);
       totalBookings += count;
-      if (['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'].includes(group.status)) {
+      if (PENDING_STATUSES.includes(group.status)) {
         pendingBookings += count;
-      }
-      if (['AGENT_ASSIGNED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WASTE_VERIFICATION', 'WEIGHING'].includes(group.status)) {
+      } else if (ACTIVE_STATUSES.includes(group.status)) {
         activePickups += count;
-      }
-      if (['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'].includes(group.status)) {
+      } else if (COMPLETED_STATUSES.includes(group.status)) {
         completedPickups += count;
-      }
-      if (group.status === 'CANCELLED') {
+      } else if (group.status === 'CANCELLED') {
         cancelledOrders += count;
       }
     }
@@ -126,7 +159,7 @@ export async function GET(req: NextRequest) {
     let activeAgents = 0;
 
     for (const group of agentStatusGroups) {
-      const count = group._count._all;
+      const count = Number(group._count?._all || 0);
       totalAgents += count;
       if (group.status === 'AVAILABLE') {
         availableAgents += count;
@@ -136,7 +169,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Aggregate settlement payout metrics
+    // Aggregate settlement payout metrics distinctly
     let approvedCustomerPayouts = 0;
     let paidCustomerPayouts = 0;
     let pendingCustomerPayouts = 0;
@@ -152,10 +185,12 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const assignedPickups = Math.max(0, totalBookings - unassignedPickups);
-    const totalRevenue = Number((paymentRevenueAgg._sum?.amount || 0).toFixed(2));
+    // Assigned active pickups strictly represents orders currently in progress with an agent
+    const assignedPickups = activePickups;
+    const totalRevenue = Number((paymentRevenueAgg?._sum?.amount || 0).toFixed(2));
     const totalCustomerSettlements = Number((approvedCustomerPayouts + paidCustomerPayouts + pendingCustomerPayouts).toFixed(2));
-    const totalCustomerPayouts = paidCustomerPayouts > 0 ? paidCustomerPayouts : totalCustomerSettlements;
+    // totalCustomerPayouts strictly represents money actually paid out
+    const totalCustomerPayouts = Number(paidCustomerPayouts.toFixed(2));
 
     const onTimeCount = completedOrdersDates.filter((order) => {
       if (!order.createdAt || !order.updatedAt) return false;
@@ -188,13 +223,15 @@ export async function GET(req: NextRequest) {
       activeOrders: activePickups,
       totalAgents,
       availableAgents,
-      totalWeightKg: Number((totalWeightKg._sum?.actualWeight || 0).toFixed(1)),
+      totalWeightKg: Number((totalWeightKgAgg?._sum?.actualWeight || 0).toFixed(1)),
       cancelledOrders,
       slaTargetMins: 30,
       slaOnTimeRate,
+      isPartial: partialErrors.length > 0,
+      partialErrors: partialErrors.length > 0 ? partialErrors : null,
     };
 
-    if (!bypassCache) {
+    if (!bypassCache && partialErrors.length === 0) {
       setCachedAdminStats(payload);
     }
 
