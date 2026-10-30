@@ -14,8 +14,8 @@ export async function POST(
   const startedAt = Date.now();
   const logTiming = (phase: string) =>
     console.info(`[api/orders/weigh] ${phase} elapsedMs=${Date.now() - startedAt}`);
+  const { id } = await params;
   try {
-    const { id } = await params;
     const authUser = await getAuthUser(req);
     logTiming('authentication complete');
     if (!authUser || authUser.role !== 'AGENT') {
@@ -59,18 +59,38 @@ export async function POST(
       return errorResponse('INVALID_STATUS_TRANSITION', `Cannot record weights from current status (${oldStatus}).`, 400);
     }
 
+    if (!Array.isArray(order.items) || order.items.length === 0) {
+      return errorResponse('INVALID_WEIGH_DATA', 'Order has no items to weigh.', 400);
+    }
+
+    const orderItemsById = new Map(order.items.map((i) => [i.id, i]));
     const matchedItemIds = new Set<string>();
+
     for (const itemInput of actualWeights) {
-      const dbItem = order.items.find(
-        (i) => (itemInput?.itemId && i.id === itemInput.itemId) || i.categoryId === itemInput?.categoryId || i.id === itemInput?.categoryId
-      );
-      if (!dbItem || typeof itemInput.actualWeight !== 'number' || !Number.isFinite(itemInput.actualWeight) || itemInput.actualWeight <= 0) {
-        return errorResponse('INVALID_WEIGH_DATA', 'Each actual weight must be a positive number for a valid order item.', 400);
+      const itemId = itemInput?.itemId;
+      const dbItem = typeof itemId === 'string' ? orderItemsById.get(itemId) : undefined;
+
+      if (!dbItem) {
+        return errorResponse('INVALID_WEIGH_DATA', 'Each actual weight must reference a valid order item ID.', 400);
       }
+
       if (matchedItemIds.has(dbItem.id)) {
         return errorResponse('INVALID_WEIGH_DATA', 'Each order item may only have one actual weight entry.', 400);
       }
+
+      if (typeof itemInput.actualWeight !== 'number' || !Number.isFinite(itemInput.actualWeight) || itemInput.actualWeight <= 0) {
+        return errorResponse('INVALID_WEIGH_DATA', 'Each actual weight must be a positive number for a valid order item.', 400);
+      }
+
       matchedItemIds.add(dbItem.id);
+    }
+
+    if (matchedItemIds.size !== order.items.length) {
+      return errorResponse(
+        'INVALID_WEIGH_DATA',
+        `Incomplete weighing: all ${order.items.length} order items must be weighed. Received weights for ${matchedItemIds.size}.`,
+        400
+      );
     }
 
     const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -106,39 +126,12 @@ export async function POST(
         order.discountAmount
       );
 
-      for (let i = 0; i < actualWeights.length; i++) {
-        const itemInput = actualWeights[i];
-        const vi = valuation.items[i];
-        if (vi) {
-          await tx.orderItem.update({
-            where: { id: itemInput.itemId },
-            data: {
-              actualWeight: vi.weightKg,
-              subtotal: vi.subtotal,
-            },
-          });
-        }
-      }
-
       const actualTotalRecyclable = valuation.totalRecyclableValue;
       const financialDirection = valuation.financialDirection;
       const finalAmount = valuation.netAmount;
       const totalWeightKg = actualWeights.reduce((total: number, input: any) => total + input.actualWeight, 0);
 
-      // Create WeightRecord
-      await tx.weightRecord.create({
-        data: {
-          orderId: id,
-          recordedByUserId: authUser?.userId || order.agent?.userId || order.customer?.userId,
-          scalePhotoUrl: typeof scalePhotoUrl === 'string' && scalePhotoUrl.trim()
-            ? scalePhotoUrl.trim()
-            : null,
-          weightJson: JSON.stringify(actualWeights),
-          notes: notes || 'Scale weights recorded at doorstep.',
-        },
-      });
-
-      // Update Order Status & Financial Totals with CAS
+      // Update Order Status & Financial Totals with CAS - MUST THROW to abort & rollback!
       let updated: any;
       if (typeof tx.order.updateMany === 'function') {
         const claimed = await tx.order.updateMany({
@@ -156,7 +149,9 @@ export async function POST(
         });
 
         if (claimed.count !== 1) {
-          return null;
+          const conflictError = new Error('ORDER_STATE_CONFLICT: The order state changed or was cancelled before recording weights.');
+          (conflictError as any).code = 'CONFLICT';
+          throw conflictError;
         }
 
         if (tx.orderStatusHistory?.create) {
@@ -202,6 +197,34 @@ export async function POST(
           },
         });
       }
+
+      // Update OrderItems within verified transaction
+      for (let i = 0; i < actualWeights.length; i++) {
+        const itemInput = actualWeights[i];
+        const vi = valuation.items[i];
+        if (vi) {
+          await tx.orderItem.update({
+            where: { id: itemInput.itemId },
+            data: {
+              actualWeight: vi.weightKg,
+              subtotal: vi.subtotal,
+            },
+          });
+        }
+      }
+
+      // Create WeightRecord within verified transaction
+      await tx.weightRecord.create({
+        data: {
+          orderId: id,
+          recordedByUserId: authUser?.userId || order.agent?.userId || order.customer?.userId,
+          scalePhotoUrl: typeof scalePhotoUrl === 'string' && scalePhotoUrl.trim()
+            ? scalePhotoUrl.trim()
+            : null,
+          weightJson: JSON.stringify(actualWeights),
+          notes: notes || 'Scale weights recorded at doorstep.',
+        },
+      });
 
       // Valuation adjustment check against captured payments
       const capturedPayment = (tx as any).payment?.findFirst ? await (tx as any).payment.findFirst({
@@ -253,7 +276,13 @@ export async function POST(
       timeout: 15000,
     });
 
-    if (!updatedOrder) {
+    broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
+    broadcaster.broadcast('WEIGHING_STARTED', { orderId: id, actualTotal: updatedOrder.actualTotal });
+    logTiming('response ready');
+
+    return successResponse(updatedOrder);
+  } catch (err: any) {
+    if (err?.code === 'CONFLICT' || err?.message?.includes('ORDER_STATE_CONFLICT')) {
       const recheck = await db.order.findUnique({
         where: { id },
         include: {
@@ -264,18 +293,11 @@ export async function POST(
           weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
         },
       });
-      if (recheck?.status === newStatus || recheck?.status === 'PICKUP_COMPLETED') {
+      if (recheck?.status === 'WEIGHING' || recheck?.status === 'PICKUP_COMPLETED') {
         return successResponse(recheck);
       }
       return errorResponse('CONFLICT', 'The order state changed or was cancelled before recording weights.', 409);
     }
-
-    broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
-    broadcaster.broadcast('WEIGHING_STARTED', { orderId: id, actualTotal: updatedOrder.actualTotal });
-    logTiming('response ready');
-
-    return successResponse(updatedOrder);
-  } catch (err: any) {
     console.error('Record weighing error:', err);
     return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to record scale weights.', 500);
   }
