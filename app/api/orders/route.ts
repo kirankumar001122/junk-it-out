@@ -3,6 +3,7 @@ import {
   RazorpayOrderCreationError,
 } from '@/lib/payments/razorpay';
 import { OrderExecutionTimer } from '@/lib/observability/orderTimingDiagnostics';
+import { isAgentEligibleForServiceArea } from '@/lib/services/agentService';
 import { NextRequest } from 'next/server';
 import {
   createOrder,
@@ -605,9 +606,38 @@ export async function GET(req: NextRequest) {
         );
       }
 
-      // 3. Retrieve historical orders excluding active order IDs up to remaining requested limit
+      // 3. Fetch unassigned orders available in agent's service area
+      let unassignedOrders: any[] = [];
+      const agentProfile = authUser.agentId
+        ? await db.agent.findUnique({
+            where: { id: authUser.agentId },
+            select: { id: true, serviceAreas: true, status: true },
+          })
+        : null;
+
+      if (agentProfile && (agentProfile.status === 'AVAILABLE' || activeOrders.length === 0)) {
+        const rawUnassigned = await db.order.findMany({
+          where: {
+            agentId: null,
+            status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED'] },
+            OR: [
+              { financialDirection: { not: 'CUSTOMER_PAYS' } },
+              { financialDirection: 'CUSTOMER_PAYS', paymentStatus: 'CAPTURED' },
+            ],
+          },
+          select: agentOrderSelect,
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        });
+
+        unassignedOrders = rawUnassigned.filter((o: any) =>
+          isAgentEligibleForServiceArea(agentProfile.serviceAreas, o.address?.area)
+        );
+      }
+
+      // 4. Retrieve historical orders excluding active order IDs up to remaining requested limit
       const activeIds = activeOrders.map((o) => o.id);
-      const remainingLimit = Math.max(0, limit - activeOrders.length);
+      const remainingLimit = Math.max(0, limit - activeOrders.length - unassignedOrders.length);
 
       const historicalOrders = remainingLimit > 0
         ? await db.order.findMany({
@@ -621,7 +651,7 @@ export async function GET(req: NextRequest) {
           })
         : [];
 
-      orders = [...activeOrders, ...historicalOrders];
+      orders = [...activeOrders, ...unassignedOrders, ...historicalOrders];
     } else {
       orders = await db.order.findMany({
         where: whereClause,

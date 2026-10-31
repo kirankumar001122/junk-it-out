@@ -34,7 +34,7 @@ export async function checkGeofenceServiceability(
   if (!cachedAreas) {
     try {
       const dbAreas = await db.serviceArea.findMany({
-        where: { status: { in: ['ACTIVE', 'INACTIVE'] } },
+        where: { status: { in: ['ACTIVE', 'INACTIVE', 'BLOCKED', 'SUSPENDED', 'DISABLED'] } },
         take: 1000,
       });
       cachedAreas = [];
@@ -56,6 +56,19 @@ export async function checkGeofenceServiceability(
       serviceAreaCache = { areas: cachedAreas, expiresAt: now + 60_000 };
     } catch (err) {
       console.error('Database service area check error:', err);
+    }
+  }
+
+  if (areaName && cachedAreas && cachedAreas.length > 0) {
+    const normArea = areaName.trim().toLowerCase();
+    const namedDbArea = cachedAreas.find(
+      (a) => a.name.toLowerCase() === normArea || a.id.toLowerCase() === normArea || normArea.includes(a.name.toLowerCase())
+    );
+    if (namedDbArea && namedDbArea.status !== 'ACTIVE') {
+      return {
+        serviceable: false,
+        message: `Service is currently disabled/inactive in ${namedDbArea.name}.`,
+      };
     }
   }
 
@@ -83,20 +96,36 @@ export async function checkGeofenceServiceability(
     }
   }
 
-  // 2. Check preset Bengaluru zone polygons
-  const matchedZone = BENGALURU_ZONES.find(
-    (z) => z.status === 'ACTIVE' && isPointInPolygon(point, z.boundaryPolygon)
-  );
+  if (areaName) {
+    const normArea = areaName.trim().toLowerCase();
+    const presetNamedZone = BENGALURU_ZONES.find(
+      (z) => z.name.toLowerCase() === normArea || z.id.toLowerCase() === normArea || normArea.includes(z.name.toLowerCase())
+    );
+    if (presetNamedZone && presetNamedZone.status !== 'ACTIVE') {
+      return {
+        serviceable: false,
+        message: `Service is currently disabled/inactive in ${presetNamedZone.name}.`,
+      };
+    }
+  }
 
-  if (matchedZone) {
+  // 2. Check preset Bengaluru zone polygons
+  const presetZone = BENGALURU_ZONES.find((z) => isPointInPolygon(point, z.boundaryPolygon));
+  if (presetZone) {
+    if (presetZone.status !== 'ACTIVE') {
+      return {
+        serviceable: false,
+        message: `Service is currently disabled/inactive in ${presetZone.name}.`,
+      };
+    }
     return {
       serviceable: true,
-      message: `Location is inside active Bengaluru service zone: ${matchedZone.name}`,
+      message: `Location is inside active Bengaluru service zone: ${presetZone.name}`,
       zone: {
-        id: matchedZone.id,
-        name: matchedZone.name,
-        etaMinutes: matchedZone.etaMinutes,
-        basePickupCharge: matchedZone.basePickupCharge,
+        id: presetZone.id,
+        name: presetZone.name,
+        etaMinutes: presetZone.etaMinutes,
+        basePickupCharge: presetZone.basePickupCharge,
       },
     };
   }
@@ -116,7 +145,13 @@ export async function checkGeofenceServiceability(
       }
     }
 
-    if (minDistance <= 10.0 && closestZone.status === 'ACTIVE') {
+    if (minDistance <= 10.0) {
+      if (closestZone.status !== 'ACTIVE') {
+        return {
+          serviceable: false,
+          message: `Service is currently disabled/inactive in ${closestZone.name}.`,
+        };
+      }
       return {
         serviceable: true,
         message: `Location is inside active Bengaluru service zone: ${closestZone.name}`,

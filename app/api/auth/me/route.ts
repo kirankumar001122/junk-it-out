@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
       return errorResponse('UNAUTHORIZED', 'Authentication required.', 401);
     }
 
-    const isAgent = authUser.role === 'AGENT';
+    const isAgent = authUser.role === 'AGENT' || Boolean(authUser.agentId);
 
     let user = await db.user.findUnique({
       where: { id: authUser.userId },
@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
         phone: user.phone,
         name: user.name,
         email: user.email,
-        role: user.role,
+        role: authUser.role || user.role,
         customer: user.customer,
         agent: user.agent,
         admin: user.admin,

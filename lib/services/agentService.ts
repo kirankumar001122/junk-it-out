@@ -24,7 +24,7 @@ export async function getActiveAgents(serviceAreaName?: string) {
         select: {
           orders: {
             where: {
-              status: { in: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WEIGHING'] },
+              status: { in: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WASTE_VERIFICATION', 'WEIGHING'] },
             },
           },
         },
@@ -54,7 +54,7 @@ export async function getAgentActiveOrder(agentId: string) {
   return db.order.findFirst({
     where: {
       agentId,
-      status: { in: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WEIGHING'] },
+      status: { in: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WASTE_VERIFICATION', 'WEIGHING'] },
     },
     include: {
       customer: { include: { user: true } },
@@ -227,7 +227,7 @@ export interface ExecuteAgentAcceptParams {
 
 export type ExecuteAgentAcceptResult =
   | { changed: true; alreadyAssignedToAgent: true; order: any; notificationCreated: boolean; reason?: undefined }
-  | { changed: false; reason: 'activeAssignment' | 'agentUnavailable' | 'orderChanged'; alreadyAssignedToAgent: boolean; order: any | null; notificationCreated: false };
+  | { changed: false; reason: 'activeAssignment' | 'agentUnavailable' | 'agentSuspended' | 'orderChanged'; alreadyAssignedToAgent: boolean; order: any | null; notificationCreated: false };
 
 export async function executeAgentAcceptTransaction(
   client: any,
@@ -236,7 +236,15 @@ export async function executeAgentAcceptTransaction(
   const { order, agentId, agentName, vehicleNumber, agentUserId, userId } = params;
 
   const runWithTx = async (tx: any): Promise<ExecuteAgentAcceptResult> => {
-    await tx.$queryRaw`SELECT "id" FROM "Agent" WHERE "id" = ${agentId} FOR UPDATE`;
+    let agentRowStatus: string | undefined;
+    try {
+      const lockedRows = await tx.$queryRaw`SELECT "id", "status" FROM "Agent" WHERE "id" = ${agentId} FOR UPDATE` as any[];
+      if (Array.isArray(lockedRows) && lockedRows.length > 0) {
+        agentRowStatus = lockedRows[0].status;
+      }
+    } catch {
+      // Fallback if raw query is not supported by mock or provider
+    }
 
     const activeOrder = await tx.order.findFirst({
       where: {
@@ -272,17 +280,36 @@ export async function executeAgentAcceptTransaction(
       };
     }
 
-    const currentAgent = await tx.agent.findUnique({
+    const currentAgentStatus = agentRowStatus ?? (await tx.agent.findUnique({
       where: { id: agentId },
       select: { id: true, status: true },
-    });
-    const canAcceptAssignedOrder =
-      currentAgent?.status === 'ASSIGNED' &&
-      (order.agentId === agentId || activeOrder?.id === order.id);
-    if (!currentAgent || (currentAgent.status !== 'AVAILABLE' && !canAcceptAssignedOrder)) {
+    }))?.status;
+
+    if (!currentAgentStatus) {
       return {
         changed: false,
         reason: 'agentUnavailable',
+        alreadyAssignedToAgent: false,
+        order: null,
+        notificationCreated: false,
+      };
+    }
+    if (currentAgentStatus === 'SUSPENDED' || currentAgentStatus === 'DEACTIVATED') {
+      return {
+        changed: false,
+        reason: 'agentSuspended',
+        alreadyAssignedToAgent: false,
+        order: null,
+        notificationCreated: false,
+      };
+    }
+    const canAcceptAssignedOrder =
+      currentAgentStatus === 'ASSIGNED' &&
+      (order.agentId === agentId || activeOrder?.id === order.id);
+    if (currentAgentStatus !== 'AVAILABLE' && !canAcceptAssignedOrder) {
+      return {
+        changed: false,
+        reason: currentAgentStatus === 'ASSIGNED' ? 'activeAssignment' : 'agentUnavailable',
         alreadyAssignedToAgent: false,
         order: null,
         notificationCreated: false,
@@ -315,31 +342,30 @@ export async function executeAgentAcceptTransaction(
       };
     }
 
-    await tx.orderStatusHistory.create({
-      data: {
-        orderId: order.id,
-        oldStatus: order.status,
-        newStatus: 'AGENT_ACCEPTED',
-        changedByUserId: userId || null,
-        notes: `Pickup accepted by field agent ${agentName || 'Agent'} (${vehicleNumber || 'Vehicle'}).`,
-      },
-    });
-
-    await tx.agent.update({
-      where: { id: agentId },
-      data: { status: 'ASSIGNED' },
-    });
-
-    let notificationCreated = false;
-    if (order.financialDirection !== 'CUSTOMER_PAYS' || order.paymentStatus === 'CAPTURED') {
-      notificationCreated = await persistAgentBookingNotificationOnce(tx, {
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        agentId,
-        agentUserId: agentUserId || '',
-        status: 'AGENT_ACCEPTED',
-      });
-    }
+    const [, , notificationCreated] = await Promise.all([
+      tx.orderStatusHistory.create({
+        data: {
+          orderId: order.id,
+          oldStatus: order.status,
+          newStatus: 'AGENT_ACCEPTED',
+          changedByUserId: userId || null,
+          notes: `Pickup accepted by field agent ${agentName || 'Agent'} (${vehicleNumber || 'Vehicle'}).`,
+        },
+      }),
+      tx.agent.update({
+        where: { id: agentId },
+        data: { status: 'ASSIGNED' },
+      }),
+      (order.financialDirection !== 'CUSTOMER_PAYS' || order.paymentStatus === 'CAPTURED')
+        ? persistAgentBookingNotificationOnce(tx, {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            agentId,
+            agentUserId: agentUserId || '',
+            status: 'AGENT_ACCEPTED',
+          })
+        : Promise.resolve(false),
+    ]);
 
     const updatedOrder = await tx.order.findUnique({
       where: { id: order.id },
@@ -350,12 +376,15 @@ export async function executeAgentAcceptTransaction(
       changed: true,
       alreadyAssignedToAgent: true,
       order: updatedOrder,
-      notificationCreated,
+      notificationCreated: Boolean(notificationCreated),
     };
   };
 
   if (typeof client.$transaction === 'function') {
-    return client.$transaction(runWithTx);
+    return client.$transaction(runWithTx, {
+      maxWait: 10000,
+      timeout: 25000,
+    });
   }
   return runWithTx(client);
 }
