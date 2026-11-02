@@ -21,10 +21,6 @@ const FAQ_ITEMS = [
     a: 'Our agent brings a calibrated portable digital scale to your doorstep. Each waste category is weighed separately in front of you, and actual weights are logged directly into the agent app to compute the final receipt.',
   },
   {
-    q: 'What is the difference between "We Pay You" and "Customer Pays"?',
-    a: 'For high-value recyclable scrap like paper, plastic, metals, and e-waste (`JUNKITOUT_PAYS`), we pay you instant cash/UPI. For bulky non-recyclable debris or heavy furniture clearance (`CUSTOMER_PAYS`), a doorstep service fee applies.',
-  },
-  {
     q: 'How do customer payments work via Razorpay?',
     a: 'When an order requires a customer service charge (`CUSTOMER_PAYS`), payment is completed securely through the integrated Razorpay Standard Checkout popup using UPI, Debit/Credit Cards, or Netbanking.',
   },
