@@ -32,6 +32,23 @@ async function testSseHeadersAndFormatting() {
   assert.equal(response.headers.get('Content-Type'), SSE_HEADERS['Content-Type']);
   assert.equal(response.headers.get('Cache-Control'), SSE_HEADERS['Cache-Control']);
   assert.equal(response.headers.has('Connection'), false);
+
+  const abortController = new AbortController();
+  const replayResponse = createSseResponse({
+    signal: abortController.signal,
+    subscribe: () => () => {},
+    connectedPayload: { status: 'connected' },
+    onConnect: (send) => send('AGENT_BOOKING_ASSIGNED', { notificationId: 'booking-1' }),
+    onEvent: () => {},
+  });
+  const reader = replayResponse.body!.getReader();
+  const connected = new TextDecoder().decode((await reader.read()).value);
+  const replayed = new TextDecoder().decode((await reader.read()).value);
+  assert.match(connected, /event: connected/);
+  assert.match(replayed, /event: AGENT_BOOKING_ASSIGNED/);
+  assert.match(replayed, /"notificationId":"booking-1"/);
+  abortController.abort();
+  await reader.read();
 }
 
 async function testCustomerOwnershipAndOrderFiltering() {
@@ -155,6 +172,9 @@ async function testAgentEventTargeting() {
   assert.equal(isAgentEventForAgent('NEW_PICKUP_AVAILABLE', { targetAgentIds: ['agent-b'] }, 'agent-a'), false);
   assert.equal(isAgentEventForAgent('ORDER_UPDATED', { agentId: 'agent-a' }, 'agent-a'), true);
   assert.equal(isAgentEventForAgent('ORDER_UPDATED', { agentId: 'agent-b' }, 'agent-a'), false);
+  assert.equal(isAgentEventForAgent('AGENT_BOOKING_ASSIGNED', { agentId: 'agent-a' }, 'agent-a'), true);
+  assert.equal(isAgentEventForAgent('AGENT_BOOKING_ASSIGNED', { agentId: 'agent-b' }, 'agent-a'), false);
+  assert.equal(isAgentEventForAgent('AGENT_BOOKING_ASSIGNED', { orderId: 'order-a' }, 'agent-a'), false);
   assert.equal(isAgentEventForAgent('WEIGHING_STARTED', { orderId: 'order-a', agentId: 'agent-a' }, 'agent-a'), true);
   assert.equal(isAgentEventForAgent('WEIGHING_STARTED', { orderId: 'order-a' }, 'agent-a'), false,
     'order lifecycle data without an agent target must not reach agents');

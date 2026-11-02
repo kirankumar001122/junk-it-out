@@ -20,16 +20,19 @@ import {
   KeyRound,
   AlertTriangle,
 } from 'lucide-react';
+import WeightQuantityInput from '@/components/WeightQuantityInput';
 import { calculateOrderValuation } from '@/lib/pricing';
 import {
   pickupCartEvent,
   readPickupCart,
   removeFromPickupCart,
   updatePickupCartQuantity,
+  isCustomerPickupCategory,
   type PickupCartItem,
 } from '@/lib/pickupCart';
-import { getCachedClientJson } from '@/lib/clientRequestCache';
+import { getCachedClientJson, invalidateCachedClientJson } from '@/lib/clientRequestCache';
 import { clearSelectedLocation } from '@/lib/selectedLocation';
+import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
 
 type Props = { open: boolean; onClose: () => void };
 
@@ -70,14 +73,17 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
     return trimmed.substring(0, 2).toUpperCase();
   };
 
-  const checkAuth = useCallback(async () => {
+  const checkAuth = useCallback(async (force = false) => {
     setCheckingAuth(true);
     try {
+      if (force) {
+        invalidateCachedClientJson('authenticated-user');
+      }
       const data = await getCachedClientJson<any>(
         'authenticated-user',
         '/api/auth/me',
         10_000,
-        { cache: 'no-store' }
+        { cache: 'no-store', force }
       );
       const authenticatedCustomer = data.success && data.data?.user?.role === 'CUSTOMER';
       if (authenticatedCustomer) {
@@ -97,7 +103,6 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
         setOtpStep('details');
         setOtpError('');
       }
-      console.log('[AUTH_CHECK] Customer session status:', { authenticatedCustomer, user: data.data?.user?.phone });
     } catch {
       setIsCustomer(false);
       setUser(null);
@@ -119,15 +124,19 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
 
     Promise.all([
       getCachedClientJson<any>(
-        'public-waste-categories',
-        '/api/waste-categories',
+        'public-customer-waste-categories',
+        '/api/waste-categories?customer=true',
         60_000,
         { cache: 'force-cache' }
       ),
-      checkAuth(),
+      checkAuth(true),
     ])
       .then(([categoryData]) => {
-        setCategories(categoryData.success ? categoryData.data : []);
+        setCategories(
+          categoryData.success
+            ? categoryData.data.filter(isCustomerWasteCategory)
+            : []
+        );
       })
       .catch(() => {
         setCategories([]);
@@ -135,10 +144,13 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
       .finally(() => setLoading(false));
 
     window.addEventListener(pickupCartEvent, refresh);
-    window.addEventListener('jio_auth_change', checkAuth);
+    const handleAuthChange = () => {
+      void checkAuth(true);
+    };
+    window.addEventListener('jio_auth_change', handleAuthChange);
     return () => {
       window.removeEventListener(pickupCartEvent, refresh);
-      window.removeEventListener('jio_auth_change', checkAuth);
+      window.removeEventListener('jio_auth_change', handleAuthChange);
     };
   }, [open, checkAuth]);
 
@@ -178,14 +190,6 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.message || data.error?.message || 'Unable to send OTP. Please check mobile number.');
-      }
-
-      if (data.data?.isExisting && data.data?.existingName) {
-        setName(data.data.existingName);
-      } else if (!data.data?.isExisting && (!name || name.trim().length < 2)) {
-        setOtpError('Please enter your full name for registration.');
-        setOtpLoading(false);
-        return;
       }
 
       setOtpStep('code');
@@ -230,7 +234,8 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
       }
 
       // Refresh server-side session authority
-      await checkAuth();
+      invalidateCachedClientJson('authenticated-user');
+      await checkAuth(true);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('jio_auth_change'));
       }
@@ -249,6 +254,8 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
     setLoggingOut(true);
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
+      invalidateCachedClientJson('authenticated-user');
+      await checkAuth(true);
       clearSelectedLocation();
       window.dispatchEvent(new CustomEvent('jio_auth_change', { detail: { type: 'logout' } }));
     } catch (err) {
@@ -291,9 +298,9 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex justify-end" role="dialog" aria-modal="true" aria-label="Pickup Cart">
+    <div className="customer-backdrop-enter fixed inset-0 z-[100] flex justify-end" role="dialog" aria-modal="true" aria-label="Pickup Cart">
       <button className="absolute inset-0 cursor-default bg-slate-950/45 backdrop-blur-sm" onClick={onClose} aria-label="Close Pickup Cart" />
-      <aside className="animate-cart-in relative flex h-[100dvh] max-h-[100dvh] w-full max-w-[480px] flex-col bg-[#fbfdfb] shadow-2xl overflow-hidden">
+      <aside className="customer-dialog-enter relative flex h-[100dvh] max-h-[100dvh] w-full max-w-[500px] flex-col overflow-hidden border-l border-emerald-900/20 bg-[#f6f8f2] shadow-2xl">
         {/* HEADER */}
         <header className="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-5 py-4">
           <button onClick={onClose} className="grid h-10 w-10 place-items-center rounded-xl hover:bg-slate-100" aria-label="Back">
@@ -510,7 +517,14 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
                         {item.category.type === 'WASTE_CHARGE' ? '🧰' : '♻️'}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <h3 className="truncate text-sm font-black text-slate-950">{item.category.name}</h3>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h3 className="truncate text-sm font-black text-slate-950">{item.category.name}</h3>
+                          {!isCustomerPickupCategory(item.category.name) && (
+                            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                              Bulk Evaluation
+                            </span>
+                          )}
+                        </div>
                         <p className="mt-0.5 text-xs font-semibold text-emerald-700">
                           ₹{item.category.pricePerKg}/kg · {item.category.type === 'RECYCLABLE_BUY' ? 'Recyclable value' : 'Service category'}
                         </p>
@@ -534,7 +548,12 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
                         >
                           <Minus className="h-3.5 w-3.5" />
                         </button>
-                        <span className="min-w-16 text-center text-sm font-black text-slate-950">{item.quantity} kg</span>
+                        <WeightQuantityInput
+                          value={item.quantity}
+                          onChange={(val) => updateQuantity(item.categoryId, val)}
+                          categoryName={item.category.name}
+                          textClassName="text-sm font-black text-slate-950"
+                        />
                         <button
                           onClick={() => updateQuantity(item.categoryId, item.quantity + 1)}
                           className="btn-glossy-primary rounded-full h-8 w-8 text-white p-0 grid place-items-center"

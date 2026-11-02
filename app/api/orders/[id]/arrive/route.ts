@@ -4,56 +4,8 @@ import { getAuthUser } from '@/lib/auth/middleware';
 import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
-
-const SAFE_HYDRATED_ORDER_INCLUDE = {
-  agent: {
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          phone: true,
-        },
-      },
-    },
-  },
-  customer: {
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          phone: true,
-        },
-      },
-    },
-  },
-  address: true,
-  items: {
-    include: {
-      category: true,
-    },
-  },
-};
-
-function formatOrderResponse(
-  orderData: any,
-  fallback: { id: string; orderNumber: string; agentId?: string | null; status: string }
-) {
-  if (!orderData) {
-    return {
-      id: fallback.id,
-      orderId: fallback.id,
-      orderNumber: fallback.orderNumber,
-      agentId: fallback.agentId,
-      status: fallback.status,
-    };
-  }
-  return {
-    ...orderData,
-    orderId: orderData.id ?? fallback.id,
-  };
-}
+import { SAFE_HYDRATED_ORDER_INCLUDE, formatOrderResponse } from '@/lib/orders/orderFormat';
+import { runBackgroundTask } from '@/lib/utils/backgroundTask';
 
 export async function POST(
   req: NextRequest,
@@ -103,36 +55,91 @@ export async function POST(
       return errorResponse('INVALID_STATUS_TRANSITION', `Cannot transition order status from ${oldStatus} to ${newStatus}.`, 400);
     }
 
-    const updatedOrder = await db.$transaction(async (tx) => {
-      const updated = await tx.order.update({
-        where: { id },
-        data: {
-          status: newStatus,
-          statusHistory: {
-            create: {
-              oldStatus,
-              newStatus,
-              changedByUserId: authUser?.userId || null,
-              notes: `Agent arrived at customer doorstep.`,
-            },
-          },
-        },
-        include: SAFE_HYDRATED_ORDER_INCLUDE,
+    const transition = await db.$transaction(async (tx) => {
+      const result = await tx.order.updateMany({
+        where: { id, agentId: authUser.agentId, status: oldStatus },
+        data: { status: newStatus },
       });
 
-      if (order.agentId) {
-        await tx.agent.update({
-          where: { id: order.agentId },
-          data: { status: 'ARRIVED' },
-        });
+      if (result.count !== 1) {
+        return {
+          kind: 'conflict' as const,
+          order: await tx.order.findUnique({
+            where: { id },
+            include: SAFE_HYDRATED_ORDER_INCLUDE,
+          }),
+        };
       }
 
-      return updated;
+      await tx.orderStatusHistory.create({
+        data: {
+          orderId: id,
+          oldStatus,
+          newStatus,
+          changedByUserId: authUser.userId || null,
+          notes: 'Agent arrived at customer doorstep.',
+        },
+      });
+
+      await tx.agent.update({
+        where: { id: authUser.agentId },
+        data: { status: 'ARRIVED' },
+      });
+
+      return {
+        kind: 'updated' as const,
+        order: await tx.order.findUnique({
+          where: { id },
+          include: SAFE_HYDRATED_ORDER_INCLUDE,
+        }),
+      };
     }, { isolationLevel: 'ReadCommitted', maxWait: 5000, timeout: 5000 });
+
+    if (transition.kind === 'conflict') {
+      if (transition.order?.agentId === authUser.agentId && transition.order.status === newStatus) {
+        return successResponse(
+          formatOrderResponse(transition.order, {
+            id: order.id,
+            orderNumber: order.orderNumber,
+            agentId: order.agentId,
+            status: newStatus,
+          })
+        );
+      }
+      return errorResponse('ORDER_STATE_CHANGED', 'The order changed while recording arrival. Refresh and try again.', 409);
+    }
+
+    const updatedOrder = transition.order;
+    if (!updatedOrder) {
+      return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
+    }
     logTiming('order update complete');
 
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
     broadcaster.broadcast('AGENT_ARRIVED', { orderId: id, agentId: order.agentId });
+
+    // Non-blocking doorstep arrival notification offloaded from HTTP response lifecycle
+    runBackgroundTask(async () => {
+      try {
+        const customerUserId = updatedOrder.customer?.userId || (order as any).customer?.userId;
+        const customerPhone = updatedOrder.customer?.user?.phone || (order as any).customer?.user?.phone;
+        if (!customerUserId || !customerPhone) return;
+
+        await db.notification.create({
+          data: {
+            userId: customerUserId,
+            orderId: id,
+            type: 'WHATSAPP',
+            recipient: customerPhone,
+            content: `Your Junk It Out pickup agent has arrived at your doorstep for order #${order.orderNumber}.`,
+            status: 'SENT',
+          },
+        });
+      } catch (notifErr: any) {
+        console.warn('[ARRIVE NOTIFICATION NOTICE] Safe notification error:', notifErr?.message);
+      }
+    }, 'OrderArrivalNotification');
+
     logTiming('response ready');
 
     return successResponse(

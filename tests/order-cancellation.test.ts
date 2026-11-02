@@ -43,6 +43,7 @@ function clone<T>(value: T): T {
 }
 
 const orderDelegate = db.order as any;
+(db as any).user = { ...(db as any).user, findUnique: async () => ({ tokenVersion: 1 }) };
 const originalFindUnique = orderDelegate.findUnique;
 const originalFindFirst = orderDelegate.findFirst;
 const originalFindMany = orderDelegate.findMany;

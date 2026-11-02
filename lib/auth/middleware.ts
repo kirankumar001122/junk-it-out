@@ -2,35 +2,55 @@ import { NextRequest } from 'next/server';
 import { verifyToken, JwtPayload } from './jwt';
 import { db } from '../db';
 
-type AgentTokenVersionLookup = (
-  agentId: string,
-) => Promise<{ tokenVersion?: number | null } | null>;
-
 export async function validatePayload(
   payload: JwtPayload | null,
-  findAgent: AgentTokenVersionLookup = async (agentId) =>
-    db.agent.findUnique({
-      where: { id: agentId },
-      select: { tokenVersion: true } as any,
-    }) as Promise<{ tokenVersion?: number | null } | null>,
+  agentFinder?: ((id: string) => Promise<any>) | { agentFinder?: (id: string) => Promise<any>; userFinder?: (id: string) => Promise<any> },
+  userFinderArg?: (id: string) => Promise<any>
 ): Promise<JwtPayload | null> {
   if (!payload) return null;
 
-  if (payload.role === 'AGENT' && payload.agentId) {
-    try {
-      const agent = await findAgent(payload.agentId);
-      if (!agent) return null;
-      const currentDbVersion = agent.tokenVersion ?? 1;
+  const actualAgentFinder = typeof agentFinder === 'function' ? agentFinder : agentFinder?.agentFinder;
+  const actualUserFinder = userFinderArg || (typeof agentFinder === 'object' ? agentFinder?.userFinder : undefined);
+
+  try {
+    // 1. Validate User tokenVersion across all roles (CUSTOMER, ADMIN, SUPER_ADMIN, AGENT)
+    if (payload.userId) {
+      const user = actualUserFinder
+        ? await actualUserFinder(payload.userId)
+        : await db.user.findUnique({
+            where: { id: payload.userId },
+            select: { tokenVersion: true } as any,
+          });
+
+      if (!user) return null;
+      const currentDbVersion = user.tokenVersion ?? 1;
       const tokenVersion = payload.tokenVersion ?? 1;
-      if (tokenVersion < currentDbVersion) {
+      if (tokenVersion !== currentDbVersion) {
         return null;
       }
-    } catch (e) {
-      console.error('Agent token version validation failed:', {
-        errorType: e instanceof Error ? e.name : 'UnknownError',
-      });
-      return null;
     }
+
+    // 2. Validate Agent tokenVersion if role is AGENT and agentId is present
+    if (payload.role === 'AGENT' && payload.agentId) {
+      const agent = actualAgentFinder
+        ? await actualAgentFinder(payload.agentId)
+        : await db.agent.findUnique({
+            where: { id: payload.agentId },
+            select: { tokenVersion: true } as any,
+          });
+
+      if (!agent) return null;
+      const currentDbVersion = (agent as any).tokenVersion ?? 1;
+      const tokenVersion = payload.tokenVersion ?? 1;
+      if (tokenVersion !== currentDbVersion) {
+        return null;
+      }
+    }
+  } catch (e: any) {
+    console.error('Agent token version validation failed:', {
+      errorType: e instanceof Error ? e.name : 'UnknownError',
+    });
+    return null;
   }
 
   return payload;
@@ -45,10 +65,67 @@ export async function getAuthUser(req: NextRequest): Promise<JwtPayload | null> 
     if (payload) return validatePayload(payload);
   }
 
-  // Check Cookies for `jio_token`
+  const pathname = req.nextUrl?.pathname || '';
+  const referer = req.headers.get('referer') || '';
+  const isAdminContext =
+    pathname.startsWith('/api/admin') ||
+    pathname.includes('/assign') ||
+    referer.includes('/admin');
+  const isAgentContext =
+    pathname.startsWith('/api/agent') ||
+    referer.includes('/agent');
+
+  // If in admin context, prioritize jio_admin_token if present
+  if (isAdminContext) {
+    const adminCookie = req.cookies.get('jio_admin_token')?.value;
+    if (adminCookie) {
+      const payload = verifyToken(adminCookie);
+      if (payload && (isAdminRole(payload) || Boolean(payload.adminId))) {
+        return validatePayload(payload);
+      }
+    }
+  }
+
+  // If in agent context, prioritize jio_agent_token if present
+  if (isAgentContext) {
+    const agentCookie = req.cookies.get('jio_agent_token')?.value;
+    if (agentCookie) {
+      const payload = verifyToken(agentCookie);
+      if (payload && (payload.role === 'AGENT' || Boolean(payload.agentId))) {
+        return validatePayload(payload);
+      }
+    }
+  }
+
+  // Check Cookies for jio_token
   const tokenCookie = req.cookies.get('jio_token')?.value;
   if (tokenCookie) {
     const payload = verifyToken(tokenCookie);
+    if (payload) {
+      // If in admin context but jio_token is non-admin, fall back to jio_admin_token if present
+      if (isAdminContext && !isAdminRole(payload) && !payload.adminId) {
+        const adminCookie = req.cookies.get('jio_admin_token')?.value;
+        if (adminCookie) {
+          const adminPayload = verifyToken(adminCookie);
+          if (adminPayload && (isAdminRole(adminPayload) || Boolean(adminPayload.adminId))) {
+            return validatePayload(adminPayload);
+          }
+        }
+      }
+      return validatePayload(payload);
+    }
+  }
+
+  // Fallback to jio_admin_token or jio_agent_token if jio_token is missing
+  const adminCookie = req.cookies.get('jio_admin_token')?.value;
+  if (adminCookie) {
+    const payload = verifyToken(adminCookie);
+    if (payload) return validatePayload(payload);
+  }
+
+  const agentCookie = req.cookies.get('jio_agent_token')?.value;
+  if (agentCookie) {
+    const payload = verifyToken(agentCookie);
     if (payload) return validatePayload(payload);
   }
 
@@ -62,7 +139,10 @@ export function hasRole(user: JwtPayload | null, allowedRoles: string[]): boolea
 }
 
 export function isAdminRole(user: JwtPayload | null): boolean {
-  return hasRole(user, ['ADMIN', 'SUPER_ADMIN']);
+  if (!user) return false;
+  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return true;
+  if (Boolean(user.adminId)) return true;
+  return false;
 }
 
 export function requireAdminUser(user: JwtPayload | null): JwtPayload | null {

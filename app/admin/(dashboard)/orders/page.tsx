@@ -1,21 +1,15 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import {
   Package,
   Search,
-  Filter,
-  Plus,
-  Clock,
-  User,
-  MapPin,
-  Scale,
-  CheckCircle,
-  XCircle,
   RefreshCw,
   Eye,
   UserPlus,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 export default function AdminOrdersPage() {
@@ -26,6 +20,11 @@ export default function AdminOrdersPage() {
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('ALL');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalOrders, setTotalOrders] = useState(0);
+  const limit = 25;
+
   const [selectedOrderForAssign, setSelectedOrderForAssign] = useState<any>(null);
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [assignLoading, setAssignLoading] = useState(false);
@@ -33,49 +32,142 @@ export default function AdminOrdersPage() {
 
   const assignInFlightRef = useRef(false);
   const loadingRef = useRef(false);
+  const agentsLoadingRef = useRef(false);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const loadOrdersAndAgents = async () => {
-    if (loadingRef.current) return;
+  const loadOrders = useCallback(async (targetPage = 1, search = searchTerm, status = filterStatus) => {
     loadingRef.current = true;
+    setLoading(true);
     try {
-      setLoading(true);
+      const params = new URLSearchParams({
+        page: String(targetPage),
+        limit: String(limit),
+      });
+      if (search.trim()) params.set('search', search.trim());
+      if (status !== 'ALL') params.set('status', status);
+
+      const res = await fetch(`/api/orders?${params.toString()}`)
+        .then((r) => r.json())
+        .catch(() => ({ success: false }));
+
+      if (res.success) {
+        setOrders(res.data || []);
+        if (res.meta) {
+          setPage(res.meta.page || targetPage);
+          setTotalPages(res.meta.totalPages || 1);
+          setTotalOrders(res.meta.total !== undefined ? res.meta.total : (res.data?.length ?? 0));
+        } else {
+          setPage(targetPage);
+          setTotalPages(1);
+          setTotalOrders(res.data?.length ?? 0);
+        }
+      }
+    } catch (e: any) {
+      console.error('Error loading orders:', e);
+    } finally {
+      setLoading(false);
+      loadingRef.current = false;
+    }
+  }, [searchTerm, filterStatus]);
+
+  const loadAgents = async () => {
+    if (agentsLoadingRef.current) return;
+    agentsLoadingRef.current = true;
+    try {
       setAgentsLoading(true);
       setAgentsError(null);
-      const [ordersRes, agentsRes] = await Promise.all([
-        fetch('/api/orders').then((r) => r.json()).catch(() => ({ success: false })),
-        fetch('/api/admin/agents').then((r) => r.json()).catch(() => ({ success: false })),
-      ]);
+      const agentsRes = await fetch('/api/admin/agents')
+        .then((r) => r.json())
+        .catch(() => ({ success: false }));
 
-      if (ordersRes.success) setOrders(ordersRes.data || []);
       if (agentsRes.success) {
-        const fetchedAgents = agentsRes.data || [];
-        setAgents(fetchedAgents);
+        setAgents(agentsRes.data || []);
       } else {
         setAgentsError(agentsRes.error?.message || agentsRes.message || 'Failed to load field agents.');
       }
     } catch (e: any) {
-      console.error(e);
-      setAgentsError('Error loading orders and agents.');
+      console.error('Error loading field agents:', e);
+      setAgentsError('Error loading field agents.');
     } finally {
-      setLoading(false);
       setAgentsLoading(false);
-      loadingRef.current = false;
+      agentsLoadingRef.current = false;
     }
   };
 
+  const loadOrdersAndAgents = () => {
+    loadOrders(page, searchTerm, filterStatus);
+    loadAgents();
+  };
+
   useEffect(() => {
-    loadOrdersAndAgents();
+    // Initial fetch
+    loadOrders(1, '', 'ALL');
+    loadAgents();
   }, []);
+
+  // Debounce search and status filter changes to trigger server-side query across full history
+  const handleSearchChange = (val: string) => {
+    setSearchTerm(val);
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
+      loadOrders(1, val, filterStatus);
+    }, 350);
+  };
+
+  const handleStatusChange = (val: string) => {
+    setFilterStatus(val);
+    loadOrders(1, searchTerm, val);
+  };
+
+  const handlePageChange = (newPage: number) => {
+    if (newPage < 1 || newPage > totalPages) return;
+    loadOrders(newPage, searchTerm, filterStatus);
+  };
+
+  // Keyboard accessibility and body scroll lock for modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedOrderForAssign(null);
+        setAssignError(null);
+      }
+    };
+    if (selectedOrderForAssign) {
+      window.addEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = 'hidden';
+    }
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = '';
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    };
+  }, [selectedOrderForAssign]);
+
+  const sortedAgents = [...agents].sort((a, b) => {
+    if (a.status === 'AVAILABLE' && b.status !== 'AVAILABLE') return -1;
+    if (a.status !== 'AVAILABLE' && b.status === 'AVAILABLE') return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  useEffect(() => {
+    if (selectedOrderForAssign && !selectedAgentId && agents.length > 0) {
+      if (selectedOrderForAssign.agentId && agents.some((a: any) => a.id === selectedOrderForAssign.agentId)) {
+        setSelectedAgentId(selectedOrderForAssign.agentId);
+      } else {
+        const firstAvailable = agents.find((a: any) => a.status === 'AVAILABLE');
+        setSelectedAgentId(firstAvailable ? firstAvailable.id : (agents[0]?.id || ''));
+      }
+    }
+  }, [agents, selectedOrderForAssign, selectedAgentId]);
 
   const openAssignModal = (order: any) => {
     setSelectedOrderForAssign(order);
     setAssignError(null);
     if (order.agentId && agents.some((a) => a.id === order.agentId)) {
       setSelectedAgentId(order.agentId);
-    } else if (agents.length > 0) {
-      setSelectedAgentId(agents[0].id);
     } else {
-      setSelectedAgentId('');
+      const firstAvailable = agents.find((a) => a.status === 'AVAILABLE');
+      setSelectedAgentId(firstAvailable ? firstAvailable.id : (agents[0]?.id || ''));
     }
   };
 
@@ -106,7 +198,7 @@ export default function AdminOrdersPage() {
       if (res.ok && data.success) {
         setSelectedOrderForAssign(null);
         setSelectedAgentId('');
-        await loadOrdersAndAgents();
+        loadOrdersAndAgents();
       } else {
         setAssignError(data.error?.message || data.message || 'Failed to assign agent to this order.');
       }
@@ -119,16 +211,6 @@ export default function AdminOrdersPage() {
     }
   };
 
-  const filteredOrders = orders.filter((o) => {
-    const matchesStatus = filterStatus === 'ALL' || o.status === filterStatus;
-    const matchesSearch =
-      o.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      o.customer?.user?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      o.customer?.user?.phone?.includes(searchTerm) ||
-      o.address?.area?.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesStatus && matchesSearch;
-  });
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -138,21 +220,20 @@ export default function AdminOrdersPage() {
             Orders Roster
           </span>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-1">Orders Management</h1>
-          <p className="text-xs text-slate-500">Monitor doorstep pickups, re-assign agents, track status & payouts</p>
+          <p className="text-xs text-slate-500">Live operational pickups, scheduled dispatch slots, and active agent assignments</p>
         </div>
 
         <button
-          type="button"
           onClick={loadOrdersAndAgents}
           disabled={loading}
-          className="btn-glossy-secondary rounded-full disabled:opacity-50 text-slate-800 font-bold text-xs px-5 py-2.5 border border-slate-200 flex items-center gap-2 shadow-2xs"
+          className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 flex items-center gap-1.5 self-start sm:self-auto disabled:opacity-50"
         >
-          <RefreshCw className={`w-4 h-4 text-slate-600 ${loading ? 'animate-spin' : ''}`} />
-          Refresh List
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
         </button>
       </div>
 
-      {/* Filter Bar & Search */}
+      {/* Filter and Search Bar */}
       <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="relative w-full sm:w-80">
@@ -161,22 +242,23 @@ export default function AdminOrdersPage() {
               type="text"
               placeholder="Search Order # / Customer / Phone / Area"
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-10 pr-4 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
             />
           </div>
 
-          <div className="flex items-center gap-3 w-full sm:w-auto">
-            <Filter className="w-4 h-4 text-slate-400 shrink-0" />
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             <select
               value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="w-full sm:w-48 bg-slate-50 border border-slate-200 rounded-2xl px-3 py-2.5 text-xs font-bold text-slate-900"
+              onChange={(e) => handleStatusChange(e.target.value)}
+              className="w-full sm:w-auto bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
             >
-              <option value="ALL">All Statuses</option>
+              <option value="ALL">All Order Statuses</option>
               <option value="BOOKING_RECEIVED">Booking Received</option>
+              <option value="AGENT_BEING_ASSIGNED">Agent Being Assigned</option>
               <option value="AGENT_ASSIGNED">Agent Assigned</option>
               <option value="AGENT_ON_WAY">Agent On Way</option>
+              <option value="AGENT_ARRIVED">Agent Arrived</option>
               <option value="WEIGHING">Weighing</option>
               <option value="PICKUP_COMPLETED">Completed</option>
               <option value="CANCELLED">Cancelled</option>
@@ -184,9 +266,9 @@ export default function AdminOrdersPage() {
           </div>
         </div>
 
-        {/* Orders Table */}
-        <div className="overflow-x-auto pt-2">
-          <table className="w-full text-left text-xs">
+        {/* Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-xs">
             <thead className="bg-slate-50 text-slate-500 uppercase font-bold text-[10px]">
               <tr>
                 <th className="p-3">Order Number</th>
@@ -194,20 +276,28 @@ export default function AdminOrdersPage() {
                 <th className="p-3">Pickup Area</th>
                 <th className="p-3">Status</th>
                 <th className="p-3">Assigned Agent</th>
-                <th className="p-3">Estimated / Final</th>
-                <th className="p-3">Date</th>
+                <th className="p-3">Total Value</th>
+                <th className="p-3">Created At</th>
                 <th className="p-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
-              {filteredOrders.length === 0 ? (
+              {loading && orders.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-6 text-center text-slate-400 font-medium">
-                    No orders match your filter criteria.
+                  <td colSpan={8} className="p-8 text-center text-slate-400 font-semibold">
+                    Loading orders...
+                  </td>
+                </tr>
+              ) : orders.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="p-8 text-center text-slate-400 space-y-2">
+                    <Package className="w-8 h-8 mx-auto text-slate-300" />
+                    <p className="font-bold text-slate-700 text-xs">No orders match filter criteria</p>
+                    <p className="text-[11px] text-slate-400">Try adjusting your search query or status filter</p>
                   </td>
                 </tr>
               ) : (
-                filteredOrders.map((o) => (
+                orders.map((o) => (
                   <tr key={o.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="p-3 font-mono font-bold text-slate-900">{o.orderNumber}</td>
                     <td className="p-3">
@@ -273,12 +363,54 @@ export default function AdminOrdersPage() {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Controls */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-100 text-xs text-slate-500">
+          <div>
+            Showing page <span className="font-bold text-slate-800">{page}</span> of{' '}
+            <span className="font-bold text-slate-800">{totalPages}</span> ({totalOrders} total orders)
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handlePageChange(page - 1)}
+              disabled={page <= 1 || loading}
+              className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              Previous
+            </button>
+            <span className="px-2 font-bold text-slate-700">
+              {page} / {totalPages}
+            </span>
+            <button
+              onClick={() => handlePageChange(page + 1)}
+              disabled={page >= totalPages || loading}
+              className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              Next
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Agent Assign Modal */}
       {selectedOrderForAssign && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Assign Agent to Order"
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 overflow-y-auto"
+        >
+          <div
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm cursor-pointer"
+            onClick={() => {
+              setSelectedOrderForAssign(null);
+              setAssignError(null);
+            }}
+            aria-hidden="true"
+          />
+          <div className="relative bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl z-10 my-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-base font-extrabold text-slate-900">
@@ -329,9 +461,9 @@ export default function AdminOrdersPage() {
                   disabled={assignLoading}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none disabled:opacity-50"
                 >
-                  {agents.map((ag) => (
+                  {sortedAgents.map((ag) => (
                     <option key={ag.id} value={ag.id}>
-                      {ag.name} ({ag.vehicleType} • {ag.vehicleNumber}) - {ag.status} [★{ag.rating} | {ag.phone}]
+                      {ag.status === 'AVAILABLE' ? '🟢 [AVAILABLE]' : `⚪ [${ag.status}]`} {ag.name} ({ag.vehicleType} • {ag.vehicleNumber}) [★{ag.rating} | {ag.phone}]
                     </option>
                   ))}
                 </select>
@@ -356,7 +488,14 @@ export default function AdminOrdersPage() {
                 disabled={assignLoading || agents.length === 0 || !selectedAgentId}
                 className="w-1/2 btn-glossy-primary rounded-full text-white font-bold text-xs py-3 shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {assignLoading ? 'Assigning...' : 'Confirm Assignment'}
+                {assignLoading ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Assigning...</span>
+                  </>
+                ) : (
+                  <span>Confirm Assignment</span>
+                )}
               </button>
             </div>
           </div>

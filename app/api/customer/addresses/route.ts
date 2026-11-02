@@ -5,22 +5,12 @@ import { getAuthUser } from '@/lib/auth/middleware';
 export async function GET(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
-    const { searchParams } = new URL(req.url);
-    const phone = searchParams.get('phone');
-
-    let userId = authUser?.userId;
-
-    if (!userId && phone) {
-      const user = await db.user.findUnique({ where: { phone } });
-      if (user) userId = user.id;
-    }
-
-    if (!userId) {
-      return NextResponse.json({ success: true, data: [] });
+    if (!authUser || authUser.role !== 'CUSTOMER' || !authUser.userId) {
+      return NextResponse.json({ success: false, message: 'Authenticated customer access is required.' }, { status: 401 });
     }
 
     const addresses = await db.address.findMany({
-      where: { userId },
+      where: { userId: authUser.userId },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -33,58 +23,88 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
     const authUser = await getAuthUser(req);
-    const { phone: bodyPhone, name: bodyName, label, houseNo, building, street, area, landmark, pincode, lat, lng } = body;
+    if (!authUser || authUser.role !== 'CUSTOMER' || !authUser.userId) {
+      return NextResponse.json({ success: false, message: 'Authenticated customer access is required.' }, { status: 401 });
+    }
+
+    const body = await req.json();
+    const { label, houseNo, building, street, area, landmark, pincode, lat, lng, name: bodyName } = body;
 
     if (!houseNo || !street || !area) {
       return NextResponse.json({ success: false, message: 'Missing required address fields.' }, { status: 400 });
     }
 
-    let user = authUser?.role === 'CUSTOMER'
-      ? await db.user.findUnique({ where: { id: authUser.userId }, select: { id: true, phone: true, name: true } })
-      : bodyPhone
-        ? await db.user.findUnique({ where: { phone: bodyPhone } })
-        : null;
-    const phone = user?.phone || bodyPhone;
-    const name = bodyName || user?.name || 'Customer';
-
-    if (!phone) {
-      return NextResponse.json({ success: false, message: 'Authenticated customer access is required.' }, { status: 401 });
+    if (
+      typeof lat !== 'number' ||
+      typeof lng !== 'number' ||
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lng) ||
+      lat === 0 ||
+      lng === 0
+    ) {
+      return NextResponse.json(
+        { success: false, message: 'Valid GPS latitude and longitude coordinates are required.' },
+        { status: 400 }
+      );
     }
+
+    const cleanPincode = typeof pincode === 'string' ? pincode.trim() : typeof pincode === 'number' ? String(pincode) : '';
+    if (!cleanPincode || !/^[1-9][0-9]{5}$/.test(cleanPincode)) {
+      return NextResponse.json(
+        { success: false, message: 'A valid 6-digit Indian pincode is required.' },
+        { status: 400 }
+      );
+    }
+
+    const user = await db.user.findUnique({
+      where: { id: authUser.userId },
+      select: { id: true, phone: true, name: true },
+    });
 
     if (!user) {
-      user = await db.user.create({
-        data: {
-          phone,
-          name: name || 'Customer',
-          role: 'CUSTOMER',
-          customer: {
-            create: {
-              referralCode: `JIO-${Math.random().toString(36).substring(2, 7).toUpperCase()}`,
-            },
-          },
-        },
-      });
+      return NextResponse.json({ success: false, message: 'Customer account not found.' }, { status: 404 });
     }
 
-    const newAddress = await db.address.create({
-      data: {
-        userId: user.id,
-        label: label || 'Home',
-        name,
-        phone,
-        houseNo,
-        building: building || null,
-        street,
-        area,
-        landmark: landmark || null,
-        pincode: pincode || '560078',
-        lat: lat || 12.9077,
-        lng: lng || 77.5854,
-        isDefault: true,
-      },
-    });
+    const phone = user.phone;
+    const name = bodyName?.trim() || user.name || 'Customer';
+    const isDefault = body.isDefault !== undefined ? Boolean(body.isDefault) : true;
+
+    const runTx = async (tx: any) => {
+      const addressClient = tx?.address || db.address;
+      if (isDefault && typeof addressClient?.updateMany === 'function') {
+        await addressClient.updateMany({
+          where: { userId: user.id },
+          data: { isDefault: false },
+        });
+      }
+
+      if (typeof addressClient?.create === 'function') {
+        return addressClient.create({
+          data: {
+            userId: user.id,
+            label: label || 'Home',
+            name,
+            phone,
+            houseNo,
+            building: building || null,
+            street,
+            area,
+            landmark: landmark || null,
+            pincode: cleanPincode,
+            lat,
+            lng,
+            isDefault,
+          },
+        });
+      }
+
+      return null;
+    };
+
+    const newAddress = typeof db.$transaction === 'function'
+      ? await db.$transaction(runTx)
+      : await runTx(db);
 
     return NextResponse.json({ success: true, data: newAddress });
   } catch (error: any) {

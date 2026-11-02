@@ -38,6 +38,32 @@ export async function GET(req: NextRequest) {
     subscribe: (listener) => broadcaster.subscribe(listener),
     connectedPayload: { status: 'connected', agentId },
     heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+    async onConnect(send) {
+      const pendingNotifications = await db.notification.findMany({
+        where: {
+          userId: authUser.userId,
+          type: 'AGENT_BOOKING_ASSIGNED',
+          status: 'QUEUED',
+        },
+        include: {
+          order: { select: { orderNumber: true, agentId: true, status: true } },
+        },
+        orderBy: { sentAt: 'asc' },
+        take: 50,
+      });
+
+      for (const notification of pendingNotifications) {
+        if (notification.order?.agentId !== agentId) continue;
+        send('AGENT_BOOKING_ASSIGNED', {
+          notificationId: notification.id,
+          orderId: notification.orderId,
+          orderNumber: notification.order.orderNumber,
+          agentId,
+          status: notification.order.status,
+          message: notification.content,
+        });
+      }
+    },
     onEvent(event, send) {
       if (!isAgentEventForAgent(event.event, event.payload, agentId)) return;
       send(event.event, event.payload);

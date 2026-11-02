@@ -1,17 +1,103 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyRazorpayWebhookSignature } from '@/lib/payments/razorpay';
+import {
+  refundRazorpayPayment,
+  verifyRazorpayWebhookSignature,
+} from '@/lib/payments/razorpay';
 import { dispatchPaidOrderToAgents } from '@/lib/payments/verification';
 import { dispatchCapturedPayment } from '@/lib/payments/webhookDispatch';
+import {
+  getSafeErrorDependency,
+  getSafeErrorType,
+  logStructured,
+  withApiRequestLogging,
+  type ApiRequestContext,
+} from '@/lib/observability/structuredLogger';
 import {
   applyRefundEventOnce,
   refundAttemptId,
   refundEventId,
   refundIdempotencyKey,
   refundStatusFromProviderStatus,
+  isRefundResultForRequest,
 } from '@/lib/payments/refundWorkflow';
 
-export async function POST(req: NextRequest) {
+async function refundLateCapturedPayment(payment: {
+  id: string;
+  orderId: string;
+  amount: number;
+  paymentId: string;
+}) {
+  const attemptId = refundAttemptId(payment.id);
+  const idempotencyKey = refundIdempotencyKey(payment.id);
+  let nextStatus: 'REFUNDED' | 'REFUND_PENDING' | 'REFUND_FAILED' | 'REFUND_PENDING_RECONCILIATION';
+  let refund: any = null;
+
+  try {
+    refund = await refundRazorpayPayment(
+      payment.paymentId,
+      Math.round(payment.amount * 100),
+      {
+        reason: 'Automatic refund for payment captured after cancellation',
+        orderId: payment.orderId,
+        payment_record_id: payment.id,
+        refund_request_key: idempotencyKey,
+        attempt_id: attemptId,
+      },
+      idempotencyKey,
+    );
+    if (!isRefundResultForRequest(refund, {
+      paymentId: payment.paymentId,
+      amountInPaise: Math.round(payment.amount * 100),
+      idempotencyKey,
+    })) {
+      nextStatus = 'REFUND_PENDING_RECONCILIATION';
+    } else if (refund.status === 'processed') {
+      nextStatus = 'REFUNDED';
+    } else if (refund.status === 'pending') {
+      nextStatus = 'REFUND_PENDING';
+    } else {
+      nextStatus = 'REFUND_FAILED';
+    }
+  } catch (error: any) {
+    nextStatus = error?.uncertain ? 'REFUND_PENDING_RECONCILIATION' : 'REFUND_FAILED';
+  }
+
+  await db.$transaction(async (tx) => {
+    await (tx as any).refundAttempt.updateMany({
+      where: { id: attemptId, status: { in: ['REFUND_PROCESSING', 'RECONCILIATION_REQUIRED'] } },
+      data: {
+        status: nextStatus,
+        ...(typeof refund?.id === 'string' ? { razorpayRefundId: refund.id } : {}),
+        failureReason: nextStatus === 'REFUNDED' ? null : `Late-capture refund status: ${nextStatus}`,
+      },
+    });
+    await tx.payment.updateMany({
+      where: { id: payment.id, status: { in: ['REFUND_PROCESSING', 'REFUND_PENDING', 'REFUND_PENDING_RECONCILIATION'] } },
+      data: { status: nextStatus },
+    });
+    await tx.order.updateMany({
+      where: { id: payment.orderId, paymentStatus: { in: ['REFUND_PROCESSING', 'REFUND_PENDING', 'REFUND_PENDING_RECONCILIATION'] } },
+      data: { paymentStatus: nextStatus },
+    });
+    await (tx as any).refundAttemptEvent.createMany({
+      data: [{
+        id: refundEventId(attemptId, `LATE_CAPTURE_REFUND_${nextStatus}`),
+        refundAttemptId: attemptId,
+        eventType: 'LATE_CAPTURE_REFUND_RESULT',
+        status: nextStatus,
+        details: {
+          providerRefundId: refund?.id || null,
+          providerStatus: refund?.status || null,
+        },
+      }],
+      skipDuplicates: true,
+    });
+  });
+  return nextStatus;
+}
+
+async function handlePost(req: NextRequest, context: ApiRequestContext) {
   try {
     const rawBody = await req.text();
     const signature = req.headers.get('x-razorpay-signature') || '';
@@ -80,6 +166,12 @@ export async function POST(req: NextRequest) {
                 })]
               : []),
           ]);
+          if (refundFailed) {
+            logStructured('warn', 'payment.provider.refund_failed', {
+              ...context,
+              dependency: 'razorpay',
+            });
+          }
           return NextResponse.json({ success: true, status: 'Refund webhook processed.' });
         }
       }
@@ -262,6 +354,12 @@ export async function POST(req: NextRequest) {
         });
         return NextResponse.json({ success: true, status: 'Refund event processed.' });
       });
+      if (refundStatus === 'REFUND_FAILED') {
+        logStructured('warn', 'payment.provider.refund_failed', {
+          ...context,
+          dependency: 'razorpay',
+        });
+      }
       return webhookResponse;
     }
 
@@ -324,31 +422,88 @@ export async function POST(req: NextRequest) {
       });
 
       if (paymentClaim.count !== 1) {
-        return false;
+        return { claimed: false, lateCapture: false };
+      }
+
+      const currentOrder = await tx.order.findUnique({
+        where: { id: payment.orderId },
+        select: { status: true },
+      });
+      if (captured && currentOrder?.status === 'CANCELLED') {
+        const attemptId = refundAttemptId(payment.id);
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: { status: 'REFUND_PROCESSING' },
+        });
+        await tx.order.update({
+          where: { id: payment.orderId },
+          data: { paymentStatus: 'REFUND_PROCESSING' },
+        });
+        await (tx as any).refundAttempt.createMany({
+          data: [{
+            id: attemptId,
+            orderId: payment.orderId,
+            paymentId: payment.id,
+            amount: payment.amount,
+            status: 'REFUND_PROCESSING',
+          }],
+          skipDuplicates: true,
+        });
+        await (tx as any).refundAttemptEvent.createMany({
+          data: [{
+            id: refundEventId(attemptId, 'LATE_CAPTURE_DETECTED'),
+            refundAttemptId: attemptId,
+            eventType: 'LATE_CAPTURE_DETECTED',
+            status: 'REFUND_PROCESSING',
+            details: { providerPaymentId, source: 'RAZORPAY_WEBHOOK' },
+          }],
+          skipDuplicates: true,
+        });
+        return { claimed: true, lateCapture: true };
       }
 
       await tx.order.update({
         where: { id: payment.orderId },
         data: { paymentStatus: nextOrderPaymentStatus },
       });
-      return true;
+      return { claimed: true, lateCapture: false };
     });
 
-    if (!claimed) {
+    if (!claimed.claimed) {
       return NextResponse.json({ success: true, status: 'Already processed' });
+    }
+
+    if (failed) {
+      logStructured('warn', 'payment.provider.failed', {
+        ...context,
+        dependency: 'razorpay',
+      });
+    }
+
+    if (claimed.lateCapture) {
+      const lateRefundStatus = await refundLateCapturedPayment({
+        id: payment.id,
+        orderId: payment.orderId,
+        amount: payment.amount,
+        paymentId: providerPaymentId,
+      });
+      return NextResponse.json({ success: true, status: `Late capture refund ${lateRefundStatus}.` });
     }
 
     await dispatchCapturedPayment(nextStatus, payment.orderId, dispatchPaidOrderToAgents);
 
     return NextResponse.json({ success: true, status: 'Webhook processed' });
   } catch (error: any) {
-    console.error(
-      '[PAYMENT_WEBHOOK_ERROR]',
-      error?.message || error,
-    );
+    logStructured('error', 'payment.webhook.failed', {
+      ...context,
+      dependency: getSafeErrorDependency(error),
+      errorType: getSafeErrorType(error),
+    });
     return NextResponse.json(
       { success: false, message: 'Webhook processing failed.' },
       { status: 500 },
     );
   }
 }
+
+export const POST = withApiRequestLogging('/api/payments/webhook', handlePost);

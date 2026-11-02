@@ -35,6 +35,7 @@ assert.equal(getApiErrorMessage({ success: false }, "fallback"), "fallback");
 
 async function testOrderDetailRouteLookupAndOwnership() {
   const orderDelegate = db.order as any;
+  (db as any).user = { ...(db as any).user, findUnique: async () => ({ tokenVersion: 1 }) };
   const originalFindFirst = orderDelegate.findFirst;
   const order = {
     id: databaseId,

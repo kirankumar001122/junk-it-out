@@ -7,6 +7,8 @@ const state = {
   gatewayCalls: 0,
   broadcasts: 0,
   executeRawCalls: [] as any[],
+  orderLockQueries: [] as string[],
+  orderReads: 0,
   currentUser: {
     userId: 'customer-user-1',
     customerId: 'customer-1',
@@ -110,6 +112,7 @@ vi.mock('@/lib/db', () => {
 
   const orderTable = {
     findUnique: vi.fn(async ({ where }: any) => {
+      state.orderReads += 1;
       if (where.id === currentOrder.id) {
         return {
           ...currentOrder,
@@ -127,7 +130,10 @@ vi.mock('@/lib/db', () => {
   const database = {
     order: orderTable,
     payment,
-    $queryRaw: vi.fn(async () => []),
+    $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+      state.orderLockQueries.push(strings.join('?'));
+      return [];
+    }),
     $executeRaw: vi.fn(async (strings: TemplateStringsArray, ...values: any[]) => {
       state.executeRawCalls.push({ strings, values });
       return 1;
@@ -177,6 +183,8 @@ describe('Customer Payment Retry and Failed Booking Feedback', () => {
     state.gatewayCalls = 0;
     state.broadcasts = 0;
     state.executeRawCalls = [];
+    state.orderLockQueries = [];
+    state.orderReads = 0;
     state.currentUser = {
       userId: 'customer-user-1',
       customerId: 'customer-1',
@@ -348,30 +356,26 @@ describe('Customer Payment Retry and Failed Booking Feedback', () => {
     assert.match(body.message, /not authorized to verify this payment/i);
   });
 
-  it('acquires transaction-scoped advisory lock using $executeRaw on payment creation and retry', async () => {
+  it('locks and re-reads the order on payment creation and retry', async () => {
     // 1. Initial attempt
     const res1 = await createPayment(
       createPostRequest('/api/payments/create', { orderId: currentOrder.id })
     );
     assert.equal(res1.status, 200);
-    assert.equal(state.executeRawCalls.length, 1);
-    const [call1] = state.executeRawCalls;
-    const rawSql1 = call1.strings.join('?');
-    assert.match(rawSql1, /pg_advisory_xact_lock/);
-    assert.match(rawSql1, /hashtextextended/);
-    assert.deepEqual(call1.values, [currentOrder.id]);
+    assert.equal(state.executeRawCalls.length, 0);
+    assert.equal(state.orderLockQueries.length, 1);
+    assert.match(state.orderLockQueries[0], /FOR UPDATE/);
+    assert.equal(state.orderReads, 2);
 
     // 2. Retry attempt for same order
     const res2 = await createPayment(
       createPostRequest('/api/payments/create', { orderId: currentOrder.id })
     );
     assert.equal(res2.status, 200);
-    assert.equal(state.executeRawCalls.length, 2);
-    const call2 = state.executeRawCalls[1];
-    const rawSql2 = call2.strings.join('?');
-    assert.match(rawSql2, /pg_advisory_xact_lock/);
-    assert.match(rawSql2, /hashtextextended/);
-    assert.deepEqual(call2.values, [currentOrder.id]);
+    assert.equal(state.executeRawCalls.length, 0);
+    assert.equal(state.orderLockQueries.length, 2);
+    assert.match(state.orderLockQueries[1], /FOR UPDATE/);
+    assert.equal(state.orderReads, 4);
     // Payment retry reuses existing active gateway order without creating new one
     assert.equal(state.gatewayCalls, 1);
   });

@@ -6,16 +6,18 @@ import { signToken } from '../lib/auth/jwt';
 
 async function run() {
   const settlementDelegate = db.settlement as any;
+  const auditLogDelegate = db.auditLog as any;
   const originalFindMany = settlementDelegate.findMany;
   const originalUpdate = settlementDelegate.update;
+  const originalAuditCreate = auditLogDelegate.create;
+  const userDelegate = db.user as any;
+  const originalUserFindUnique = userDelegate.findUnique;
+  userDelegate.findUnique = async () => ({ tokenVersion: 1 });
 
   let currentSettlement = {
     id: 'settlement-1',
     orderId: 'order-1',
-    customerId: 'customer-1',
-    totalWeightKg: 15.5,
-    amount: 310.0,
-    breakdownJson: '{}',
+    amount: 150.0,
     status: 'PENDING',
     createdAt: new Date(),
     approvedAt: null as Date | null,
@@ -30,6 +32,7 @@ async function run() {
     currentSettlement = { ...currentSettlement, ...data };
     return currentSettlement;
   };
+  auditLogDelegate.create = async () => ({ id: 'audit-1' });
 
   const adminToken = signToken({
     userId: 'admin-1',
@@ -49,9 +52,14 @@ async function run() {
   }
 
   try {
-    // 1. Unauthenticated check
+    // 1. Unauthenticated check (must return 401)
     const unauth = await getSettlements(new NextRequest('http://localhost/api/admin/settlements'));
-    assert.equal(unauth.status, 403);
+    assert.equal(unauth.status, 401);
+
+    // Non-admin check (must return 403)
+    const custToken = signToken({ userId: 'c-1', phone: '9999999999', role: 'CUSTOMER' });
+    const custReq = new NextRequest('http://localhost/api/admin/settlements', { headers: { Cookie: `jio_token=${custToken}` } });
+    assert.equal((await getSettlements(custReq)).status, 403);
 
     // 2. Fetch settlements
     const listRes = await getSettlements(makeRequest());
@@ -75,16 +83,22 @@ async function run() {
     assert.equal(readyRes.status, 200);
     assert.equal(currentSettlement.status, 'READY_FOR_PAYOUT');
 
-    // 6. Update to PAID (manual disbursal confirmation)
-    const paidRes = await updateSettlement(makeRequest({ id: 'settlement-1', status: 'PAID' }, 'PATCH'));
+    // 6. Reject PAID without transaction reference (SEC-12)
+    const missingRefRes = await updateSettlement(makeRequest({ id: 'settlement-1', status: 'PAID' }, 'PATCH'));
+    assert.equal(missingRefRes.status, 400, 'PAID status without transaction reference must return 400');
+
+    // 7. Update to PAID with valid transaction reference
+    const paidRes = await updateSettlement(makeRequest({ id: 'settlement-1', status: 'PAID', transactionReference: 'TXN_PAYOUT_987654' }, 'PATCH'));
     assert.equal(paidRes.status, 200);
     assert.equal(currentSettlement.status, 'PAID');
-    assert.ok(currentSettlement.paidAt instanceof Date, 'paidAt should be set when marked paid');
+    assert.ok(currentSettlement.paidAt instanceof Date, 'paidAt should be set on payment');
 
-    console.log('Admin settlements status transitions and paidAt tracking tests passed.');
+    console.log('Admin settlements workflow tests passed.');
   } finally {
     settlementDelegate.findMany = originalFindMany;
     settlementDelegate.update = originalUpdate;
+    auditLogDelegate.create = originalAuditCreate;
+    userDelegate.findUnique = originalUserFindUnique;
     await db.$disconnect();
   }
 }

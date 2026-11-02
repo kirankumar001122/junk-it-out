@@ -113,10 +113,7 @@ export default function CustomerOtpLogin({
         );
       }
 
-      // Existing customer name
-      if (data.data?.isExisting && data.data?.existingName) {
-        setName(data.data.existingName);
-      } else if (!name || name.trim().length < 2) {
+      if (!name || name.trim().length < 2) {
         setName('Customer');
       }
 

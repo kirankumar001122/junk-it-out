@@ -34,6 +34,21 @@ const baseOrder = {
   items: [{ estimatedWeight: 5 }],
 };
 
+const baseBookingInput = {
+  phone: '9876543210',
+  name: 'Weight Validation Customer',
+  address: {
+    houseNo: '12',
+    street: 'Main Road',
+    area: 'JP Nagar',
+    pincode: '560078',
+    lat: 12.9166,
+    lng: 77.5996,
+  },
+  items: [{ categoryId: 'cat_ewaste_01', estimatedWeight: 5 }],
+  pickupType: 'ASAP' as const,
+};
+
 let currentOrder = { ...baseOrder };
 
 vi.mock('@/lib/auth/middleware', () => ({
@@ -102,6 +117,7 @@ vi.mock('@/lib/db', () => {
       currentOrder = {
         id: `order-${Date.now()}`,
         ...data,
+        items: data.items?.create || [],
       };
       return { ...currentOrder };
     }),
@@ -146,6 +162,20 @@ vi.mock('@/lib/db', () => {
       customer: { id: state.currentUser.customerId },
       role: state.currentUser.role,
     })),
+    findFirst: vi.fn(async () => null),
+    create: vi.fn(async ({ data }: any) => ({
+      id: state.currentUser.userId,
+      phone: data.phone,
+      name: data.name,
+      role: 'CUSTOMER',
+      customer: { id: state.currentUser.customerId },
+    })),
+    update: vi.fn(async ({ data }: any) => ({
+      id: state.currentUser.userId,
+      ...data,
+      role: 'CUSTOMER',
+      customer: { id: state.currentUser.customerId },
+    })),
   };
 
   const serviceArea = {
@@ -175,10 +205,10 @@ vi.mock('@/lib/db', () => {
   };
 
   const wasteCategory = {
-    findMany: vi.fn(async () => [
-      { id: 'cat_ewaste_01', name: 'Electronic Waste', pricePerKg: 20.0 },
-      { id: 'cat_metal_01', name: 'Metal Scrap', pricePerKg: 30.0 },
-    ]),
+    findMany: vi.fn(async ({ where }: any) => [
+      { id: 'cat_ewaste_01', name: 'Electronic Waste', pricePerKg: 20.0, minWeightKg: 5, maxWeightKg: 20, active: true },
+      { id: 'cat_metal_01', name: 'Metal Scrap', pricePerKg: 30.0, minWeightKg: 5, maxWeightKg: 20, active: true },
+    ].filter((category) => where.id.in.includes(category.id) && (!where.active || category.active === where.active))),
   };
 
   const database = {
@@ -209,7 +239,13 @@ import { validateAndCalculateCoupon, InvalidCouponError } from '@/lib/services/c
 import { POST as validateCouponRoute } from '@/app/api/coupons/validate/route';
 import { POST as createOrderRoute } from '@/app/api/orders/route';
 import { POST as createPaymentRoute } from '@/app/api/payments/create/route';
-import { createOrder, createOrderPayloadHash } from '@/lib/services/orderService';
+import {
+  createOrder,
+  createOrderPayloadHash,
+  InvalidWasteCategoryError,
+  InvalidBookingWeightError,
+} from '@/lib/services/orderService';
+import { calculateTotalBookingWeight } from '@/lib/validations/schemas';
 
 function createPostRequest(url: string, body: Record<string, unknown>, headers: Record<string, string> = {}) {
   return new NextRequest(`http://localhost${url}`, {
@@ -408,6 +444,73 @@ describe('Coupon Support in Booking Flow', () => {
   });
 
   describe('3. Order Creation & Client Manipulation Immunity', () => {
+    it('validates total booking weight across items at inclusive category boundaries', async () => {
+      assert.equal(calculateTotalBookingWeight([
+        { estimatedWeight: 2 },
+        { estimatedWeight: 3 },
+      ]), 5);
+
+      const withinRange = await createOrder({
+        ...baseBookingInput,
+        items: [
+          { categoryId: 'cat_ewaste_01', estimatedWeight: 2 },
+          { categoryId: 'cat_ewaste_01', estimatedWeight: 3 },
+        ],
+      });
+      assert.equal(withinRange.items.length, 2);
+
+      await assert.rejects(
+        () => createOrder({
+          ...baseBookingInput,
+          items: [{ categoryId: 'cat_ewaste_01', estimatedWeight: 4 }],
+        }),
+        (error: any) => error instanceof InvalidBookingWeightError &&
+          /at least 5 kg/i.test(error.message),
+      );
+
+      await assert.rejects(
+        () => createOrder({
+          ...baseBookingInput,
+          items: [{ categoryId: 'cat_ewaste_01', estimatedWeight: 21 }],
+        }),
+        (error: any) => error instanceof InvalidBookingWeightError &&
+          /must not exceed 20 kg/i.test(error.message),
+      );
+
+      const minimumBoundary = await createOrder({
+        ...baseBookingInput,
+        items: [{ categoryId: 'cat_ewaste_01', estimatedWeight: 5 }],
+      });
+      assert.ok(minimumBoundary.id);
+
+      const maximumBoundary = await createOrder({
+        ...baseBookingInput,
+        items: [{ categoryId: 'cat_ewaste_01', estimatedWeight: 20 }],
+      });
+      assert.ok(maximumBoundary.id);
+
+      await assert.rejects(
+        () => createOrder({
+          ...baseBookingInput,
+          items: [{ categoryId: 'cat_ewaste_01', estimatedWeight: Number.NaN }],
+        }),
+        (error: any) => error instanceof InvalidBookingWeightError &&
+          /finite positive/i.test(error.message),
+      );
+
+      await assert.rejects(
+        () => createOrder({
+          ...baseBookingInput,
+          items: [
+            { categoryId: 'cat_ewaste_01', estimatedWeight: Number.MAX_VALUE },
+            { categoryId: 'cat_ewaste_01', estimatedWeight: Number.MAX_VALUE },
+          ],
+        }),
+        (error: any) => error instanceof InvalidBookingWeightError &&
+          /finite positive values/i.test(error.message),
+      );
+    });
+
     const validBookingPayload = {
       phone: '9876543210',
       name: 'Coupon Test Customer',
@@ -479,6 +582,22 @@ describe('Coupon Support in Booking Flow', () => {
         (err: any) => {
           return err instanceof InvalidCouponError || err?.name === 'InvalidCouponError';
         }
+      );
+    });
+
+    it('rejects unknown waste categories instead of applying a fallback price', async () => {
+      await assert.rejects(
+        async () => {
+          await createOrder(
+            {
+              ...validBookingPayload,
+              items: [{ categoryId: 'missing-category', estimatedWeight: 5 }],
+            },
+            'idem-missing-category-1',
+            state.currentUser,
+          );
+        },
+        (err: any) => err instanceof InvalidWasteCategoryError || err?.name === 'InvalidWasteCategoryError',
       );
     });
 

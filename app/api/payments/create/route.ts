@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
 import {
+  getSafeErrorDependency,
+  getSafeErrorType,
+  getSafeDatabaseCode,
+  getSafePrismaCode,
+  logStructured,
+  withApiRequestLogging,
+  type ApiRequestContext,
+} from '@/lib/observability/structuredLogger';
+import {
   createRazorpayOrder,
   RazorpayOrderCreationError,
 } from '@/lib/payments/razorpay';
@@ -12,15 +21,9 @@ const ACTIVE_PAYMENT_STATUSES = [
   'AUTHORIZED',
 ] as const;
 
-export async function POST(req: NextRequest) {
-  const startedAt = Date.now();
-  const logTiming = (phase: string) =>
-    console.info(`[api/payments/create] ${phase} elapsedMs=${Date.now() - startedAt}`);
-
+async function handlePost(req: NextRequest, context: ApiRequestContext) {
   try {
-    logTiming('request start');
     const authUser = await getAuthUser(req);
-    logTiming('authentication complete');
 
     if (!authUser || authUser.role !== 'CUSTOMER' || !authUser.customerId) {
       return NextResponse.json(
@@ -44,7 +47,6 @@ export async function POST(req: NextRequest) {
       where: { id: orderId },
       include: { payments: { orderBy: { createdAt: 'desc' } } },
     });
-    logTiming('order lookup complete');
 
     if (!order) {
       return NextResponse.json(
@@ -109,15 +111,62 @@ export async function POST(req: NextRequest) {
     }
 
     const attempt = await db.$transaction(async (tx) => {
-      if (typeof (tx as any).$executeRaw === 'function') {
-        await (tx as any).$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${order.id}, 0))`;
-      } else {
-        await (tx as any).$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${order.id}, 0))`;
+      await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "id" = ${order.id} FOR UPDATE`;
+
+      const currentOrder = await tx.order.findUnique({
+        where: { id: order.id },
+      });
+
+      if (!currentOrder) {
+        return { kind: 'rejected' as const, status: 404, message: 'Order not found' };
+      }
+
+      if (currentOrder.customerId !== authUser.customerId) {
+        return {
+          kind: 'rejected' as const,
+          status: 403,
+          message: 'You are not authorized to pay for this order.',
+        };
+      }
+
+      if (currentOrder.financialDirection !== 'CUSTOMER_PAYS') {
+        return {
+          kind: 'rejected' as const,
+          status: 400,
+          message: 'This order does not require a customer payment.',
+        };
+      }
+
+      if (
+        currentOrder.status === 'CANCELLED' ||
+        currentOrder.status === 'SETTLEMENT_COMPLETED' ||
+        currentOrder.paymentStatus === 'REFUNDED' ||
+        currentOrder.paymentStatus === 'PARTIALLY_REFUNDED' ||
+        (currentOrder.paymentStatus && currentOrder.paymentStatus.startsWith('REFUND_'))
+      ) {
+        return {
+          kind: 'rejected' as const,
+          status: 400,
+          message: 'This order is no longer payable.',
+        };
+      }
+
+      if (currentOrder.paymentStatus === 'CAPTURED' || currentOrder.paymentStatus === 'SUCCESS') {
+        return { kind: 'alreadyPaid' as const, orderId: currentOrder.id };
+      }
+
+      const currentAmount = Number(currentOrder.finalAmount);
+      if (!Number.isFinite(currentAmount) || currentAmount <= 0) {
+        return {
+          kind: 'rejected' as const,
+          status: 400,
+          message: 'This order has no valid payable amount.',
+        };
       }
 
       const activePayment = await tx.payment.findFirst({
         where: {
-          orderId: order.id,
+          orderId: currentOrder.id,
           direction: 'CUSTOMER_PAYS',
           status: { in: [...ACTIVE_PAYMENT_STATUSES] },
         },
@@ -125,13 +174,13 @@ export async function POST(req: NextRequest) {
       });
 
       if (activePayment) {
-        return { kind: 'existing' as const, payment: activePayment };
+        return { kind: 'existing' as const, payment: activePayment, order: currentOrder };
       }
 
       const payment = await tx.payment.create({
         data: {
-          orderId,
-          amount,
+          orderId: currentOrder.id,
+          amount: currentAmount,
           direction: 'CUSTOMER_PAYS',
           gateway: 'RAZORPAY',
           status: 'CREATION_PENDING',
@@ -139,12 +188,32 @@ export async function POST(req: NextRequest) {
       });
 
       await tx.order.update({
-        where: { id: order.id },
+        where: { id: currentOrder.id },
         data: { paymentStatus: 'INITIATED' },
       });
 
-      return { kind: 'new' as const, payment };
+      return { kind: 'new' as const, payment, order: currentOrder, amount: currentAmount };
     });
+
+    if (attempt.kind === 'rejected') {
+      return NextResponse.json(
+        { success: false, message: attempt.message },
+        { status: attempt.status },
+      );
+    }
+
+    if (attempt.kind === 'alreadyPaid') {
+      return NextResponse.json({
+        success: true,
+        alreadyPaid: true,
+        message: 'This order has already been paid and verified.',
+        data: {
+          orderId: attempt.orderId,
+          status: 'CAPTURED',
+          paymentStatus: 'CAPTURED',
+        },
+      });
+    }
 
     if (attempt.kind === 'existing') {
       if (attempt.payment.status === 'CREATION_PENDING') {
@@ -178,7 +247,7 @@ export async function POST(req: NextRequest) {
           currency: 'INR',
           key,
           name: 'Junk It Out Waste Pickup',
-          description: `Pickup service charge #${order.orderNumber}`,
+          description: `Pickup service charge #${attempt.order.orderNumber}`,
         },
       });
     }
@@ -186,11 +255,10 @@ export async function POST(req: NextRequest) {
     let razorpayOrder;
     try {
       razorpayOrder = await createRazorpayOrder({
-        amountInPaise: Math.round(amount * 100),
-        receipt: order.orderNumber,
-        notes: { orderId: order.id, orderNumber: order.orderNumber },
+        amountInPaise: Math.round(attempt.amount * 100),
+        receipt: attempt.order.orderNumber,
+        notes: { orderId: attempt.order.id, orderNumber: attempt.order.orderNumber },
       });
-      logTiming('razorpay order created');
     } catch (error) {
       if (!(error instanceof RazorpayOrderCreationError) || !error.uncertain) {
         await db.payment.update({
@@ -208,7 +276,6 @@ export async function POST(req: NextRequest) {
         status: 'INITIATED',
       },
     });
-    logTiming('database persistence complete');
 
     return NextResponse.json({
       success: true,
@@ -219,14 +286,17 @@ export async function POST(req: NextRequest) {
         currency: 'INR',
         key: razorpayOrder.keyId,
         name: 'Junk It Out Waste Pickup',
-        description: `Pickup service charge #${order.orderNumber}`,
+        description: `Pickup service charge #${attempt.order.orderNumber}`,
       },
     });
   } catch (error: any) {
-    console.error(
-      '[PAYMENT_CREATE_ERROR]',
-      error?.message || error,
-    );
+    logStructured('error', 'payment.create.failed', {
+      ...context,
+      dependency: getSafeErrorDependency(error),
+      errorType: getSafeErrorType(error),
+      prismaCode: getSafePrismaCode(error),
+      databaseCode: getSafeDatabaseCode(error),
+    });
 
     const isRazorpayAuthError =
       error instanceof RazorpayOrderCreationError &&
@@ -251,3 +321,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export const POST = withApiRequestLogging('/api/payments/create', handlePost);

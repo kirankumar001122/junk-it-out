@@ -68,7 +68,8 @@ export default function AdminLiveMapPage() {
 
         <button
           onClick={loadMapData}
-          className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl border border-slate-200 flex items-center gap-2 self-start sm:self-auto"
+          disabled={loading}
+          className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl border border-slate-200 flex items-center gap-2 self-start sm:self-auto disabled:opacity-50"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           Refresh Map

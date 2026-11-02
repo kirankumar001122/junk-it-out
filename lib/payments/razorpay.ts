@@ -74,8 +74,56 @@ function isValidSignature(payload: string, signature: string, secret: string) {
   }
 }
 
+// Shared keep-alive HTTPS agent for Razorpay requests to eliminate repeated TLS handshake overhead
+let razorpayHttpsAgent: https.Agent | null = null;
+function getRazorpayHttpsAgent(): https.Agent | undefined {
+  if (!razorpayHttpsAgent && typeof https?.Agent === 'function') {
+    razorpayHttpsAgent = new https.Agent({
+      keepAlive: true,
+      keepAliveMsecs: 60000,
+      maxSockets: 50,
+      timeout: 15000,
+    });
+  }
+  return razorpayHttpsAgent ?? undefined;
+}
+
+export function closeRazorpayConnections(): void {
+  if (razorpayHttpsAgent) {
+    razorpayHttpsAgent.destroy();
+    razorpayHttpsAgent = null;
+  }
+}
+
+export function warmRazorpayConnection(): void {
+  try {
+    const agent = getRazorpayHttpsAgent();
+    if (!agent || typeof https?.request !== 'function') return;
+    const req = https.request({
+      hostname: 'api.razorpay.com',
+      port: 443,
+      method: 'HEAD',
+      path: '/',
+      agent,
+      timeout: 4000,
+    });
+    req.on('error', () => {});
+    req.on('timeout', () => req.destroy());
+    req.end();
+  } catch {
+    // Non-fatal pre-warming
+  }
+}
+
+// Auto-warm connection in Node server environment
+if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'test') {
+  try {
+    warmRazorpayConnection();
+  } catch {}
+}
+
 // Low-level HTTPS helper that bypasses Node's fetch issues and works with tests
-function razorpayRequest(
+function executeSingleRazorpayRequest(
   method: string,
   path: string,
   bodyData?: any,
@@ -92,13 +140,14 @@ function razorpayRequest(
         port: 443,
         path: `/v1${path}`,
         method: method,
+        agent: getRazorpayHttpsAgent(),
         headers: {
           Authorization: `Basic ${auth}`,
           "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(payload),
           ...additionalHeaders,
         },
-        timeout: 15000,
+        timeout: 10000,
       },
       (res) => {
         let raw = "";
@@ -143,6 +192,47 @@ function razorpayRequest(
   });
 }
 
+// Low-level HTTPS helper with timeout and transient retry support
+async function razorpayRequest(
+  method: string,
+  path: string,
+  bodyData?: any,
+  additionalHeaders: Record<string, string> = {},
+): Promise<any> {
+  const isIdempotent =
+    method === "GET" ||
+    Boolean(
+      additionalHeaders["X-Refund-Idempotency"] ||
+        additionalHeaders["X-Razorpay-Idempotency-Key"] ||
+        additionalHeaders["X-Idempotency-Key"]
+    );
+  const maxAttempts = isIdempotent ? 2 : 1;
+
+  let lastError: any = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      if (attempt > 1) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+      return await executeSingleRazorpayRequest(
+        method,
+        path,
+        bodyData,
+        additionalHeaders
+      );
+    } catch (err: any) {
+      lastError = err;
+      if (err instanceof RazorpayApiError && err.statusCode < 500) {
+        throw err;
+      }
+      if (attempt >= maxAttempts) {
+        throw err;
+      }
+    }
+  }
+  throw lastError;
+}
+
 // ---------------------------------------------------------
 // CREATE RAZORPAY ORDER
 // ---------------------------------------------------------
@@ -170,8 +260,16 @@ export async function createRazorpayOrder(input: {
       notes: input.notes,
     });
 
+    if (typeof data?.id !== "string" || !data.id.trim()) {
+      throw new RazorpayOrderCreationError(
+        "Invalid response received from Razorpay gateway.",
+        false,
+        502,
+      );
+    }
+
     return {
-      id: data.id as string,
+      id: data.id,
       amount: data.amount as number,
       currency: data.currency as string,
       keyId,
@@ -289,12 +387,15 @@ export async function refundRazorpayPayment(
     }
     body.amount = amountInPaise;
   }
+  if (notes && typeof notes === 'object') {
+    body.notes = notes;
+  }
+  const { secret } = requireCredentials();
   if (
     process.env.NODE_ENV !== 'production' &&
     (paymentId.startsWith('pay_test_') ||
-      process.env.RAZORPAY_KEY_SECRET === 'YOUR_RAZORPAY_SECRET' ||
-      process.env.RAZORPAY_SECRET === 'YOUR_RAZORPAY_SECRET' ||
-      process.env.RAZORPAY_SECRET === 'your_test_secret')
+      secret === 'YOUR_RAZORPAY_SECRET' ||
+      secret === 'your_test_secret')
   ) {
     console.log('[DEV_MOCK_RAZORPAY_REFUND_SUCCESS]', { paymentId, amountInPaise });
     return {
@@ -304,6 +405,7 @@ export async function refundRazorpayPayment(
       currency: 'INR',
       payment_id: paymentId,
       status: 'processed',
+      notes,
     };
   }
 

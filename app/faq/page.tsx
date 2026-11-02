@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { HelpCircle, ChevronDown, ArrowRight, Phone, MessageSquare, ShieldCheck, Scale, Banknote } from 'lucide-react';
+import ScrollReveal from '@/components/ScrollReveal';
 
 export const metadata = {
   title: 'Frequently Asked Questions (FAQ) — Junk It Out Doorstep Scrap Pickup',
@@ -51,7 +52,8 @@ const FAQ_ITEMS = [
 
 export default function FAQPage() {
   return (
-    <div className="max-w-4xl mx-auto px-4 py-10 space-y-8 min-h-[85vh]">
+    <div className="customer-page-cream min-h-[85vh]">
+      <div className="customer-page max-w-4xl space-y-8">
       {/* HEADER */}
       <div className="text-center max-w-2xl mx-auto space-y-2">
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200/80">
@@ -67,7 +69,7 @@ export default function FAQPage() {
       </div>
 
       {/* FAQ LIST */}
-      <div className="space-y-3">
+      <ScrollReveal className="space-y-3">
         {FAQ_ITEMS.map((item, idx) => (
           <details
             key={idx}
@@ -84,10 +86,10 @@ export default function FAQPage() {
             </p>
           </details>
         ))}
-      </div>
+      </ScrollReveal>
 
       {/* CONTACT BANNER */}
-      <div className="bg-slate-900 text-white rounded-2xl p-6 text-center space-y-3 shadow-md border border-slate-800">
+      <ScrollReveal className="customer-hero rounded-2xl p-6 text-center text-white shadow-md">
         <h2 className="text-xl font-bold">Still have questions?</h2>
         <p className="text-xs text-slate-300 max-w-md mx-auto">
           Our Bengaluru customer support team is available 8:00 AM – 8:00 PM daily.
@@ -107,6 +109,7 @@ export default function FAQPage() {
             View Price List <ArrowRight className="w-3.5 h-3.5" />
           </Link>
         </div>
+      </ScrollReveal>
       </div>
     </div>
   );

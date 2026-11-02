@@ -15,6 +15,7 @@ model User {
   name               String
   passwordHash       String?
   role               String               @default("CUSTOMER")
+  tokenVersion       Int                  @default(1)
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
   addresses          Address[]
@@ -54,6 +55,7 @@ model Customer {
   orders       Order[]
   reviews      Review[]
   settlements  Settlement[]
+  orderIdempotencyRecords OrderIdempotency[]
 }
 
 model Agent {
@@ -185,9 +187,29 @@ model Order {
   reviews            Review?
   settlement         Settlement?
   weightRecords      WeightRecord[]
+  orderIdempotency   OrderIdempotency?
 
   @@index([customerId, createdAt])
+  @@index([createdAt(sort: Desc)])
   @@index([agentId, status, createdAt])
+  @@index([status, createdAt])
+  @@index([paymentStatus, createdAt])
+  @@index([financialDirection, status, createdAt])
+}
+
+model OrderIdempotency {
+  id           String   @id @default(uuid())
+  customerId   String
+  key          String
+  payloadHash  String
+  orderId      String   @unique
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime?
+  customer     Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, key])
+  @@index([expiresAt])
 }
 
 model OrderItem {
@@ -200,6 +222,8 @@ model OrderItem {
   subtotal        Float         @default(0.0)
   category        WasteCategory @relation(fields: [categoryId], references: [id])
   order           Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
 }
 
 model WeightRecord {
@@ -231,6 +255,7 @@ model Payment {
   @@index([gatewayOrderId, direction])
   @@index([paymentId])
   @@index([orderId, direction, status])
+  @@index([status, amount])
 }
 
 model RefundRequest {
@@ -295,11 +320,20 @@ model Settlement {
   amount        Float
   breakdownJson String
   status        String    @default("PENDING")
+  payoutId      String?
+  utr           String?
+  payoutMethod  String?   @default("BANK_TRANSFER")
+  failureReason String?
+  processedAt   DateTime?
   createdAt     DateTime  @default(now())
+
   approvedAt    DateTime?
   paidAt        DateTime?
   customer      Customer  @relation(fields: [customerId], references: [id])
   order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([customerId, createdAt])
 }
 
 model AgentLocation {
@@ -326,6 +360,8 @@ model OrderStatusHistory {
   timestamp       DateTime @default(now())
   changedBy       User?    @relation(fields: [changedByUserId], references: [id])
   order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
 }
 
 model Notification {
@@ -338,6 +374,7 @@ model Notification {
   status            String   @default("SENT")
   provider          String?  @default("FAST2SMS")
   providerRequestId String?
+  deliveryAttempts Int      @default(0)
   deliveryStatus    String?  @default("sent")
   statusDescription String?
   sentAt            DateTime @default(now())
@@ -355,6 +392,8 @@ model Coupon {
   active        Boolean   @default(true)
   expiryDate    DateTime?
   createdAt     DateTime  @default(now())
+
+  @@index([active, expiryDate])
 }
 
 model Complaint {
@@ -362,7 +401,7 @@ model Complaint {
   orderId         String?
   customerId      String
   category        String   @default("WEIGHT_DISPUTE")
-  description     String
+  description     String?
   photoUrl        String?
   status          String   @default("OPEN")
   resolutionNotes String?
@@ -407,4 +446,7 @@ model AuditLog {
   ipAddress String?  @default("127.0.0.1")
   timestamp DateTime @default(now())
   user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([timestamp])
+  @@index([action, timestamp])
 }

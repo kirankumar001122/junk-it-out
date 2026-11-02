@@ -1,8 +1,17 @@
+import {
+  createRazorpayOrder,
+  RazorpayOrderCreationError,
+} from '@/lib/payments/razorpay';
+import { OrderExecutionTimer } from '@/lib/observability/orderTimingDiagnostics';
+import { isAgentEligibleForServiceArea } from '@/lib/services/agentService';
 import { NextRequest } from 'next/server';
 import {
   createOrder,
   OrderIdempotencyConflictError,
   InvalidCouponError,
+  InvalidWasteCategoryError,
+  InvalidBookingWeightError,
+  InvalidIdempotencyKeyError,
 } from '@/lib/services/orderService';
 import { validateCreateOrderInput } from '@/lib/validations/schemas';
 import { getAuthUser } from '@/lib/auth/middleware';
@@ -12,18 +21,22 @@ import {
   errorResponse,
 } from '@/lib/utils/apiResponse';
 
+const inFlightGatewayOrders = new Map<
+  string,
+  Promise<{ gatewayOrderId: string; keyId: string; amount: number; paymentId: string }>
+>();
+
 export async function POST(req: NextRequest) {
+  const timer = new OrderExecutionTimer(req.headers.get('x-request-id') || undefined);
   try {
     const authUser = await getAuthUser(req);
 
-    if (
-      !authUser ||
-      authUser.role !== 'CUSTOMER' ||
-      !authUser.customerId
-    ) {
+    const isAdmin = authUser && ['ADMIN', 'SUPER_ADMIN'].includes(authUser.role);
+    const isCustomer = authUser && authUser.role === 'CUSTOMER' && Boolean(authUser.customerId);
+    if (!isAdmin && !isCustomer) {
       return errorResponse(
         'UNAUTHORIZED',
-        'Authenticated customer session required to place a pickup order.',
+        'Authenticated customer or admin session required to place a pickup order.',
         401
       );
     }
@@ -45,13 +58,274 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (idempotencyKey && !/^[A-Za-z0-9_-]{10,128}$/.test(idempotencyKey.trim())) {
+      return errorResponse(
+        'INVALID_IDEMPOTENCY_KEY',
+        'Idempotency-Key must be 10-128 characters using letters, numbers, "_" or "-".',
+        400,
+      );
+    }
+
+    timer.recordPhase('auth_and_input_validation');
+
     const order = await createOrder(
       body,
       idempotencyKey,
-      authUser
+      authUser,
+      timer
     );
+    timer.recordPhase('create_order_complete');
 
-    return successResponse(order, 201);
+    // If order requires customer payment, initialize the gateway order in advance
+    // to eliminate a redundant sequential client-server HTTP roundtrip.
+    let paymentConfig: any = null;
+    let paymentRecord: any = (order as any).payments?.[0] || null;
+    let createdGatewayOrder: { id: string; keyId: string } | null = null;
+
+    if (order.financialDirection === 'CUSTOMER_PAYS' && Number(order.finalAmount) > 0 && order.paymentStatus !== 'CAPTURED') {
+      try {
+        const amount = Number(order.finalAmount);
+
+        // Fast path: payment was eagerly created inside the order creation transaction (saves separate tx + lock roundtrips)
+        if (paymentRecord) {
+          if (paymentRecord.status === 'INITIATED' && paymentRecord.gatewayOrderId) {
+            const key = process.env.RAZORPAY_KEY_ID || process.env.PAYMENT_KEY_ID;
+            if (key) {
+              if (order.paymentStatus !== 'INITIATED') {
+                await db.order.update({
+                  where: { id: order.id },
+                  data: { paymentStatus: 'INITIATED' },
+                });
+              }
+              paymentConfig = {
+                paymentId: paymentRecord.id,
+                gatewayOrderId: paymentRecord.gatewayOrderId,
+                amount: paymentRecord.amount,
+                currency: 'INR',
+                key,
+                name: 'Junk It Out Waste Pickup',
+                description: `Pickup service charge #${order.orderNumber}`,
+              };
+            }
+          } else if (paymentRecord.status === 'CREATION_PENDING') {
+            const inFlightGate = inFlightGatewayOrders.get(order.id);
+            if (inFlightGate) {
+              const res = await inFlightGate;
+              paymentRecord.gatewayOrderId = res.gatewayOrderId;
+              paymentRecord.status = 'INITIATED';
+              (order as any).paymentStatus = 'INITIATED';
+              paymentConfig = {
+                paymentId: res.paymentId,
+                gatewayOrderId: res.gatewayOrderId,
+                amount: res.amount,
+                currency: 'INR',
+                key: res.keyId,
+                name: 'Junk It Out Waste Pickup',
+                description: `Pickup service charge #${order.orderNumber}`,
+              };
+            } else {
+              const gatePromise = (async () => {
+                const razorpayOrder = await createRazorpayOrder({
+                  amountInPaise: Math.round(amount * 100),
+                  receipt: order.orderNumber,
+                  notes: { orderId: order.id, orderNumber: order.orderNumber },
+                });
+                createdGatewayOrder = razorpayOrder;
+
+                await db.$transaction([
+                  db.payment.update({
+                    where: { id: paymentRecord.id },
+                    data: {
+                      gatewayOrderId: razorpayOrder.id,
+                      status: 'INITIATED',
+                    },
+                  }),
+                  db.order.update({
+                    where: { id: order.id },
+                    data: { paymentStatus: 'INITIATED' },
+                  }),
+                ]);
+
+                return {
+                  gatewayOrderId: razorpayOrder.id,
+                  keyId: razorpayOrder.keyId,
+                  amount,
+                  paymentId: paymentRecord.id,
+                };
+              })();
+
+              inFlightGatewayOrders.set(order.id, gatePromise);
+              try {
+                const res = await gatePromise;
+                timer.recordPhase('razorpay_gateway_call');
+                timer.recordPhase('payment_and_order_db_updates');
+
+                paymentRecord.gatewayOrderId = res.gatewayOrderId;
+                paymentRecord.status = 'INITIATED';
+                (order as any).paymentStatus = 'INITIATED';
+
+                paymentConfig = {
+                  paymentId: res.paymentId,
+                  gatewayOrderId: res.gatewayOrderId,
+                  amount: res.amount,
+                  currency: 'INR',
+                  key: res.keyId,
+                  name: 'Junk It Out Waste Pickup',
+                  description: `Pickup service charge #${order.orderNumber}`,
+                };
+              } finally {
+                inFlightGatewayOrders.delete(order.id);
+              }
+            }
+          }
+        } else {
+          // Fallback path: lock and create payment if not eagerly created
+          const attempt = await db.$transaction(async (tx) => {
+            if (typeof (tx as any).$executeRaw === 'function') {
+              await (tx as any).$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${order.id}, 0))`;
+            } else {
+              await (tx as any).$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${order.id}, 0))`;
+            }
+
+            const existing = await tx.payment.findFirst({
+              where: {
+                orderId: order.id,
+                direction: 'CUSTOMER_PAYS',
+                status: { in: ['CREATION_PENDING', 'INITIATED', 'AUTHORIZED'] },
+              },
+              orderBy: { createdAt: 'desc' },
+            });
+
+            if (existing) {
+              return { kind: 'existing' as const, payment: existing };
+            }
+
+            const created = await tx.payment.create({
+              data: {
+                orderId: order.id,
+                amount,
+                direction: 'CUSTOMER_PAYS',
+                gateway: 'RAZORPAY',
+                status: 'CREATION_PENDING',
+              },
+            });
+
+            return { kind: 'new' as const, payment: created };
+          });
+          timer.recordPhase('payment_lock_and_tx');
+          paymentRecord = attempt.payment;
+
+          if (attempt.kind === 'existing') {
+            if (attempt.payment.gatewayOrderId) {
+              const key = process.env.RAZORPAY_KEY_ID || process.env.PAYMENT_KEY_ID;
+              if (key) {
+                if (order.paymentStatus !== 'INITIATED') {
+                  await db.order.update({
+                    where: { id: order.id },
+                    data: { paymentStatus: 'INITIATED' },
+                  });
+                }
+                paymentConfig = {
+                  paymentId: attempt.payment.id,
+                  gatewayOrderId: attempt.payment.gatewayOrderId,
+                  amount: attempt.payment.amount,
+                  currency: 'INR',
+                  key,
+                  name: 'Junk It Out Waste Pickup',
+                  description: `Pickup service charge #${order.orderNumber}`,
+                };
+              }
+            }
+          } else {
+            const razorpayOrder = await createRazorpayOrder({
+              amountInPaise: Math.round(amount * 100),
+              receipt: order.orderNumber,
+              notes: { orderId: order.id, orderNumber: order.orderNumber },
+            });
+            createdGatewayOrder = razorpayOrder;
+            timer.recordPhase('razorpay_gateway_call');
+
+            await db.$transaction([
+              db.payment.update({
+                where: { id: attempt.payment.id },
+                data: {
+                  gatewayOrderId: razorpayOrder.id,
+                  status: 'INITIATED',
+                },
+              }),
+              db.order.update({
+                where: { id: order.id },
+                data: { paymentStatus: 'INITIATED' },
+              }),
+            ]);
+            timer.recordPhase('payment_and_order_db_updates');
+
+            attempt.payment.gatewayOrderId = razorpayOrder.id;
+            attempt.payment.status = 'INITIATED';
+            (order as any).paymentStatus = 'INITIATED';
+            (order as any).payments = [attempt.payment];
+
+            paymentConfig = {
+              paymentId: attempt.payment.id,
+              gatewayOrderId: razorpayOrder.id,
+              amount,
+              currency: 'INR',
+              key: razorpayOrder.keyId,
+              name: 'Junk It Out Waste Pickup',
+              description: `Pickup service charge #${order.orderNumber}`,
+            };
+          }
+        }
+      } catch (payErr) {
+        // Non-fatal: if gateway call fails or credentials are unset, order is safely preserved as PENDING
+        console.warn('[ORDERS_ROUTE_PAYMENT_INIT_DEFERRED]', payErr instanceof Error ? payErr.message : payErr);
+
+        if (paymentRecord?.id && paymentRecord.status === 'CREATION_PENDING') {
+          try {
+            if (createdGatewayOrder?.id) {
+              // Gateway order was created, but the post-gateway atomic update failed.
+              // Save gatewayOrderId and mark INITIATED on the payment record so retries reuse it without duplicate gateway orders.
+              await db.payment.update({
+                where: { id: paymentRecord.id },
+                data: {
+                  gatewayOrderId: createdGatewayOrder.id,
+                  status: 'INITIATED',
+                },
+              });
+              paymentRecord.gatewayOrderId = createdGatewayOrder.id;
+              paymentRecord.status = 'INITIATED';
+            } else {
+              const isUncertain =
+                payErr instanceof RazorpayOrderCreationError && payErr.uncertain;
+
+              // If gateway outcome is uncertain (timeout/network drop), do NOT mark FAILED.
+              // Leaving as CREATION_PENDING ensures /api/payments/create requires reconciliation
+              // and prevents creating duplicate gateway orders.
+              if (!isUncertain) {
+                await db.payment.update({
+                  where: { id: paymentRecord.id },
+                  data: { status: 'FAILED' },
+                });
+                paymentRecord.status = 'FAILED';
+              }
+            }
+          } catch (cleanupErr) {
+            console.error('[ORDERS_ROUTE_COMPENSATION_FAILED]', cleanupErr);
+          }
+        }
+      }
+    }
+
+    timer.finish({
+      orderId: order.id,
+      financialDirection: order.financialDirection,
+      hasPaymentConfig: Boolean(paymentConfig),
+    });
+
+    const responseData = paymentConfig
+      ? { ...order, paymentStatus: 'INITIATED', paymentConfig }
+      : order;
+    return successResponse(responseData, 201);
   } catch (err: any) {
     console.error(
       'Order creation error:',
@@ -81,6 +355,35 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (
+      err instanceof InvalidWasteCategoryError ||
+      err?.name === 'InvalidWasteCategoryError'
+    ) {
+      return errorResponse(
+        'INVALID_WASTE_CATEGORY',
+        err.message || 'One or more selected waste categories are unavailable.',
+        400,
+      );
+    }
+
+    if (
+      err instanceof InvalidBookingWeightError ||
+      err?.name === 'InvalidBookingWeightError'
+    ) {
+      return errorResponse(
+        'INVALID_BOOKING_WEIGHT',
+        err.message,
+        400,
+      );
+    }
+
+    if (
+      err instanceof InvalidIdempotencyKeyError ||
+      err?.name === 'InvalidIdempotencyKeyError'
+    ) {
+      return errorResponse('INVALID_IDEMPOTENCY_KEY', err.message, 400);
+    }
+
     return errorResponse(
       'ORDER_CREATION_FAILED',
       err.message ||
@@ -106,12 +409,16 @@ export async function GET(req: NextRequest) {
     const { searchParams } =
       new URL(req.url);
 
+    const page = Math.max(1, Number(searchParams.get('page') || 1) || 1);
     const limit = Math.min(
       Number(
         searchParams.get('limit')
       ) || 20,
       100
     );
+    const skip = (page - 1) * limit;
+    const search = searchParams.get('search')?.trim() || '';
+    const statusParam = searchParams.get('status')?.trim() || '';
 
     let whereClause: any = {};
 
@@ -202,7 +509,7 @@ export async function GET(req: NextRequest) {
     }
 
     // =====================================================
-    // ADMIN / SUPER ADMIN
+    // ADMIN / SUPER ADMIN & SEARCH / STATUS FILTERS
     // =====================================================
     //
     // Admins continue to see all orders, including pending
@@ -210,50 +517,156 @@ export async function GET(req: NextRequest) {
     //
     // =====================================================
 
-    const orders = authUser.role === 'AGENT'
-      ? await db.order.findMany({
-        where: whereClause,
-        select: {
-          id: true,
-          orderNumber: true,
-          agentId: true,
-          status: true,
-          customer: {
-            select: {
-              user: { select: { id: true, name: true, phone: true } },
-            },
-          },
-          address: {
-            select: {
-              name: true,
-              houseNo: true,
-              street: true,
-              area: true,
-              lat: true,
-              lng: true,
-              pickupInstructions: true,
-            },
-          },
-          items: {
-            select: {
-              id: true,
-              categoryId: true,
-              estimatedWeight: true,
-              actualWeight: true,
-              category: { select: { id: true, name: true } },
-            },
+    const extraConditions: any[] = [];
+    if (statusParam && statusParam !== 'ALL') {
+      extraConditions.push({ status: statusParam });
+    }
+    if (search) {
+      extraConditions.push({
+        OR: [
+          { orderNumber: { contains: search, mode: 'insensitive' } },
+          { customer: { user: { name: { contains: search, mode: 'insensitive' } } } },
+          { customer: { user: { phone: { contains: search, mode: 'insensitive' } } } },
+          { address: { area: { contains: search, mode: 'insensitive' } } },
+          { address: { city: { contains: search, mode: 'insensitive' } } },
+        ],
+      });
+    }
+
+    if (extraConditions.length > 0) {
+      whereClause.AND = [...(whereClause.AND || []), ...extraConditions];
+    }
+
+    const AGENT_ACTIVE_STATUSES = [
+      'AGENT_ASSIGNED',
+      'AGENT_ACCEPTED',
+      'AGENT_ON_WAY',
+      'AGENT_ARRIVED',
+      'WASTE_VERIFICATION',
+      'WEIGHING',
+    ];
+
+    let orders: any[] = [];
+
+    if (authUser.role === 'AGENT') {
+      const agentOrderSelect = {
+        id: true,
+        orderNumber: true,
+        agentId: true,
+        status: true,
+        customer: {
+          select: {
+            user: { select: { id: true, name: true, phone: true } },
           },
         },
+        address: {
+          select: {
+            name: true,
+            houseNo: true,
+            street: true,
+            area: true,
+            lat: true,
+            lng: true,
+            pickupInstructions: true,
+          },
+        },
+        items: {
+          select: {
+            id: true,
+            categoryId: true,
+            estimatedWeight: true,
+            actualWeight: true,
+            category: { select: { id: true, name: true } },
+          },
+        },
+      };
+
+      // 1. Fetch active assignments for the agent
+      const activeOrders = await db.order.findMany({
+        where: {
+          ...whereClause,
+          status: { in: AGENT_ACTIVE_STATUSES },
+        },
+        select: agentOrderSelect,
         orderBy: { createdAt: 'desc' },
-        take: limit,
-      })
-      : await db.order.findMany({
+      });
+
+      // 2. Anomaly detection: log if agent has multiple active assignments
+      if (activeOrders.length > 1) {
+        console.error(
+          JSON.stringify({
+            timestamp: new Date().toISOString(),
+            severity: 'error',
+            event: 'agent.data_integrity.multiple_active_orders',
+            agentId: authUser.agentId,
+            activeOrderIds: activeOrders.map((o) => o.id),
+            count: activeOrders.length,
+            message: 'Agent has multiple active assignments; returning all active assignments.',
+          })
+        );
+      }
+
+      // 3. Fetch unassigned orders available in agent's service area
+      let unassignedOrders: any[] = [];
+      const agentProfile = authUser.agentId
+        ? await db.agent.findUnique({
+            where: { id: authUser.agentId },
+            select: { id: true, serviceAreas: true, status: true },
+          })
+        : null;
+
+      if (agentProfile && (agentProfile.status === 'AVAILABLE' || activeOrders.length === 0)) {
+        const rawUnassigned = await db.order.findMany({
+          where: {
+            agentId: null,
+            status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED'] },
+            OR: [
+              { financialDirection: { not: 'CUSTOMER_PAYS' } },
+              { financialDirection: 'CUSTOMER_PAYS', paymentStatus: 'CAPTURED' },
+            ],
+          },
+          select: agentOrderSelect,
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        });
+
+        unassignedOrders = rawUnassigned.filter((o: any) =>
+          isAgentEligibleForServiceArea(agentProfile.serviceAreas, o.address?.area)
+        );
+      }
+
+      // 4. Retrieve historical orders excluding active order IDs up to remaining requested limit
+      const activeIds = activeOrders.map((o) => o.id);
+      const remainingLimit = Math.max(0, limit - activeOrders.length - unassignedOrders.length);
+
+      const historicalOrders = remainingLimit > 0
+        ? await db.order.findMany({
+            where: {
+              ...whereClause,
+              ...(activeIds.length > 0 ? { id: { notIn: activeIds } } : {}),
+            },
+            select: agentOrderSelect,
+            orderBy: { createdAt: 'desc' },
+            take: remainingLimit,
+          })
+        : [];
+
+      orders = [...activeOrders, ...unassignedOrders, ...historicalOrders];
+    } else {
+      orders = await db.order.findMany({
         where: whereClause,
 
         include: {
           customer: {
             include: {
-              user: true,
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  phone: true,
+                  email: true,
+                },
+              },
             },
           },
 
@@ -281,28 +694,50 @@ export async function GET(req: NextRequest) {
 
           address: true,
 
-          items: {
-            include: {
-              category: true,
-            },
-          },
+          ...(authUser.role === 'CUSTOMER' || searchParams.get('includeItems') === 'true'
+            ? {
+                items: {
+                  select: {
+                    id: true,
+                    categoryId: true,
+                    estimatedWeight: true,
+                    actualWeight: true,
+                    category: { select: { id: true, name: true } },
+                  },
+                },
+              }
+            : {}),
 
-          statusHistory: {
-            orderBy: {
-              timestamp: 'desc',
-            },
-          },
+          ...(searchParams.get('includeHistory') === 'true'
+            ? {
+                statusHistory: {
+                  orderBy: {
+                    timestamp: 'desc',
+                  },
+                },
+              }
+            : {}),
         },
 
         orderBy: {
           createdAt: 'desc',
         },
-
+        skip,
         take: limit,
       });
+    }
+
+    const total = await db.order.count({ where: whereClause }).catch(() => orders.length);
 
     return successResponse(
-      orders
+      orders,
+      200,
+      {
+        page,
+        limit,
+        total: Math.max(total, orders.length),
+        totalPages: Math.max(1, Math.ceil(Math.max(total, orders.length) / limit)),
+      }
     );
   } catch (err: any) {
     console.error(

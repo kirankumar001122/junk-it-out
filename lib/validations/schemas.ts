@@ -77,7 +77,11 @@ export function validateCreateOrderInput(body: any): { valid: boolean; error?: s
     if (!item.categoryId || typeof item.categoryId !== 'string') {
       return { valid: false, error: 'Each waste item must specify a valid categoryId.' };
     }
-    if (typeof item.estimatedWeight !== 'number' || item.estimatedWeight <= 0) {
+    if (
+      typeof item.estimatedWeight !== 'number' ||
+      !Number.isFinite(item.estimatedWeight) ||
+      item.estimatedWeight <= 0
+    ) {
       return { valid: false, error: 'Estimated weight must be a positive number.' };
     }
   }
@@ -86,16 +90,51 @@ export function validateCreateOrderInput(body: any): { valid: boolean; error?: s
     return { valid: false, error: 'Photos must be an array of image URLs.' };
   }
 
-  if (body.pickupType === 'SCHEDULED' && (!body.scheduledSlot || typeof body.scheduledSlot !== 'string')) {
-    return { valid: false, error: 'A valid date and time slot must be selected for scheduled pickups.' };
+  if (body.pickupType !== undefined && !['ASAP', 'SCHEDULED'].includes(body.pickupType)) {
+    return { valid: false, error: 'Pickup type must be ASAP or SCHEDULED.' };
+  }
+
+  if (body.pickupType === 'SCHEDULED') {
+    if (!body.scheduledSlot || typeof body.scheduledSlot !== 'string' || body.scheduledSlot.trim().length === 0) {
+      return { valid: false, error: 'A valid date and time slot must be selected for scheduled pickups.' };
+    }
+
+    const slotStr = body.scheduledSlot.trim();
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    const dateMatch = slotStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (dateMatch) {
+      const slotDate = new Date(`${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}T23:59:59`);
+      if (slotDate < todayStart) {
+        return { valid: false, error: 'Scheduled pickup date cannot be in the past.' };
+      }
+    } else {
+      const monthMatch = slotStr.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:,?\s+(\d{4}))?/i);
+      if (monthMatch) {
+        const monthName = monthMatch[1];
+        const day = parseInt(monthMatch[2], 10);
+        const year = monthMatch[3] ? parseInt(monthMatch[3], 10) : now.getFullYear();
+        const slotDate = new Date(`${monthName} ${day}, ${year} 23:59:59`);
+        if (!isNaN(slotDate.getTime()) && slotDate < todayStart) {
+          return { valid: false, error: 'Scheduled pickup date cannot be in the past.' };
+        }
+      }
+    }
   }
 
   return { valid: true };
 }
 
+export function calculateTotalBookingWeight(
+  items: Array<{ estimatedWeight: number }>
+): number {
+  return items.reduce((total, item) => total + item.estimatedWeight, 0);
+}
+
 const ALLOWED_STATUS_TRANSITIONS: Record<string, string[]> = {
   BOOKING_RECEIVED: ['AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'CANCELLED'],
-  AGENT_BEING_ASSIGNED: ['AGENT_ASSIGNED', 'CANCELLED'],
+  AGENT_BEING_ASSIGNED: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'CANCELLED'],
   AGENT_ASSIGNED: ['AGENT_ACCEPTED', 'AGENT_ON_WAY', 'CANCELLED'],
   AGENT_ACCEPTED: ['AGENT_ON_WAY', 'CANCELLED'],
   AGENT_ON_WAY: ['AGENT_ARRIVED', 'CANCELLED'],
@@ -113,4 +152,48 @@ export function validateStatusTransition(currentStatus: string, targetStatus: st
   if (normCurrent === normTarget) return true;
   const allowed = ALLOWED_STATUS_TRANSITIONS[normCurrent];
   return allowed ? allowed.includes(normTarget) : false;
+}
+
+
+export function validateActualWeightsInput(
+  actualWeights: any,
+  orderItems?: Array<{ id: string; categoryId: string }>
+): { valid: boolean; error?: string } {
+  if (!Array.isArray(actualWeights) || actualWeights.length === 0) {
+    return { valid: false, error: 'Itemized actual weights array is required.' };
+  }
+
+  const matchedItemIds = new Set<string>();
+
+  for (const itemInput of actualWeights) {
+    if (!itemInput || typeof itemInput !== 'object') {
+      return { valid: false, error: 'Each actual weight item must be an object.' };
+    }
+
+    if (
+      typeof itemInput.actualWeight !== 'number' ||
+      !Number.isFinite(itemInput.actualWeight) ||
+      itemInput.actualWeight <= 0
+    ) {
+      return { valid: false, error: 'Each actual weight must be a positive number for a valid order item.' };
+    }
+
+    if (orderItems) {
+      const dbItem = orderItems.find(
+        (i) =>
+          (itemInput.itemId && i.id === itemInput.itemId) ||
+          i.categoryId === itemInput.categoryId ||
+          i.id === itemInput.categoryId
+      );
+      if (!dbItem) {
+        return { valid: false, error: 'Weight submitted for an item that is not in this order.' };
+      }
+      if (matchedItemIds.has(dbItem.id)) {
+        return { valid: false, error: 'Each order item may only have one actual weight entry.' };
+      }
+      matchedItemIds.add(dbItem.id);
+    }
+  }
+
+  return { valid: true };
 }

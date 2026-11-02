@@ -1,10 +1,49 @@
 import { createHash } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
+/**
+ * Resolves the client IP address strictly through explicitly trusted proxy configurations.
+ * Prevents IP spoofing via arbitrary client-supplied X-Forwarded-For headers.
+ */
 export function getClientIp(request: NextRequest): string {
-  return request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-    || request.headers.get('x-real-ip')
-    || 'unknown';
+  // 1. Explicitly configured trusted proxy header (e.g. CF-Connecting-IP, True-Client-IP)
+  const configuredHeader = process.env.TRUSTED_PROXY_HEADER?.trim().toLowerCase();
+  if (configuredHeader) {
+    const val = request.headers.get(configuredHeader)?.trim();
+    if (val) {
+      return val.split(',')[0].trim();
+    }
+  }
+
+  // 2. Vercel platform environment: x-vercel-forwarded-for or x-real-ip
+  if (process.env.VERCEL) {
+    const vercelIp = request.headers.get('x-vercel-forwarded-for')?.trim()
+      || request.headers.get('x-real-ip')?.trim();
+    if (vercelIp) {
+      return vercelIp.split(',')[0].trim();
+    }
+  }
+
+  // 3. Explicit TRUST_PROXY setting for authorized reverse proxies
+  if (process.env.TRUST_PROXY === 'true') {
+    const cfIp = request.headers.get('cf-connecting-ip')?.trim();
+    if (cfIp) return cfIp;
+    const realIp = request.headers.get('x-real-ip')?.trim();
+    if (realIp) return realIp;
+    const fwd = request.headers.get('x-forwarded-for')?.trim();
+    if (fwd) {
+      return fwd.split(',')[0].trim();
+    }
+  }
+
+  // 4. Server-provided socket IP from NextRequest (if available)
+  const directIp = (request as any).ip;
+  if (typeof directIp === 'string' && directIp.trim()) {
+    return directIp.trim();
+  }
+
+  // 5. Untrusted proxy/direct client: Do not trust arbitrary X-Forwarded-For headers
+  return 'untrusted-client';
 }
 
 export function opaqueKey(value: string): string {

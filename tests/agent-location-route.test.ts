@@ -14,6 +14,9 @@ async function run() {
   const agentDelegate = db.agent as any;
   const database = db as any;
   const originalFindUnique = agentDelegate.findUnique;
+  const userDelegate = db.user as any;
+  const originalUserFindUnique = userDelegate?.findUnique;
+  if (userDelegate) userDelegate.findUnique = async () => ({ tokenVersion: 1 });
   const originalTransaction = database.$transaction;
   const broadcasts: Array<{ event: string; payload: any }> = [];
   const unsubscribe = broadcaster.subscribe((event) => broadcasts.push(event));
@@ -125,6 +128,7 @@ async function run() {
   } finally {
     unsubscribe();
     agentDelegate.findUnique = originalFindUnique;
+    if (userDelegate) userDelegate.findUnique = originalUserFindUnique;
     database.$transaction = originalTransaction;
   }
 }

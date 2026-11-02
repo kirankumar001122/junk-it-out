@@ -7,6 +7,9 @@ import { signToken } from '../lib/auth/jwt';
 async function run() {
   const orderDelegate = db.order as any;
   const originalOrderFindMany = orderDelegate.findMany;
+  const userDelegate = db.user as any;
+  const originalUserFindUnique = userDelegate.findUnique;
+  userDelegate.findUnique = async () => ({ tokenVersion: 1 });
 
   try {
     const adminToken = signToken({
@@ -181,6 +184,7 @@ async function run() {
     console.log('Admin reports performance, projection, and CSV safety tests passed.');
   } finally {
     orderDelegate.findMany = originalOrderFindMany;
+    userDelegate.findUnique = originalUserFindUnique;
     await db.$disconnect();
   }
 }

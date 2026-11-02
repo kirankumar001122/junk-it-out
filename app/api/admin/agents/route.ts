@@ -1,13 +1,17 @@
 import { NextRequest } from 'next/server';
 import { getActiveAgents } from '@/lib/services/agentService';
-import { getAuthUser } from '@/lib/auth/middleware';
+import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { db } from '@/lib/db';
 
 export async function GET(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
-    if (!authUser || !['ADMIN', 'SUPER_ADMIN'].includes(authUser.role)) {
+    const authorizationStatus = getAdminAuthorizationStatus(authUser);
+    if (authorizationStatus === 401) {
+      return errorResponse('UNAUTHORIZED', 'Authentication is required.', 401);
+    }
+    if (authorizationStatus === 403) {
       return errorResponse('FORBIDDEN', 'Admin access required.', 403);
     }
 
@@ -22,30 +26,45 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
-    if (!authUser || !['ADMIN', 'SUPER_ADMIN'].includes(authUser.role)) {
+    const authorizationStatus = getAdminAuthorizationStatus(authUser);
+    if (authorizationStatus === 401) {
+      return errorResponse('UNAUTHORIZED', 'Authentication is required.', 401);
+    }
+    if (authorizationStatus === 403) {
       return errorResponse('FORBIDDEN', 'Admin access required.', 403);
     }
 
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const { name, phone, vehicleType, vehicleNumber, serviceAreas } = body;
 
-    if (!name || !phone) {
-      return errorResponse('BAD_REQUEST', 'Name and phone are required.', 400);
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return errorResponse('BAD_REQUEST', 'Agent name is required.', 400);
     }
 
-    let user = await db.user.findUnique({ where: { phone } });
+    if (!phone || typeof phone !== 'string') {
+      return errorResponse('BAD_REQUEST', 'Valid phone number is required.', 400);
+    }
+
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (cleanPhone.length !== 10) {
+      return errorResponse('BAD_REQUEST', 'Phone number must be a valid 10-digit mobile number.', 400);
+    }
+
+    const trimmedName = name.trim();
+
+    let user = await db.user.findUnique({ where: { phone: cleanPhone } });
     if (!user) {
       user = await db.user.create({
         data: {
-          name,
-          phone,
+          name: trimmedName,
+          phone: cleanPhone,
           role: 'AGENT',
         },
       });
     } else {
       await db.user.update({
         where: { id: user.id },
-        data: { role: 'AGENT', name },
+        data: { role: 'AGENT', name: trimmedName },
       });
     }
 
@@ -54,13 +73,23 @@ export async function POST(req: NextRequest) {
       agent = await db.agent.create({
         data: {
           userId: user.id,
-          vehicleType: vehicleType || 'Three-Wheeler Auto Loading',
-          vehicleNumber: vehicleNumber || 'KA-05-JK-1000',
-          serviceAreas: serviceAreas || 'JP Nagar, Jayanagar, Koramangala',
+          vehicleType: vehicleType ? String(vehicleType).trim() : 'Three-Wheeler Auto Loading',
+          vehicleNumber: vehicleNumber ? String(vehicleNumber).trim() : 'KA-05-JK-1000',
+          serviceAreas: serviceAreas ? String(serviceAreas).trim() : 'JP Nagar, Jayanagar, Koramangala',
           status: 'AVAILABLE',
         },
       });
     }
+
+    await db.auditLog.create({
+      data: {
+        userId: authUser?.userId || null,
+        userName: authUser?.name || 'Admin Operations',
+        action: 'AGENT_CREATED',
+        oldValue: null,
+        newValue: `Created field agent: ${trimmedName} (${cleanPhone}), Vehicle: ${agent.vehicleNumber}`,
+      },
+    }).catch(() => null);
 
     return successResponse(agent);
   } catch (err: any) {
@@ -72,24 +101,38 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
-    if (!authUser || !['ADMIN', 'SUPER_ADMIN'].includes(authUser.role)) {
+    const authorizationStatus = getAdminAuthorizationStatus(authUser);
+    if (authorizationStatus === 401) {
+      return errorResponse('UNAUTHORIZED', 'Authentication is required.', 401);
+    }
+    if (authorizationStatus === 403) {
       return errorResponse('FORBIDDEN', 'Admin access required.', 403);
     }
 
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const { id, status, vehicleType, vehicleNumber, serviceAreas } = body;
 
-    if (!id) {
+    if (!id || typeof id !== 'string') {
       return errorResponse('BAD_REQUEST', 'Agent ID required.', 400);
+    }
+
+    const allowedStatuses = ['AVAILABLE', 'ON_DUTY', 'BUSY', 'OFFLINE'];
+    if (status && !allowedStatuses.includes(status)) {
+      return errorResponse('BAD_REQUEST', `Status must be one of: ${allowedStatuses.join(', ')}`, 400);
+    }
+
+    const existingAgent = await db.agent.findUnique({ where: { id } });
+    if (!existingAgent) {
+      return errorResponse('NOT_FOUND', 'Field agent not found.', 404);
     }
 
     const updated = await db.agent.update({
       where: { id },
       data: {
         ...(status ? { status } : {}),
-        ...(vehicleType ? { vehicleType } : {}),
-        ...(vehicleNumber ? { vehicleNumber } : {}),
-        ...(serviceAreas ? { serviceAreas } : {}),
+        ...(vehicleType ? { vehicleType: String(vehicleType).trim() } : {}),
+        ...(vehicleNumber ? { vehicleNumber: String(vehicleNumber).trim() } : {}),
+        ...(serviceAreas ? { serviceAreas: String(serviceAreas).trim() } : {}),
       },
       select: {
         id: true,
@@ -110,6 +153,16 @@ export async function PUT(req: NextRequest) {
         },
       },
     });
+
+    await db.auditLog.create({
+      data: {
+        userId: authUser?.userId || null,
+        userName: authUser?.name || 'Admin Operations',
+        action: 'AGENT_UPDATED',
+        oldValue: `Status: ${existingAgent.status}`,
+        newValue: `Status: ${updated.status}, Vehicle: ${updated.vehicleNumber}`,
+      },
+    }).catch(() => null);
 
     return successResponse(updated);
   } catch (err: any) {

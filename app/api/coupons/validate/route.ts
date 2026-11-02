@@ -38,6 +38,12 @@ export async function POST(req: NextRequest) {
     );
 
     if (!result.valid) {
+      if (result.isDbError) {
+        return NextResponse.json(
+          { success: false, message: result.error || 'Database error occurred while verifying coupon.' },
+          { status: 503 }
+        );
+      }
       return NextResponse.json(
         { success: false, message: result.error || 'Invalid or ineligible coupon code.' },
         { status: 400 }

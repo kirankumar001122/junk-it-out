@@ -71,14 +71,14 @@ export default function ServicesPage() {
   ];
 
   return (
-    <div className="w-full bg-slate-50 pb-20 space-y-16">
+    <div className="customer-page-cream w-full pb-20 space-y-16">
       {/* Services Header */}
-      <section className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 text-white py-16 px-6 sm:px-12 text-center">
+      <section className="customer-hero relative overflow-hidden py-20 px-6 text-white sm:px-12 text-center">
         <div className="max-w-4xl mx-auto space-y-4">
           <span className="bg-emerald-500/20 text-emerald-400 text-xs font-extrabold px-4 py-1.5 rounded-full uppercase tracking-wider border border-emerald-500/30">
             Our Services
           </span>
-          <h1 className="text-4xl sm:text-5xl font-black tracking-tight">
+          <h1 className="text-4xl sm:text-6xl font-black tracking-[-0.06em]">
             Complete On-Demand <br />
             <span className="text-emerald-400">Waste & Scrap Solutions</span>
           </h1>
@@ -96,7 +96,7 @@ export default function ServicesPage() {
             return (
               <div
                 key={idx}
-                className={`p-8 rounded-3xl border ${srv.color} shadow-sm space-y-6 flex flex-col justify-between hover:shadow-md transition-shadow`}
+                className="customer-feature-card p-8 space-y-6 flex flex-col justify-between"
               >
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
@@ -138,7 +138,7 @@ export default function ServicesPage() {
 
       {/* CTA Box */}
       <section className="max-w-7xl mx-auto px-6 sm:px-12">
-        <div className="bg-slate-900 rounded-3xl p-8 sm:p-12 text-center text-white space-y-6 shadow-xl">
+        <div className="customer-hero relative overflow-hidden rounded-[2rem] p-8 sm:p-12 text-center text-white space-y-6 shadow-xl">
           <h2 className="text-3xl font-black">Need a Custom Waste Disposal Quote?</h2>
           <p className="text-slate-300 text-sm max-w-xl mx-auto">
             Our agent fleet operates 7 days a week across  Bengaluru city. Contact us or schedule your pickup online.

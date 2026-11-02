@@ -1,33 +1,53 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { History, ShieldCheck } from 'lucide-react';
+import { History, ShieldCheck, RefreshCw } from 'lucide-react';
 
 export default function AdminAuditLogsPage() {
   const [logs, setLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadLogs = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/audit-logs');
+      const data = await res.json();
+      if (data.success) setLogs(data.data || []);
+    } catch {
+      // safe fallback
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    fetch('/api/admin/audit-logs')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) setLogs(data.data);
-      })
-      .catch(() => {});
+    loadLogs();
   }, []);
 
   return (
     <div className="space-y-6">
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-        <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-3 py-1 rounded-full uppercase">
-          Security & Audit Log
-        </span>
-        <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-1">Administrative Audit Trail Logs</h1>
-        <p className="text-xs text-slate-500">Immutable history of all sensitive administrative changes and system actions</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+        <div>
+          <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-3 py-1 rounded-full uppercase">
+            Security & Audit Log
+          </span>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-1">Administrative Audit Trail Logs</h1>
+          <p className="text-xs text-slate-500">Immutable history of all sensitive administrative changes and system actions</p>
+        </div>
+
+        <button
+          onClick={loadLogs}
+          disabled={loading}
+          className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 flex items-center gap-1.5 self-start sm:self-auto disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
       </div>
 
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-6">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full min-w-[650px] text-left text-xs">
             <thead className="bg-slate-50 text-slate-500 uppercase font-bold text-[10px]">
               <tr>
                 <th className="p-3">Timestamp</th>

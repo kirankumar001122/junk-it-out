@@ -27,6 +27,7 @@ async function run(): Promise<void> {
   const { db } = await import("../lib/db");
   const userDelegate = db.user as any;
   const originalFindFirst = userDelegate.findFirst;
+  const originalFindUnique = userDelegate.findUnique;
   const existingAdminUser = {
     id: "existing-agent-user",
     phone: "+917842259582",
@@ -38,6 +39,7 @@ async function run(): Promise<void> {
     customer: { id: "preserved-customer-record" },
   };
   userDelegate.findFirst = async () => ({ ...existingAdminUser });
+  userDelegate.findUnique = async () => ({ ...existingAdminUser, tokenVersion: 1 });
 
   try {
     const request = new NextRequest("http://localhost:3000/api/auth/admin-login", {
@@ -66,7 +68,7 @@ async function run(): Promise<void> {
     assert.equal(authorizedUser?.role, "ADMIN");
     assert.ok(requireAdminUser(authorizedUser));
     assert.equal(
-      requireAdminUser({ ...authorizedUser!, role: "AGENT" }),
+      requireAdminUser({ ...authorizedUser!, role: "AGENT", adminId: null }),
       null,
       "agent sessions must not pass admin authorization",
     );
@@ -89,6 +91,7 @@ async function run(): Promise<void> {
     console.log("Existing ADMIN account login and authorization recognition test passed.");
   } finally {
     userDelegate.findFirst = originalFindFirst;
+    userDelegate.findUnique = originalFindUnique;
     await db.$disconnect();
     Module._resolveFilename = originalResolve;
     for (const [key, value] of Object.entries({

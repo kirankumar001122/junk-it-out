@@ -46,21 +46,49 @@ export async function GET(req: NextRequest) {
     const startDateParam = searchParams.get('startDate') || searchParams.get('from');
     const endDateParam = searchParams.get('endDate') || searchParams.get('to');
 
-    const maxRows = limitParam
-      ? Math.min(Math.max(1, parseInt(limitParam, 10) || MAX_EXPORT_LIMIT), MAX_EXPORT_LIMIT)
-      : null;
+    let maxRows: number | null = null;
+    if (limitParam !== null) {
+      const parsed = parseInt(limitParam, 10);
+      if (isNaN(parsed) || parsed < 1 || parsed > MAX_EXPORT_LIMIT) {
+        return NextResponse.json(
+          { success: false, message: `Limit parameter must be an integer between 1 and ${MAX_EXPORT_LIMIT}.` },
+          { status: 400 },
+        );
+      }
+      maxRows = parsed;
+    }
 
     const where: {
       status?: string;
       createdAt?: { gte?: Date; lte?: Date };
     } = {};
-    if (statusParam) {
+
+    if (statusParam && statusParam !== 'ALL') {
       where.status = statusParam;
     }
+
     if (startDateParam || endDateParam) {
       where.createdAt = {};
-      if (startDateParam) where.createdAt.gte = new Date(startDateParam);
-      if (endDateParam) where.createdAt.lte = new Date(endDateParam);
+      if (startDateParam) {
+        const d = new Date(startDateParam);
+        if (isNaN(d.getTime())) {
+          return NextResponse.json(
+            { success: false, message: 'Invalid startDate format.' },
+            { status: 400 },
+          );
+        }
+        where.createdAt.gte = d;
+      }
+      if (endDateParam) {
+        const d = new Date(endDateParam);
+        if (isNaN(d.getTime())) {
+          return NextResponse.json(
+            { success: false, message: 'Invalid endDate format.' },
+            { status: 400 },
+          );
+        }
+        where.createdAt.lte = d;
+      }
     }
 
     const csvLines: string[] = [headers.map(csvCell).join(',')];

@@ -24,11 +24,13 @@ import {
   X,
 } from 'lucide-react';
 import CustomerOtpLogin from '@/components/CustomerOtpLogin';
+import WeightQuantityInput from '@/components/WeightQuantityInput';
 import LocationSearchModal from '@/components/LocationSearchModal';
 import InteractiveMap, { loadGoogleMaps } from '@/components/InteractiveMap';
 import { readPickupCart } from '@/lib/pickupCart';
 import { getSelectedLocation, setSelectedLocation, LOCATION_CHANGE_EVENT } from '@/lib/selectedLocation';
 import { loadRazorpayScript } from '@/lib/razorpayClient';
+import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
 
 // Small category images used in the booking cards.
 const CATEGORY_IMAGES: Record<string, string> = {
@@ -37,7 +39,6 @@ const CATEGORY_IMAGES: Record<string, string> = {
   'Paper & Cardboard': '/categories/paper-carboard.jpg',
   'Plastic Waste': '/categories/plastic-waste.jpg?v=2',
 };
-const CUSTOMER_CATEGORY_NAMES = new Set(Object.keys(CATEGORY_IMAGES));
 
 // Standard 1-hour pickup time slots
 const TIME_SLOTS = [
@@ -103,8 +104,10 @@ export default function BookingPage() {
   // Step 3: Summary, Pricing & Confirmation
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [categoryNotice, setCategoryNotice] = useState<string | null>(null);
   const [successOrder, setSuccessOrder] = useState<any>(null);
   const [pendingOrder, setPendingOrder] = useState<any | null>(null);
+  const [bookingStatusText, setBookingStatusText] = useState('Opening secure payment...');
 
   // Coupon State
   const [couponInput, setCouponInput] = useState('');
@@ -125,6 +128,7 @@ export default function BookingPage() {
   const idempotencyKeyRef = useRef<string>('');
   const lastPayloadSignatureRef = useRef<string>('');
   const isRetryingRef = useRef(false);
+  const isSubmittingRef = useRef(false);
 
   // Generate 4 available dates dynamically starting today
   const availableDates = [0, 1, 2, 3].map((offset) => {
@@ -218,13 +222,11 @@ export default function BookingPage() {
     checkAuth();
     loadLocationFromStore();
 
-    fetch('/api/waste-categories')
+    fetch('/api/waste-categories?customer=true')
       .then((res) => res.json())
       .then((data) => {
         if (data.success && Array.isArray(data.data)) {
-          const availableCategories = data.data.filter((category: any) =>
-            CUSTOMER_CATEGORY_NAMES.has(category.name?.trim())
-          );
+          const availableCategories = data.data.filter(isCustomerWasteCategory);
           setCategories(availableCategories);
 
           const params = new URLSearchParams(window.location.search);
@@ -249,6 +251,13 @@ export default function BookingPage() {
                 estimatedWeight: Math.max(1, item.quantity || 1),
               }));
 
+            const unsupportedCount = cartItems.length - validItems.length;
+            if (unsupportedCount > 0) {
+              setCategoryNotice(
+                'Certain items in your cart require custom bulk evaluation and were held aside from quick doorstep pickup.'
+              );
+            }
+
             if (validItems.length > 0) {
               setSelectedItems(validItems);
             } else if (selectedCategory) {
@@ -264,6 +273,20 @@ export default function BookingPage() {
             setSelectedItems([
               { categoryId: selectedCategory.id, estimatedWeight: 1 },
             ]);
+          } else if (requestedCategory) {
+            const allDbCategory = data.data.find(
+              (c: any) => c.id === requestedCategory || c.name === requestedCategory
+            );
+            if (allDbCategory) {
+              setCategoryNotice(
+                `"${allDbCategory.name}" requires custom on-site bulk evaluation. Please select one of our active doorstep categories below or contact support for bulk scrap.`
+              );
+            }
+            if (defaultServiceCategory) {
+              setSelectedItems([
+                { categoryId: defaultServiceCategory.id, estimatedWeight: 1 },
+              ]);
+            }
           } else if (defaultServiceCategory) {
             setSelectedItems([
               { categoryId: defaultServiceCategory.id, estimatedWeight: 1 },
@@ -409,6 +432,13 @@ export default function BookingPage() {
     } catch {}
   }, []);
 
+  // Proactively warm up / ensure Razorpay SDK is loaded whenever customer reaches address (step 2) or checkout (step 3)
+  useEffect(() => {
+    if (step >= 2) {
+      loadRazorpayScript().catch(() => {});
+    }
+  }, [step]);
+
   const handleApplyCoupon = async (codeToApply?: string) => {
     const code = (codeToApply || couponInput).trim().toUpperCase();
     if (!code) {
@@ -501,6 +531,7 @@ export default function BookingPage() {
     if (isRetryingRef.current || loading) return;
     isRetryingRef.current = true;
     setLoading(true);
+    setBookingStatusText('Re-connecting to secure payment...');
     setErrorMsg('');
 
     const scriptPromise = loadRazorpayScript();
@@ -601,6 +632,7 @@ export default function BookingPage() {
         modal: {
           ondismiss: function () {
             setLoading(false);
+            isSubmittingRef.current = false;
             isRetryingRef.current = false;
             setErrorMsg(`Checkout was cancelled or dismissed. Order #${targetOrder.orderNumber} is saved. You can retry payment whenever ready.`);
           },
@@ -610,6 +642,7 @@ export default function BookingPage() {
       const rzp = new (window as any).Razorpay(options);
       rzp.on('payment.failed', function (response: any) {
         setLoading(false);
+        isSubmittingRef.current = false;
         isRetryingRef.current = false;
         const reason = response?.error?.description || response?.error?.reason || 'Transaction declined.';
         setErrorMsg(`Payment failed: ${reason} Order #${targetOrder.orderNumber} is saved. You can retry payment whenever ready.`);
@@ -625,6 +658,7 @@ export default function BookingPage() {
 
   // Master Customer Booking & Razorpay Payment Handler
   const handleConfirmOrder = async () => {
+    if (isSubmittingRef.current || loading) return;
     if (!isCustomer) {
       setLoginOpen(true);
       setErrorMsg('Authentication is required. Please log in with mobile OTP to complete your booking.');
@@ -697,8 +731,10 @@ export default function BookingPage() {
       lastPayloadSignatureRef.current = currentPayloadSignature;
     }
 
+    isSubmittingRef.current = true;
     setLoading(true);
     setErrorMsg('');
+    setBookingStatusText('Securing your booking slot...');
 
     // Preload / load SDK in parallel with API calls
     const scriptPromise = loadRazorpayScript();
@@ -728,36 +764,15 @@ export default function BookingPage() {
           setCouponError(errorMsg);
         }
         setLoading(false);
+        isSubmittingRef.current = false;
         setErrorMsg(errorMsg);
         return;
       }
 
       const orderData = data.data;
 
-      // 2. Initialize Razorpay Payment Order
-      const payRes = await fetch('/api/payments/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId: orderData.id }),
-      });
-
-      const payData = await payRes.json();
-      if (!payRes.ok || !payData.success) {
-        setPendingOrder(orderData);
-        if (typeof window !== 'undefined') {
-          sessionStorage.setItem('jio_pending_order', JSON.stringify({
-            id: orderData.id,
-            orderNumber: orderData.orderNumber,
-            finalAmount: orderData.finalAmount,
-            area: orderData.address?.area || area,
-          }));
-        }
-        setLoading(false);
-        setErrorMsg(payData.message || 'Failed to initialize Razorpay payment order. Your order is saved and you can retry payment.');
-        return;
-      }
-
-      if (payData.alreadyPaid) {
+      // If order does not require customer payment (e.g. JUNKITOUT_PAYS scrap payout or ZERO_BALANCE), confirm directly
+      if (orderData.financialDirection !== 'CUSTOMER_PAYS' || Number(orderData.finalAmount) === 0) {
         idempotencyKeyRef.current = '';
         lastPayloadSignatureRef.current = '';
         setPendingOrder(null);
@@ -765,14 +780,64 @@ export default function BookingPage() {
           sessionStorage.removeItem('jio_pending_order');
         }
         setLoading(false);
+        isSubmittingRef.current = false;
         setSuccessOrder({
           ...orderData,
-          paymentStatus: 'CAPTURED',
+          paymentStatus: 'NOT_APPLICABLE',
           status: 'BOOKING_RECEIVED',
         });
         return;
       }
 
+      // 2. Check if paymentConfig was already provided in single round-trip by /api/orders
+      let razorpayConfig = orderData.paymentConfig;
+
+      if (!razorpayConfig) {
+        setBookingStatusText('Connecting to secure payment...');
+        const payRes = await fetch('/api/payments/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: orderData.id }),
+        });
+
+        const payData = await payRes.json();
+        if (!payRes.ok || !payData.success) {
+          setPendingOrder(orderData);
+          if (typeof window !== 'undefined') {
+            sessionStorage.setItem('jio_pending_order', JSON.stringify({
+              id: orderData.id,
+              orderNumber: orderData.orderNumber,
+              finalAmount: orderData.finalAmount,
+              area: orderData.address?.area || area,
+            }));
+          }
+          setLoading(false);
+          isSubmittingRef.current = false;
+          setErrorMsg(payData.message || 'Failed to initialize Razorpay payment order. Your order is saved and you can retry payment.');
+          return;
+        }
+
+        if (payData.alreadyPaid) {
+          idempotencyKeyRef.current = '';
+          lastPayloadSignatureRef.current = '';
+          setPendingOrder(null);
+          if (typeof window !== 'undefined') {
+            sessionStorage.removeItem('jio_pending_order');
+          }
+          setLoading(false);
+          isSubmittingRef.current = false;
+          setSuccessOrder({
+            ...orderData,
+            paymentStatus: 'CAPTURED',
+            status: 'BOOKING_RECEIVED',
+          });
+          return;
+        }
+
+        razorpayConfig = payData.data;
+      }
+
+      setBookingStatusText('Opening Razorpay checkout...');
       const scriptLoaded = await scriptPromise;
       if (!scriptLoaded) {
         setPendingOrder(orderData);
@@ -785,11 +850,10 @@ export default function BookingPage() {
           }));
         }
         setLoading(false);
+        isSubmittingRef.current = false;
         setErrorMsg('Failed to load Razorpay payment SDK. Please check your network connection and retry payment below.');
         return;
       }
-
-      const razorpayConfig = payData.data;
 
       const options = {
         key: razorpayConfig.key,
@@ -898,6 +962,7 @@ export default function BookingPage() {
       rzp.open();
     } catch (err: any) {
       setLoading(false);
+      isSubmittingRef.current = false;
       setErrorMsg('Network error while processing booking request. Please try again.');
     }
   };
@@ -992,7 +1057,8 @@ export default function BookingPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
+    <div className="customer-page-cream">
+    <div className="customer-page max-w-4xl">
       {/* 3-STEP PROGRESS HEADER */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">
@@ -1000,7 +1066,7 @@ export default function BookingPage() {
             <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full uppercase tracking-wider border border-emerald-200/80">
               Doorstep Pickup Booking
             </span>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight mt-1">Book Waste Pickup</h1>
+            <h1 className="customer-title mt-2">Book your pickup</h1>
           </div>
           <span className="text-xs font-bold text-slate-700 bg-slate-100 px-3 py-1 rounded-lg border border-slate-200">
             Step {step} of 3
@@ -1017,7 +1083,7 @@ export default function BookingPage() {
             <div key={st.id} className="space-y-1">
               <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
                 <div
-                  className="h-full bg-emerald-600 transition-all duration-300 ease-out"
+                  className="customer-progress-rail h-full transition-all duration-300 ease-out"
                   style={{ width: step > st.id ? '100%' : step === st.id ? '100%' : '0%' }}
                 />
               </div>
@@ -1043,7 +1109,18 @@ export default function BookingPage() {
 
       {/* STEP 1: CATEGORY SELECTION ("What are we picking up?") */}
       {step === 1 && (
-        <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-slate-200 space-y-6 animate-scale-in">
+        <div className="customer-surface rounded-[1.75rem] p-5 sm:p-7 space-y-6 animate-scale-in">
+          {categoryNotice && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs font-medium text-amber-800 flex items-start gap-2.5">
+              <span className="text-base leading-none">⚠️</span>
+              <div className="flex-1 space-y-1">
+                <p>{categoryNotice}</p>
+                <Link href="/customer/support" className="text-emerald-700 hover:text-emerald-800 font-bold underline text-[11px] inline-flex items-center gap-1">
+                  Need bulk pickup assistance? Contact Support &rarr;
+                </Link>
+              </div>
+            </div>
+          )}
           <div>
             <h2 className="text-lg font-bold text-slate-900 tracking-tight">What materials are you disposing?</h2>
             <p className="text-xs text-slate-500 font-medium mt-0.5">
@@ -1116,7 +1193,12 @@ export default function BookingPage() {
                         >
                           <Minus className="h-3.5 w-3.5" />
                         </button>
-                        <span className="text-xs font-extrabold text-emerald-950 px-2">{quantity} kg</span>
+                        <WeightQuantityInput
+                          value={quantity}
+                          onChange={(val) => updateItemWeight(cat.id, val)}
+                          categoryName={cat.name}
+                          textClassName="text-xs font-extrabold text-emerald-950"
+                        />
                         <button
                           type="button"
                           onClick={() => updateItemWeight(cat.id, quantity + 1)}
@@ -1151,7 +1233,7 @@ export default function BookingPage() {
 
       {/* STEP 2: PICKUP LOCATION & SCHEDULE */}
       {step === 2 && (
-        <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-slate-200 space-y-6 animate-scale-in">
+        <div className="customer-surface rounded-[1.75rem] p-5 sm:p-7 space-y-6 animate-scale-in">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
             <div>
               <h2 className="text-lg font-bold text-slate-900 tracking-tight">Pickup Location & Schedule</h2>
@@ -1403,7 +1485,7 @@ export default function BookingPage() {
 
       {/* STEP 3: BOOKING SUMMARY & PAYMENT VERIFICATION */}
       {step === 3 && (
-        <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-slate-200 space-y-6 animate-scale-in">
+        <div className="customer-surface rounded-[1.75rem] p-5 sm:p-7 space-y-6 animate-scale-in">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
             <div>
               <h2 className="text-lg font-bold text-slate-900 tracking-tight">Booking Summary</h2>
@@ -1651,7 +1733,7 @@ export default function BookingPage() {
                   {loading ? (
                     <>
                       <Clock className="w-4 h-4 animate-spin text-white" />
-                      Opening secure payment...
+                      {bookingStatusText || 'Opening secure payment...'}
                     </>
                   ) : (
                     <>
@@ -1696,7 +1778,7 @@ export default function BookingPage() {
                   {loading ? (
                     <>
                       <Clock className="w-4 h-4 animate-spin text-white" />
-                      Opening secure payment...
+                      {bookingStatusText || 'Opening secure payment...'}
                     </>
                   ) : (
                     <>
@@ -1747,6 +1829,7 @@ export default function BookingPage() {
           setLocationSearchModalOpen(false);
         }}
       />
+    </div>
     </div>
   );
 }

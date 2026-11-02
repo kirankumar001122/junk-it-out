@@ -1,58 +1,17 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
+import {
+  executeAgentAcceptTransaction,
+  isAgentEligibleForServiceArea,
+} from '@/lib/services/agentService';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
-
-const SAFE_HYDRATED_ORDER_INCLUDE = {
-  agent: {
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          phone: true,
-        },
-      },
-    },
-  },
-  customer: {
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          phone: true,
-        },
-      },
-    },
-  },
-  address: true,
-  items: {
-    include: {
-      category: true,
-    },
-  },
-};
-
-function formatOrderResponse(
-  orderData: any,
-  fallback: { id: string; orderNumber: string; agentId?: string | null; status: string }
-) {
-  if (!orderData) {
-    return {
-      id: fallback.id,
-      orderId: fallback.id,
-      orderNumber: fallback.orderNumber,
-      agentId: fallback.agentId,
-      status: fallback.status,
-    };
-  }
-  return {
-    ...orderData,
-    orderId: orderData.id ?? fallback.id,
-  };
-}
+import { SAFE_HYDRATED_ORDER_INCLUDE, formatOrderResponse } from '@/lib/orders/orderFormat';
+import {
+  broadcastAgentBookingNotification,
+  persistAgentBookingNotificationOnce,
+} from '@/lib/services/agentBookingNotification';
 
 export async function POST(
   req: NextRequest,
@@ -75,18 +34,18 @@ export async function POST(
     // 2. Load Agent Profile & Check Availability Status
     const agent = await db.agent.findUnique({
       where: { id: agentId },
-      include: { user: true },
+      include: { user: { select: { id: true, name: true, phone: true } } },
     });
 
     if (!agent) {
       return errorResponse('AGENT_NOT_FOUND', 'Agent profile not found.', 404);
     }
 
-    if (agent.status !== 'AVAILABLE') {
+    if (agent.status === 'SUSPENDED' || agent.status === 'DEACTIVATED') {
       return errorResponse(
-        'AGENT_NOT_AVAILABLE',
-        'Agent is currently offline or unavailable for new pickups.',
-        400
+        'FORBIDDEN',
+        'Agent account is inactive or suspended. Please contact the administrator.',
+        403
       );
     }
 
@@ -102,6 +61,34 @@ export async function POST(
 
     if (!order) {
       return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
+    }
+
+    if (agent.status === 'OFFLINE') {
+      return errorResponse(
+        'AGENT_NOT_AVAILABLE',
+        'Agent is currently offline or unavailable for new pickups.',
+        400
+      );
+    }
+
+    const isOwnOrder = order.agentId === agentId;
+    const canAcceptOrReaccept =
+      isOwnOrder &&
+      ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED', 'AGENT_ACCEPTED'].includes(order.status);
+
+    if (agent.status !== 'AVAILABLE' && !canAcceptOrReaccept) {
+      if (agent.status === 'ASSIGNED') {
+        return errorResponse(
+          'AGENT_HAS_ACTIVE_ORDER',
+          'Finish or cancel the active pickup before accepting another assignment.',
+          409
+        );
+      }
+      return errorResponse(
+        'AGENT_NOT_AVAILABLE',
+        'Agent is currently offline or unavailable for new pickups.',
+        400
+      );
     }
 
     // 4. Check Order State & Idempotency / Conflict
@@ -137,54 +124,94 @@ export async function POST(
       return errorResponse('ORDER_UNAVAILABLE', 'This pickup is no longer available for acceptance.', 400);
     }
 
-    // 5. Service Area Matching Check
-    // If the order is already assigned to this agent by dispatcher/system, bypass area eligibility check
-    if (order.agentId !== agentId) {
-      const orderAreaName = order.address?.area;
-      if (agent.serviceAreas && agent.serviceAreas.trim() !== '' && agent.serviceAreas.toLowerCase() !== 'all' && orderAreaName) {
-        const normalizedArea = orderAreaName.toLowerCase();
-        const agentAreas = agent.serviceAreas.toLowerCase().split(',').map((a) => a.trim());
-        const isEligible = agentAreas.some((area) => normalizedArea.includes(area) || area.includes(normalizedArea));
+    if (order.financialDirection === 'CUSTOMER_PAYS' && order.paymentStatus !== 'CAPTURED') {
+      return errorResponse('PAYMENT_NOT_CAPTURED', 'This pickup is not available until payment is confirmed.', 409);
+    }
 
-        if (!isEligible) {
-          return errorResponse(
-            'OUT_OF_SERVICE_AREA',
-            'Order service area is not covered by your agent profile.',
-            403
-          );
-        }
+    // 5. Active Order in Progress Check (Pre-check)
+    if (!isOwnOrder) {
+      const activeOrder = await db.order.findFirst({
+        where: {
+          agentId,
+          status: { in: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WASTE_VERIFICATION', 'WEIGHING'] },
+        },
+        select: { id: true },
+      });
+      if (activeOrder && activeOrder.id !== order.id) {
+        return errorResponse(
+          'AGENT_HAS_ACTIVE_ORDER',
+          'Finish or cancel the active pickup before accepting another assignment.',
+          409
+        );
       }
     }
 
-    // 6. Atomic Conditional Update (Race-Condition Prevention)
-    // Update status to AGENT_ACCEPTED if order is unassigned or assigned to this agent in AGENT_ASSIGNED state
-    const updateResult = await db.order.updateMany({
-      where: {
-        id: order.id,
-        OR: [
-          { agentId: null, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
-          { agentId: agentId, status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED'] } },
-        ],
-      },
-      data: {
-        agentId: agentId,
-        status: 'AGENT_ACCEPTED',
-      },
-    });
+    // 6. Service Area Status & Eligibility Check
+    // If the order is already assigned to this agent by dispatcher/system, bypass area eligibility check
+    if (order.agentId !== agentId) {
+      const orderAreaName = order.address?.area;
 
-    if (updateResult.count === 0) {
-      // Another concurrent request updated the order first. Re-verify state.
-      const recheckOrder = await db.order.findUnique({
-        where: { id: order.id },
-        include: SAFE_HYDRATED_ORDER_INCLUDE,
-      });
-      if (recheckOrder?.agentId === agentId) {
+      // Verify that the service area itself is ACTIVE in the database
+      if (orderAreaName && typeof db.serviceArea?.findFirst === 'function') {
+        const areaRecord = await db.serviceArea.findFirst({
+          where: {
+            OR: [
+              { name: { equals: orderAreaName, mode: 'insensitive' } },
+              { id: { equals: orderAreaName, mode: 'insensitive' } },
+              { name: { contains: orderAreaName, mode: 'insensitive' } },
+            ],
+          },
+          select: { status: true },
+        }).catch(() => null);
+
+        if (areaRecord && areaRecord.status !== 'ACTIVE') {
+          return errorResponse(
+            'SERVICE_AREA_INACTIVE',
+            'Service area is currently inactive or suspended.',
+            400
+          );
+        }
+      }
+
+      // Verify agent eligibility for the service area
+      if (!isAgentEligibleForServiceArea(agent.serviceAreas, orderAreaName)) {
+        return errorResponse(
+          'OUT_OF_SERVICE_AREA',
+          'Order service area is not covered by your agent profile.',
+          403
+        );
+      }
+    }
+
+    // 7. Atomic Conditional Update (Race-Condition Prevention)
+    // Update status to AGENT_ACCEPTED if order is unassigned or assigned to this agent in AGENT_ASSIGNED state
+    const assignment = await executeAgentAcceptTransaction(db, {
+      order,
+      agentId,
+      agentName: agent.user.name,
+      vehicleNumber: agent.vehicleNumber,
+      agentUserId: agent.userId,
+      userId: authUser.userId,
+    });
+    const notificationCreated = assignment.notificationCreated;
+
+    if (!assignment.changed) {
+      if (assignment.reason === 'agentSuspended') {
+        return errorResponse('FORBIDDEN', 'Agent account is inactive or suspended. Please contact the administrator.', 403);
+      }
+      if (assignment.reason === 'agentUnavailable') {
+        return errorResponse('AGENT_NOT_AVAILABLE', 'Agent is currently offline or unavailable for new pickups.', 400);
+      }
+      if (assignment.reason === 'activeAssignment') {
+        return errorResponse('AGENT_HAS_ACTIVE_ORDER', 'Finish or cancel the active pickup before accepting another assignment.', 409);
+      }
+      if (assignment.alreadyAssignedToAgent) {
         return successResponse(
-          formatOrderResponse(recheckOrder, {
+          formatOrderResponse(assignment.order, {
             id: order.id,
             orderNumber: order.orderNumber,
-            agentId: agentId,
-            status: recheckOrder.status,
+            agentId,
+            status: assignment.order?.status ?? order.status,
           })
         );
       }
@@ -195,36 +222,22 @@ export async function POST(
       );
     }
 
-    // 7. Post-Acceptance Updates & Realtime Event Broadcasting
-    const oldStatus = order.status;
+    // 7. Post-Acceptance Realtime Event Broadcasting
     const newStatus = 'AGENT_ACCEPTED';
-
-    // Record Order Status History
-    await db.orderStatusHistory.create({
-      data: {
-        orderId: order.id,
-        oldStatus,
-        newStatus,
-        changedByUserId: authUser.userId || null,
-        notes: `Pickup accepted by field agent ${agent.user.name} (${agent.vehicleNumber}).`,
-      },
-    });
-
-    // Update Agent status to ASSIGNED
-    await db.agent.update({
-      where: { id: agentId },
-      data: { status: 'ASSIGNED' },
-    });
-
-    // Fetch updated order for broadcasting
-    const updatedOrder = await db.order.findUnique({
-      where: { id: order.id },
-      include: SAFE_HYDRATED_ORDER_INCLUDE,
-    });
+    const updatedOrder = assignment.order;
 
     if (updatedOrder) {
       broadcaster.broadcast('ORDER_UPDATED', updatedOrder);
       broadcaster.broadcast('ORDER_ACCEPTED', { orderId: order.id, agentId });
+      if (notificationCreated) {
+        broadcastAgentBookingNotification({
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          agentId,
+          agentUserId: agent.userId,
+          status: newStatus,
+        }, notificationCreated, (event, payload) => broadcaster.broadcast(event, payload));
+      }
 
       // Phase 4: Dispatch AGENT_ASSIGNED event for authenticated Customer SSE stream
       try {

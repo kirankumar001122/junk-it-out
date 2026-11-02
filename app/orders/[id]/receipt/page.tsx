@@ -21,7 +21,7 @@ export default function ReceiptPage() {
         const data = await res.json();
 
         if (!res.ok || !data.success) {
-          throw new Error(data.message || 'Failed to load receipt');
+          throw new Error(data.error?.message || data.message || 'Failed to load receipt');
         }
 
         if (!isPickupCompletedStatus(data.data.status)) {
@@ -730,206 +730,308 @@ export default function ReceiptPage() {
            ================================ */
 
         @media print {
-
           @page {
             size: A4 portrait;
-            margin: 6mm;
+            margin: 10mm 12mm;
+          }
+
+          *,
+          *::before,
+          *::after {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          /* Hide application chrome: Navbar, Footer, BottomNavs, Floating actions */
+          header:not(.receipt-header),
+          footer:not(.receipt-footer),
+          nav,
+          aside,
+          .receipt-actions,
+          button:not(.receipt-actions button) {
+            display: none !important;
           }
 
           html,
           body {
             width: 100% !important;
-            height: 100% !important;
+            height: auto !important;
+            min-height: auto !important;
             margin: 0 !important;
             padding: 0 !important;
-            background: white !important;
+            background: #ffffff !important;
+            overflow: visible !important;
+            color: #0f172a !important;
+            font-size: 11pt !important;
           }
 
-          /*
-           * Remove the normal application page appearance.
-           */
-          body {
-            overflow: hidden !important;
+          /* Unset any padding/margin added by RootLayout */
+          main {
+            padding: 0 !important;
+            margin: 0 !important;
+            overflow: visible !important;
           }
 
-          /*
-           * Hide everything by default.
-           */
-          body * {
-            visibility: hidden !important;
-          }
-
-          /*
-           * Make only the receipt visible.
-           */
-          .receipt-screen,
-          .receipt-screen * {
-            visibility: visible !important;
-          }
-
-          /*
-           * Remove the receipt from normal document flow.
-           * This prevents the parent application layout from
-           * generating additional blank pages.
-           */
           .receipt-screen {
-            position: fixed !important;
-            inset: 0 !important;
+            position: static !important;
             width: 100% !important;
-            height: 100% !important;
-            min-height: 0 !important;
+            height: auto !important;
+            min-height: auto !important;
             padding: 0 !important;
             margin: 0 !important;
-            background: white !important;
-            overflow: hidden !important;
+            background: #ffffff !important;
+            overflow: visible !important;
           }
 
           .receipt-container {
-            position: absolute !important;
-            top: 0 !important;
-            left: 0 !important;
-
+            position: static !important;
             width: 100% !important;
-            max-width: none !important;
-
+            max-width: 100% !important;
             margin: 0 !important;
             padding: 0 !important;
-
-            background: white !important;
-            border: 1px solid #dbe2ea !important;
-            border-radius: 0 !important;
+            background: #ffffff !important;
+            border: 1.5px solid #cbd5e1 !important;
+            border-radius: 8px !important;
             box-shadow: none !important;
-
-            overflow: hidden !important;
+            overflow: visible !important;
           }
 
-          /*
-           * Hide the browser button from PDF/printing.
-           */
-          .receipt-actions {
-            display: none !important;
-          }
-
-          /*
-           * Compact A4 spacing.
-           */
           .receipt-header {
-            padding: 15px 20px !important;
+            background: #0f172a !important;
+            color: #ffffff !important;
+            padding: 20px 24px !important;
+            border-radius: 6px 6px 0 0 !important;
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: flex-start !important;
+            gap: 20px !important;
           }
 
           .company-name {
-            font-size: 20px !important;
+            font-size: 22px !important;
+            color: #ffffff !important;
+            font-weight: 800 !important;
+            line-height: 1.1 !important;
+          }
+
+          .company-name span {
+            color: #34d399 !important;
           }
 
           .receipt-title {
-            margin-top: 4px !important;
-            font-size: 10px !important;
+            color: #cbd5e1 !important;
+            font-size: 12px !important;
+            margin-top: 5px !important;
           }
 
           .invoice-label {
-            font-size: 8px !important;
+            color: #94a3b8 !important;
+            font-size: 10px !important;
+            letter-spacing: 1px !important;
+            font-weight: 700 !important;
           }
 
           .invoice-number {
-            font-size: 10px !important;
+            color: #ffffff !important;
+            font-size: 13px !important;
+            font-weight: 700 !important;
+            margin-top: 4px !important;
           }
 
           .invoice-date {
-            font-size: 9px !important;
+            color: #cbd5e1 !important;
+            font-size: 11px !important;
+            margin-top: 4px !important;
           }
 
           .section {
-            padding: 11px 20px !important;
+            padding: 16px 24px !important;
+            border-bottom: 1px solid #e2e8f0 !important;
+            background: #ffffff !important;
           }
 
           .compact-section {
-            padding-top: 9px !important;
-            padding-bottom: 9px !important;
+            padding-top: 12px !important;
+            padding-bottom: 12px !important;
           }
 
           .section-title {
-            margin-bottom: 7px !important;
-            font-size: 8px !important;
+            margin-bottom: 10px !important;
+            font-size: 10px !important;
+            color: #475569 !important;
+            font-weight: 800 !important;
+            letter-spacing: 0.8px !important;
           }
 
           .info-grid {
-            gap: 8px 25px !important;
+            display: grid !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            gap: 12px 32px !important;
           }
 
           .info-item span {
-            font-size: 8px !important;
-            margin-bottom: 2px !important;
+            font-size: 10px !important;
+            color: #64748b !important;
+            margin-bottom: 3px !important;
+            display: block !important;
           }
 
           .info-item strong {
-            font-size: 9px !important;
+            font-size: 12px !important;
+            color: #0f172a !important;
+            display: block !important;
+          }
+
+          .status-completed {
+            color: #059669 !important;
+            font-weight: 700 !important;
           }
 
           .address-box {
-            padding: 7px 9px !important;
-            font-size: 9px !important;
+            padding: 10px 14px !important;
+            background: #f8fafc !important;
+            border: 1px solid #e2e8f0 !important;
+            border-radius: 6px !important;
+            color: #1e293b !important;
+            font-size: 11px !important;
+            line-height: 1.5 !important;
           }
 
           .items-table {
-            font-size: 9px !important;
+            width: 100% !important;
+            border-collapse: collapse !important;
+            table-layout: fixed !important;
+            font-size: 11px !important;
           }
 
           .items-table th {
-            padding: 6px 8px !important;
-            font-size: 7px !important;
+            padding: 8px 12px !important;
+            background: #f1f5f9 !important;
+            border-top: 1px solid #cbd5e1 !important;
+            border-bottom: 1px solid #cbd5e1 !important;
+            color: #334155 !important;
+            font-size: 10px !important;
+            font-weight: 800 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.5px !important;
+            text-align: right !important;
+          }
+
+          .items-table th:first-child {
+            text-align: left !important;
           }
 
           .items-table td {
-            padding: 6px 8px !important;
+            padding: 8px 12px !important;
+            border-bottom: 1px solid #e2e8f0 !important;
+            color: #334155 !important;
+            font-size: 11px !important;
+            text-align: right !important;
+            vertical-align: middle !important;
+          }
+
+          .items-table .item-column {
+            width: 44% !important;
+          }
+
+          .items-table .item-name {
+            color: #0f172a !important;
+            font-weight: 600 !important;
+            text-align: left !important;
+          }
+
+          .amount-cell {
+            color: #0f172a !important;
+            font-weight: 700 !important;
+          }
+
+          .settlement-section {
+            border-bottom: 0 !important;
+            padding-bottom: 16px !important;
+          }
+
+          .settlement-content {
+            max-width: 450px !important;
+            margin-left: auto !important;
           }
 
           .settlement-row {
-            padding: 3px 0 !important;
-            font-size: 9px !important;
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: center !important;
+            padding: 5px 0 !important;
+            font-size: 11px !important;
+          }
+
+          .settlement-row span {
+            color: #475569 !important;
+          }
+
+          .settlement-row strong {
+            color: #0f172a !important;
+            font-weight: 700 !important;
           }
 
           .final-amount-row {
-            margin-top: 6px !important;
-            padding-top: 8px !important;
+            margin-top: 8px !important;
+            padding-top: 10px !important;
+            border-top: 2px solid #cbd5e1 !important;
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: center !important;
           }
 
           .final-amount-row span {
-            font-size: 10px !important;
+            font-size: 12px !important;
+            font-weight: 800 !important;
+            color: #0f172a !important;
+            letter-spacing: 0.4px !important;
           }
 
           .final-amount-row strong {
-            font-size: 16px !important;
+            font-size: 18px !important;
+            font-weight: 800 !important;
+            color: #059669 !important;
           }
 
           .receipt-footer {
-            padding: 9px 20px !important;
+            padding: 14px 24px !important;
+            background: #f8fafc !important;
+            border-top: 1px solid #e2e8f0 !important;
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: center !important;
+            border-radius: 0 0 6px 6px !important;
           }
 
           .receipt-footer strong {
-            font-size: 8px !important;
+            display: block !important;
+            color: #1e293b !important;
+            font-size: 10px !important;
           }
 
           .receipt-footer p {
-            font-size: 7px !important;
+            margin: 3px 0 0 !important;
+            color: #64748b !important;
+            font-size: 9px !important;
           }
 
           .footer-invoice {
-            font-size: 7px !important;
+            color: #64748b !important;
+            font-size: 10px !important;
+            font-weight: 600 !important;
+            white-space: nowrap !important;
           }
 
-          /*
-           * Prevent sections from being split between pages.
-           */
+          /* Prevent split across pages */
           .receipt-header,
           .section,
+          .settlement-section,
           .receipt-footer {
             break-inside: avoid !important;
             page-break-inside: avoid !important;
           }
 
-          /*
-           * Prevent table rows from splitting.
-           */
           .items-table tr {
             break-inside: avoid !important;
             page-break-inside: avoid !important;

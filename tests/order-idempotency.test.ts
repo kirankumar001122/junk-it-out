@@ -29,6 +29,8 @@ async function run() {
     categoryFindMany: (db as any).wasteCategory.findMany,
     couponFindUnique: (db as any).coupon.findUnique,
     orderFindFirst: (db as any).order.findFirst,
+    orderFindUnique: (db as any).order.findUnique,
+    orderIdempotency: (db as any).orderIdempotency,
     transaction: (db as any).$transaction,
   };
 
@@ -54,6 +56,7 @@ async function run() {
   let orders: any[] = [];
   let nextOrderId = 1;
   let failNextOrderCreate = false;
+  const idempotencyRecords = new Map<string, any>();
 
   (db as any).user.findUnique = async ({ where }: any) =>
     where.id === otherUser.id ? otherUser : user;
@@ -72,8 +75,19 @@ async function run() {
   ];
   (db as any).coupon.findUnique = async () => null;
   (db as any).order.findFirst = async () => null;
+  (db as any).order.findUnique = async ({ where }: any) =>
+    orders.find((o) => o.id === where.id) || null;
+  (db as any).orderIdempotency = {
+    findUnique: async ({ where }: any) => {
+      const key = `${where.customerId_key.customerId}:${where.customerId_key.key}`;
+      return idempotencyRecords.get(key) || null;
+    },
+  };
 
   (db as any).$transaction = async (callback: (tx: any) => Promise<any>) => {
+    let pendingKey: string | null = null;
+    let pendingRecord: any = null;
+
     const tx = {
       order: {
         create: async ({ data }: any) => {
@@ -94,20 +108,39 @@ async function run() {
           return created;
         },
       },
+      orderIdempotency: {
+        create: async ({ data }: any) => {
+          const key = `${data.customerId}:${data.key}`;
+          if (idempotencyRecords.has(key)) {
+            const err: any = new Error('Unique constraint failed on the fields: (`customerId`,`key`)');
+            err.code = 'P2002';
+            throw err;
+          }
+          pendingKey = key;
+          pendingRecord = data;
+          return data;
+        },
+      },
     };
 
-    return callback(tx);
+    const result = await callback(tx);
+    if (pendingKey && pendingRecord) {
+      idempotencyRecords.set(pendingKey, pendingRecord);
+    }
+    return result;
   };
 
   const authUser = { userId: user.id, customerId: customer.id };
   const restore = () => {
     (db as any).user.findUnique = original.userFindUnique;
     (db as any).serviceArea.findMany = original.serviceAreaFindMany;
-    (db as any).addressUpdateMany = original.addressUpdateMany;
-    (db as any).addressCreate = original.addressCreate;
+    (db as any).address.updateMany = original.addressUpdateMany;
+    (db as any).address.create = original.addressCreate;
     (db as any).wasteCategory.findMany = original.categoryFindMany;
     (db as any).coupon.findUnique = original.couponFindUnique;
     (db as any).order.findFirst = original.orderFindFirst;
+    (db as any).order.findUnique = original.orderFindUnique;
+    (db as any).orderIdempotency = original.orderIdempotency;
     (db as any).$transaction = original.transaction;
   };
 
@@ -139,13 +172,28 @@ async function run() {
     const afterRollback = await createOrder(input, rollbackKey, authUser);
     assert.ok(afterRollback.id, "a rolled-back key can be safely retried");
 
-    console.log("PASS: durable idempotency retries, distinct keys, payload mismatch, concurrent requests, and transaction rollback");
+    const crossCustomerKey = `cross-customer-key-${Date.now()}`;
+    const crossCustomerOrder = await createOrder(
+      input,
+      crossCustomerKey,
+      { userId: otherUser.id, customerId: otherCustomer.id }
+    );
+    assert.ok(crossCustomerOrder?.id, "other customer can use key");
+
+    const sameKeyPrimaryCustomer = await createOrder(input, crossCustomerKey, authUser);
+    assert.notEqual(
+      sameKeyPrimaryCustomer.id,
+      crossCustomerOrder.id,
+      "idempotency keys are customer-scoped and cannot collide across different customers"
+    );
+
+    console.log("Order creation idempotency tests passed.");
   } finally {
     restore();
   }
 }
 
-run().catch((error) => {
+void run().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

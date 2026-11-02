@@ -18,6 +18,7 @@ export default function AdminPaymentsPage() {
   const [refunding, setRefunding] = useState(false);
   const [refundReason, setRefundReason] = useState('Customer request / order adjustment');
   const requestId = useRef(0);
+  const refundInFlightRef = useRef(false);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -59,8 +60,25 @@ export default function AdminPaymentsPage() {
     return () => controller.abort();
   }, [loadPayments]);
 
+  // Keyboard accessibility and body scroll lock for refund modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setRefundModalPayment(null);
+      }
+    };
+    if (refundModalPayment) {
+      window.addEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = 'hidden';
+    }
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = '';
+    };
+  }, [refundModalPayment]);
+
   const handleConfirmRefund = async () => {
-    if (!refundModalPayment || refunding) return;
+    if (!refundModalPayment || refundInFlightRef.current || refunding) return;
     const numAmount = Number(refundAmount);
     const maxRefundable = Number(refundModalPayment.remainingRefundableAmount ?? refundModalPayment.amount ?? 0);
     if (!Number.isFinite(numAmount) || numAmount <= 0) {
@@ -72,6 +90,7 @@ export default function AdminPaymentsPage() {
       return;
     }
 
+    refundInFlightRef.current = true;
     setRefunding(true);
     try {
       const res = await fetch('/api/admin/payments/refund', {
@@ -83,16 +102,17 @@ export default function AdminPaymentsPage() {
           reason: refundReason,
         }),
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
         setRefundModalPayment(null);
-        loadPayments();
+        await loadPayments();
       } else {
-        alert(data.message || 'Failed to issue refund.');
+        alert(data?.message || 'Failed to issue refund.');
       }
     } catch (e: any) {
       alert(e.message || 'Error processing refund request.');
     } finally {
+      refundInFlightRef.current = false;
       setRefunding(false);
     }
   };
@@ -181,7 +201,7 @@ export default function AdminPaymentsPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="w-full min-w-[840px] text-left text-xs">
               <thead className="bg-slate-50 text-slate-500 uppercase font-bold text-[10px]">
                 <tr>
                   <th className="p-3">Order Number</th>
@@ -308,8 +328,18 @@ export default function AdminPaymentsPage() {
 
       {/* Razorpay Refund Confirmation Modal */}
       {refundModalPayment && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Initiate Razorpay Refund"
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 overflow-y-auto"
+        >
+          <div
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm cursor-pointer"
+            onClick={() => setRefundModalPayment(null)}
+            aria-hidden="true"
+          />
+          <div className="relative bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl z-10 my-auto">
             <div className="flex items-center gap-3 text-rose-600">
               <div className="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center">
                 <RotateCcw className="w-5 h-5 text-rose-600" />
