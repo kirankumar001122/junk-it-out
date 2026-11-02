@@ -112,21 +112,6 @@ export default function BookingPage() {
   const [pendingOrder, setPendingOrder] = useState<any | null>(null);
   const [bookingStatusText, setBookingStatusText] = useState('Opening secure payment...');
 
-  // Coupon State
-  const [couponInput, setCouponInput] = useState('');
-  const [appliedCoupon, setAppliedCoupon] = useState<{
-    code: string;
-    discountType?: string;
-    discountValue?: number;
-    discountAmount: number;
-    finalAmount?: number;
-    minOrderValue?: number;
-    message?: string;
-  } | null>(null);
-  const [couponLoading, setCouponLoading] = useState(false);
-  const [couponError, setCouponError] = useState<string | null>(null);
-  const [couponSuccessMsg, setCouponSuccessMsg] = useState<string | null>(null);
-
   // Idempotency Protection Ref
   const idempotencyKeyRef = useRef<string>('');
   const lastPayloadSignatureRef = useRef<string>('');
@@ -349,9 +334,6 @@ export default function BookingPage() {
     idempotencyKeyRef.current = '';
     lastPayloadSignatureRef.current = '';
     setPendingOrder(null);
-    setAppliedCoupon(null);
-    setCouponSuccessMsg(null);
-    setCouponError(null);
     if (typeof window !== 'undefined') {
       sessionStorage.removeItem('jio_pending_order');
     }
@@ -368,9 +350,6 @@ export default function BookingPage() {
     idempotencyKeyRef.current = '';
     lastPayloadSignatureRef.current = '';
     setPendingOrder(null);
-    setAppliedCoupon(null);
-    setCouponSuccessMsg(null);
-    setCouponError(null);
     if (typeof window !== 'undefined') {
       sessionStorage.removeItem('jio_pending_order');
     }
@@ -388,25 +367,29 @@ export default function BookingPage() {
 
   const calculateEstimate = () => {
     let totalWasteItemsValue = 0;
+    let totalWasteCharge = 0;
     const baseCharge = geofenceResult?.zone?.basePickupCharge || 69.0;
 
     selectedItems.forEach((item) => {
       const cat = categories.find((c) => c.id === item.categoryId);
       if (cat) {
-        totalWasteItemsValue += item.estimatedWeight * cat.pricePerKg;
+        if (cat.type === 'WASTE_CHARGE') {
+          totalWasteCharge += item.estimatedWeight * cat.pricePerKg;
+        } else {
+          totalWasteItemsValue += item.estimatedWeight * cat.pricePerKg;
+        }
       }
     });
 
-    const subtotal = totalWasteItemsValue + baseCharge;
-    const discountAmount = appliedCoupon ? appliedCoupon.discountAmount : 0;
-    const rawPayable = subtotal - discountAmount;
-    const netPayable = Math.max(1, Math.round(rawPayable * 100) / 100);
+    const upfrontCustomerCharge = Math.round((baseCharge + totalWasteCharge) * 100) / 100;
+    const netPayable = Math.max(1, upfrontCustomerCharge);
 
     return {
       totalWasteItemsValue: Math.round(totalWasteItemsValue * 100) / 100,
       baseCharge,
-      subtotal: Math.round(subtotal * 100) / 100,
-      discountAmount: Math.round(discountAmount * 100) / 100,
+      totalWasteCharge: Math.round(totalWasteCharge * 100) / 100,
+      subtotal: upfrontCustomerCharge,
+      discountAmount: 0,
       netAmount: netPayable,
       direction: 'CUSTOMER_PAYS' as const,
     };
@@ -443,83 +426,9 @@ export default function BookingPage() {
     }
   }, [step]);
 
-  const handleApplyCoupon = async (codeToApply?: string) => {
-    const code = (codeToApply || couponInput).trim().toUpperCase();
-    if (!code) {
-      setCouponError('Please enter a coupon code.');
-      setCouponSuccessMsg(null);
-      return;
-    }
-
-    if (couponLoading) return;
-    setCouponLoading(true);
-    setCouponError(null);
-    setCouponSuccessMsg(null);
-
-    // Compute raw subtotal before discounts
-    let totalWasteItemsValue = 0;
-    const baseCharge = geofenceResult?.zone?.basePickupCharge || 69.0;
-    selectedItems.forEach((item) => {
-      const cat = categories.find((c) => c.id === item.categoryId);
-      if (cat) {
-        totalWasteItemsValue += item.estimatedWeight * cat.pricePerKg;
-      }
-    });
-    const subtotal = totalWasteItemsValue + baseCharge;
-
-    try {
-      const res = await fetch('/api/coupons/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, subtotal }),
-      });
-      const data = await res.json();
-
-      if (res.ok && data.success && data.data?.valid) {
-        setAppliedCoupon(data.data);
-        setCouponInput(data.data.code);
-        setCouponSuccessMsg(data.data.message || `Coupon ${data.data.code} applied! Saved ₹${data.data.discountAmount.toFixed(2)}.`);
-        setCouponError(null);
-        // Clear idempotency key to prevent collision with non-discounted payload
-        idempotencyKeyRef.current = '';
-        lastPayloadSignatureRef.current = '';
-        setPendingOrder(null);
-        if (typeof window !== 'undefined') {
-          sessionStorage.removeItem('jio_pending_order');
-        }
-      } else {
-        setAppliedCoupon(null);
-        setCouponError(data.message || `Coupon code "${code}" is invalid for this order.`);
-        setCouponSuccessMsg(null);
-      }
-    } catch {
-      setCouponError('Network error validating coupon. Please check connection and try again.');
-      setCouponSuccessMsg(null);
-    } finally {
-      setCouponLoading(false);
-    }
-  };
-
-  const handleRemoveCoupon = () => {
-    setAppliedCoupon(null);
-    setCouponInput('');
-    setCouponError(null);
-    setCouponSuccessMsg(null);
-    idempotencyKeyRef.current = '';
-    lastPayloadSignatureRef.current = '';
-    setPendingOrder(null);
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('jio_pending_order');
-    }
-  };
-
   const handleStartFresh = () => {
     setPendingOrder(null);
     setErrorMsg('');
-    setAppliedCoupon(null);
-    setCouponInput('');
-    setCouponError(null);
-    setCouponSuccessMsg(null);
     idempotencyKeyRef.current = '';
     lastPayloadSignatureRef.current = '';
     if (typeof window !== 'undefined') {
@@ -721,7 +630,6 @@ export default function BookingPage() {
       photos: [], // Photo upload removed per user requirement
       notes: instructions,
       financialDirection: 'CUSTOMER_PAYS' as const,
-      couponCode: appliedCoupon?.code || undefined,
     };
 
     const currentPayloadSignature = JSON.stringify({
@@ -739,7 +647,6 @@ export default function BookingPage() {
       pickupType,
       scheduledSlot: pickupType === 'SCHEDULED' ? formattedScheduledSlot : null,
       notes: instructions.trim(),
-      couponCode: appliedCoupon?.code || '',
     });
 
     // Ensure session-stable idempotency key:
@@ -781,10 +688,6 @@ export default function BookingPage() {
         if (res.status === 409 || errorCode === 'IDEMPOTENCY_CONFLICT') {
           idempotencyKeyRef.current = '';
           lastPayloadSignatureRef.current = '';
-        }
-        if (errorCode === 'INVALID_COUPON') {
-          setAppliedCoupon(null);
-          setCouponError(errorMsg);
         }
         setLoading(false);
         isSubmittingRef.current = false;
@@ -1586,124 +1489,6 @@ export default function BookingPage() {
             </div>
           </div>
 
-          {/* PROMO / COUPON CODE SECTION */}
-          <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-200/80 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
-                <Ticket className="w-4 h-4 text-emerald-600" />
-                Have a Promo Coupon?
-              </span>
-              <Link
-                href="/customer/coupons"
-                target="_blank"
-                className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 hover:underline flex items-center gap-1"
-              >
-                View Available Offers →
-              </Link>
-            </div>
-
-            {appliedCoupon ? (
-              <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-3 flex items-center justify-between animate-scale-in">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
-                    <Check className="w-4 h-4 text-emerald-600 stroke-[2.5]" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-black text-emerald-900 bg-emerald-200/80 px-2 py-0.5 rounded">
-                        {appliedCoupon.code}
-                      </span>
-                      <span className="text-xs font-bold text-emerald-700">
-                        ₹{appliedCoupon.discountAmount.toFixed(2)} OFF
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-emerald-800 mt-0.5">
-                      {couponSuccessMsg || 'Coupon successfully applied!'}
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleRemoveCoupon}
-                  className="text-xs font-bold text-slate-500 hover:text-rose-600 p-1.5 rounded-lg hover:bg-white/80 transition-colors flex items-center gap-1 cursor-pointer"
-                  title="Remove coupon"
-                  aria-label="Remove applied coupon"
-                >
-                  <X className="w-4 h-4" />
-                  <span className="hidden sm:inline">Remove</span>
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <input
-                      id="coupon-code-input"
-                      type="text"
-                      value={couponInput}
-                      onChange={(e) => {
-                        setCouponInput(e.target.value.toUpperCase());
-                        if (couponError) setCouponError(null);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          handleApplyCoupon();
-                        }
-                      }}
-                      placeholder="e.g. WELCOME50 or SOUTHBLR20"
-                      aria-label="Enter promo coupon code"
-                      className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold uppercase text-slate-900 placeholder:text-slate-400 placeholder:normal-case placeholder:font-normal focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                    />
-                  </div>
-
-                  <button
-                    type="button"
-                    disabled={couponLoading || !couponInput.trim()}
-                    onClick={() => handleApplyCoupon()}
-                    className="btn-glossy-dark rounded-full text-xs font-bold px-5 py-2.5 shadow-sm transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
-                  >
-                    {couponLoading ? (
-                      <>
-                        <Clock className="w-3.5 h-3.5 animate-spin" />
-                        Checking...
-                      </>
-                    ) : (
-                      'Apply'
-                    )}
-                  </button>
-                </div>
-
-                {/* Popular suggestions chips */}
-                <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 pt-0.5">
-                  <span className="font-medium">Quick apply:</span>
-                  <button
-                    type="button"
-                    onClick={() => handleApplyCoupon('WELCOME50')}
-                    className="font-mono font-bold text-[10px] text-emerald-800 bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 px-2.5 py-1 rounded-full cursor-pointer transition-all shadow-xs"
-                  >
-                    WELCOME50 (₹50 off)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleApplyCoupon('SOUTHBLR20')}
-                    className="font-mono font-bold text-[10px] text-emerald-800 bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 px-2.5 py-1 rounded-full cursor-pointer transition-all shadow-xs"
-                  >
-                    SOUTHBLR20 (20% off)
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {couponError && (
-              <div role="alert" className="p-2.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg text-xs font-medium flex items-center gap-2 animate-scale-in">
-                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                <span>{couponError}</span>
-              </div>
-            )}
-          </div>
-
           {/* FINANCIAL SUMMARY BOX */}
           <div className="bg-slate-900 text-white p-4 sm:p-5 rounded-xl space-y-2.5 shadow-sm border border-slate-800">
             <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800 pb-2">
@@ -1717,10 +1502,10 @@ export default function BookingPage() {
               <span>Pickup Service Charge:</span>
               <span>₹{estimate.baseCharge.toFixed(2)}</span>
             </div>
-            {estimate.discountAmount > 0 && (
-              <div className="flex items-center justify-between text-xs text-emerald-400 font-bold bg-emerald-950/60 p-2 rounded-lg border border-emerald-800/60">
-                <span>Coupon Discount ({appliedCoupon?.code}):</span>
-                <span>-₹{estimate.discountAmount.toFixed(2)}</span>
+            {estimate.totalWasteCharge > 0 && (
+              <div className="flex items-center justify-between text-xs text-slate-300">
+                <span>Disposal / Bulky Charge:</span>
+                <span>₹{estimate.totalWasteCharge.toFixed(2)}</span>
               </div>
             )}
             <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between text-sm font-bold">

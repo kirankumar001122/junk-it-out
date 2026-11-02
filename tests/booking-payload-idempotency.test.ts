@@ -64,25 +64,6 @@ async function runTests() {
   });
   assert.notEqual(hash1, alteredSlotHash, 'Altering pickup slot must change payload hash');
 
-  // Verify applying or altering coupon changes the payload hash
-  const couponHash = createOrderPayloadHash({
-    ...baseInput,
-    couponCode: 'WELCOME50',
-  });
-  assert.notEqual(hash1, couponHash, 'Applying coupon code must change payload hash');
-
-  const couponCaseHash = createOrderPayloadHash({
-    ...baseInput,
-    couponCode: 'welcome50',
-  });
-  assert.equal(couponHash, couponCaseHash, 'Coupon code canonicalization must be case-insensitive');
-
-  const differentCouponHash = createOrderPayloadHash({
-    ...baseInput,
-    couponCode: 'SOUTHBLR20',
-  });
-  assert.notEqual(couponHash, differentCouponHash, 'Different coupon code must change payload hash');
-
   console.log('✓ Payload hash sensitivity tests passed');
 
   // Mock DB dependencies for createOrder

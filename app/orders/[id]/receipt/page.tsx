@@ -284,8 +284,29 @@ export default function ReceiptPage() {
               <strong>{totalWeight === null ? 'N/A' : `${totalWeight} kg`}</strong>
             </div>
 
+            <div className="settlement-row">
+              <span>Scrap Valuation</span>
+              <strong className="text-emerald-700">
+                {formatAmount(order.actualTotal ?? order.estimatedTotal ?? 0)}
+              </strong>
+            </div>
+
+            <div className="settlement-row">
+              <span>Pickup Service Charge</span>
+              <strong>
+                {formatAmount(order.pickupCharge)}
+                <span className="text-[10px] text-slate-500 font-normal ml-1">
+                  ({(order.paymentStatus === 'CAPTURED' || order.paymentStatus === 'SUCCESS') ? 'Paid at booking' : 'Pending'})
+                </span>
+              </strong>
+            </div>
+
             <div className="final-amount-row">
-              <span>FINAL RECORDED VALUATION</span>
+              <span>
+                {order.financialDirection === 'JUNKITOUT_PAYS'
+                  ? 'CUSTOMER PAYOUT AMOUNT'
+                  : 'AMOUNT PAYABLE'}
+              </span>
 
               <strong>
                 {formatAmount(order.finalAmount)}
