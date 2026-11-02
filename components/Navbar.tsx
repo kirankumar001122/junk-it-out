@@ -172,22 +172,26 @@ export default function Navbar() {
             <Bell className="h-4 w-4" />
           </Link>
 
-          <button
-            onClick={() => setCartOpen(true)}
-            className="btn-glossy-dark relative z-10 grid h-9 w-9 shrink-0 place-items-center overflow-visible rounded-full text-white shadow-lg shadow-slate-900/10 active:scale-95 sm:h-10 sm:w-10"
-            aria-label={`Shopping cart, ${cartCount} ${cartCount === 1 ? 'item' : 'items'}`}
-          >
-            <ShoppingBasket className="h-4.5 w-4.5" />
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setCartOpen(true)}
+              className="btn-glossy-dark grid h-9 w-9 shrink-0 place-items-center rounded-full text-white shadow-lg shadow-slate-900/10 active:scale-95 sm:h-10 sm:w-10 cursor-pointer"
+              aria-label={`Shopping cart, ${cartCount} ${cartCount === 1 ? 'item' : 'items'}`}
+            >
+              <ShoppingBasket className="h-4.5 w-4.5" />
+            </button>
             {cartCount > 0 && (
               <span
+                onClick={() => setCartOpen(true)}
                 aria-live="polite"
                 aria-label={`${cartCount} ${cartCount === 1 ? 'item' : 'items'} in cart`}
-                className="absolute -right-1 -top-1 z-10 grid h-5 min-w-5 place-items-center rounded-full border-2 border-white bg-emerald-500 px-1 text-[10px] font-bold leading-none text-slate-950 shadow-md animate-scale-in"
+                className="pointer-events-auto absolute -top-1.5 -right-1.5 z-20 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-white bg-emerald-500 px-1.5 text-[10px] font-extrabold leading-none tracking-tight text-slate-950 shadow-md select-none cursor-pointer animate-scale-in whitespace-nowrap"
               >
-                {cartCount}
+                {cartCount > 99 ? '99+' : cartCount}
               </span>
             )}
-          </button>
+          </div>
         </div>
       </div>
 
