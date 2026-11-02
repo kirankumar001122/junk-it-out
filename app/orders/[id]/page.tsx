@@ -15,11 +15,15 @@ import {
   Star,
   RefreshCw,
   ShieldCheck,
+  ShieldAlert,
+  LogIn,
+  WifiOff,
   FileText,
   Camera,
   XCircle,
   X,
 } from "lucide-react";
+import CustomerOtpLogin from "@/components/CustomerOtpLogin";
 import InteractiveMap from "@/components/InteractiveMap";
 import { getSecurePhotoUrl } from "@/lib/utils/photoUrl";
 import { getApiErrorMessage } from "@/lib/utils/apiErrorMessage";
@@ -51,11 +55,17 @@ export default function OrderTrackingPage() {
   const params = useParams();
   const router = useRouter();
 
-  const id = params?.id as string;
+  const rawParamId = params?.id;
+  const id = typeof rawParamId === 'string'
+    ? decodeURIComponent(rawParamId).trim()
+    : (Array.isArray(rawParamId) ? decodeURIComponent(rawParamId[0]).trim() : '');
 
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<number | 'NETWORK_ERROR' | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
+  const [loginOpen, setLoginOpen] = useState(false);
 
   const [agentLocation, setAgentLocation] = useState<AgentLocationSnapshot | null>(
     null,
@@ -124,22 +134,25 @@ export default function OrderTrackingPage() {
     const controller = new AbortController();
     orderRequestControllerRef.current = { orderId: id, controller };
     try {
-      const res = await fetch(`/api/orders/${id}`, {
+      const res = await fetch(`/api/orders/${encodeURIComponent(id)}`, {
+        credentials: "same-origin",
         cache: "no-store",
         signal: controller.signal,
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
 
       // A slow older poll must not overwrite a response received later.
       if (controller.signal.aborted || requestId !== orderRequestRef.current) return;
 
-      if (res.ok && data.success && data.data && typeof data.data === "object") {
+      if (res.ok && data?.success && data?.data && typeof data.data === "object") {
         const o = data.data;
 
         orderRef.current = o;
         setOrder(o);
         setErrorMsg(null);
+        setErrorStatus(null);
+        setErrorCode(null);
 
         const assignedAgentId = o.agentId ?? o.agent?.id;
         if (assignedAgentId && o.id) {
@@ -175,6 +188,8 @@ export default function OrderTrackingPage() {
           setAgentLocation(null);
         }
       } else if (isInitial) {
+        setErrorStatus(res.status);
+        setErrorCode(data?.error?.code ?? null);
         setErrorMsg(
           getApiErrorMessage(data, `Unable to load order details for #${id}`),
         );
@@ -184,6 +199,7 @@ export default function OrderTrackingPage() {
       console.error(e);
 
       if (isInitial) {
+        setErrorStatus('NETWORK_ERROR');
         setErrorMsg("Network connection error while fetching order details.");
       }
     } finally {
@@ -439,23 +455,90 @@ export default function OrderTrackingPage() {
   }
 
   if (errorMsg || !order) {
+    const isUnauthorized = errorStatus === 401 || errorCode === 'UNAUTHORIZED';
+    const isForbidden = errorStatus === 403 || errorCode === 'FORBIDDEN';
+    const isNotFound = errorStatus === 404 || errorCode === 'ORDER_NOT_FOUND';
+    const isNetworkError = errorStatus === 'NETWORK_ERROR';
+    const isServerError =
+      (typeof errorStatus === 'number' && errorStatus >= 500) ||
+      errorCode === 'INTERNAL_SERVER_ERROR' ||
+      errorCode === 'DATABASE_UNAVAILABLE';
+
+    let title = "Order Access Restricted";
+    let message = errorMsg || "Unable to load this pickup order.";
+    let iconBg = "bg-rose-100 text-rose-600";
+    let IconComponent = AlertCircle;
+
+    if (isUnauthorized) {
+      title = "Sign In Required";
+      message = "Please sign in with your mobile number to view this pickup order and live tracking.";
+      iconBg = "bg-amber-100 text-amber-600";
+      IconComponent = ShieldAlert;
+    } else if (isNotFound) {
+      title = "Order Not Found";
+      message = errorMsg || `We couldn't find pickup order #${id}. Please check the order number and try again.`;
+      iconBg = "bg-slate-100 text-slate-600";
+      IconComponent = AlertCircle;
+    } else if (isForbidden) {
+      title = "Order Access Restricted";
+      message = errorMsg || "You are not authorized to view details for this order. It belongs to a different account.";
+      iconBg = "bg-rose-100 text-rose-600";
+      IconComponent = ShieldAlert;
+    } else if (isNetworkError) {
+      title = "Connection Error";
+      message = "Unable to connect to the server. Please check your internet connection and try again.";
+      iconBg = "bg-amber-100 text-amber-600";
+      IconComponent = WifiOff;
+    } else if (isServerError) {
+      title = "Unable to Load Order";
+      message = errorMsg || "A temporary server error occurred while retrieving order details. Please try again.";
+      iconBg = "bg-rose-100 text-rose-600";
+      IconComponent = AlertCircle;
+    }
+
     return (
       <div className="max-w-md mx-auto px-4 py-16 text-center space-y-4">
-        <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto">
-          <AlertCircle className="w-8 h-8" />
+        <div className={`w-16 h-16 ${iconBg} rounded-full flex items-center justify-center mx-auto`}>
+          <IconComponent className="w-8 h-8" />
         </div>
 
         <div>
           <h2 className="text-xl font-black text-slate-900 mb-1">
-            Order Access Restricted
+            {title}
           </h2>
 
           <p className="text-xs text-slate-600 leading-relaxed font-medium">
-            {errorMsg || "Unable to load this pickup order."}
+            {message}
           </p>
         </div>
 
-        <div className="pt-2 flex justify-center gap-3">
+        <div className="pt-2 flex flex-wrap justify-center gap-3">
+          {isUnauthorized && (
+            <button
+              onClick={() => setLoginOpen(true)}
+              className="btn-glossy-primary rounded-full text-xs font-bold px-6 py-3 shadow-md uppercase tracking-wider flex items-center gap-1.5"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              Sign In with OTP
+            </button>
+          )}
+
+          {(isServerError || isNetworkError) && (
+            <button
+              onClick={() => {
+                setLoading(true);
+                setErrorMsg(null);
+                setErrorStatus(null);
+                setErrorCode(null);
+                void fetchOrderDetails(true);
+              }}
+              className="btn-glossy-primary rounded-full text-xs font-bold px-6 py-3 shadow-md uppercase tracking-wider flex items-center gap-1.5"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Retry
+            </button>
+          )}
+
           <button
             onClick={() => router.push("/my-pickups")}
             className="btn-glossy-primary rounded-full text-xs font-bold px-6 py-3 shadow-md uppercase tracking-wider"
@@ -470,6 +553,19 @@ export default function OrderTrackingPage() {
             Return Home
           </button>
         </div>
+
+        <CustomerOtpLogin
+          open={loginOpen}
+          onClose={() => setLoginOpen(false)}
+          onAuthenticated={() => {
+            setLoginOpen(false);
+            setLoading(true);
+            setErrorMsg(null);
+            setErrorStatus(null);
+            setErrorCode(null);
+            void fetchOrderDetails(true);
+          }}
+        />
       </div>
     );
   }

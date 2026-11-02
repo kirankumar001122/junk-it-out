@@ -15,7 +15,14 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const rawParams = await params;
+    const rawId = rawParams?.id;
+    const id = typeof rawId === 'string' ? decodeURIComponent(rawId).trim() : '';
+
+    if (!id) {
+      return errorResponse('INVALID_ORDER_ID', 'A valid order identifier is required.', 400);
+    }
+
     const authUser = await getAuthUser(req);
 
     // Role-based Ownership Authorization Check
@@ -23,9 +30,13 @@ export async function GET(
       return errorResponse('UNAUTHORIZED', 'Authentication is required to view order details.', 401);
     }
 
+    const orderWhere = id.toUpperCase() !== id && id.toLowerCase().startsWith('jio-')
+      ? { OR: [{ id }, { orderNumber: id }, { orderNumber: id.toUpperCase() }] }
+      : getOrderIdentifierWhere(id);
+
     const order = authUser.role === 'AGENT'
       ? await db.order.findFirst({
-          where: getOrderIdentifierWhere(id),
+          where: orderWhere,
           select: {
             id: true,
             orderNumber: true,
@@ -62,7 +73,7 @@ export async function GET(
           },
         })
       : await db.order.findFirst({
-          where: getOrderIdentifierWhere(id),
+          where: orderWhere,
           include: {
             customer: {
               include: {
@@ -106,7 +117,6 @@ export async function GET(
       }
 
       if (!isAssignedAgent) {
-
         const agent = authUser.agentId
           ? await db.agent.findUnique({
               where: { id: authUser.agentId },
@@ -163,6 +173,20 @@ export async function GET(
     return successResponse({ ...order, locations });
   } catch (err: any) {
     console.error('Fetch order detail error:', err);
-    return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to retrieve order details.', 500);
+    const errorMessage = String(err?.message || '');
+    const databaseUnavailable =
+      errorMessage.includes('Can\'t reach database server') ||
+      errorMessage.includes('Authentication failed against database server') ||
+      errorMessage.includes('P1001') ||
+      errorMessage.includes('P1000') ||
+      errorMessage.includes('[YOUR-PASSWORD]');
+
+    return errorResponse(
+      databaseUnavailable ? 'DATABASE_UNAVAILABLE' : 'INTERNAL_SERVER_ERROR',
+      databaseUnavailable
+        ? 'Order tracking is temporarily unavailable because the database is unreachable. Please try again shortly.'
+        : 'Failed to retrieve order details.',
+      databaseUnavailable ? 503 : 500
+    );
   }
 }
