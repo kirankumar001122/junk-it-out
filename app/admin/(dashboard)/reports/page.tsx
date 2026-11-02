@@ -1,19 +1,41 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { FileBarChart, Download, TrendingUp, Scale, Clock, ShieldCheck, Package } from 'lucide-react';
+import { Download } from 'lucide-react';
 
 export default function AdminReportsPage() {
   const [stats, setStats] = useState<any>(null);
+  const [statsError, setStatsError] = useState(false);
+  const [statsLoading, setStatsLoading] = useState(true);
 
   useEffect(() => {
+    let active = true;
+
     fetch('/api/admin/stats')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) setStats(data.data);
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          throw new Error('Failed to load report statistics.');
+        }
+        if (active) setStats(data.data);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (active) setStatsError(true);
+      })
+      .finally(() => {
+        if (active) setStatsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
+
+  const metricValue = (value: number | undefined) => {
+    if (statsLoading) return 'Loading…';
+    if (statsError) return 'Unavailable';
+    return value ?? 0;
+  };
 
   return (
     <div className="space-y-6">
@@ -23,7 +45,7 @@ export default function AdminReportsPage() {
             Business Intelligence
           </span>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-1">Reports & Analytics</h1>
-          <p className="text-xs text-slate-500">Waste volume trends, agent SLA compliance, & financial export reports</p>
+          <p className="text-xs text-slate-500">Operational totals, settlement records, and dispatch SLA metrics</p>
         </div>
 
         <a
@@ -35,52 +57,34 @@ export default function AdminReportsPage() {
         </a>
       </div>
 
+      {statsError && (
+        <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          Report statistics could not be loaded. Refresh the page to try again.
+        </p>
+      )}
+
       {/* Metrics Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-2">
           <span className="text-xs font-bold text-slate-500 uppercase">Total Completed Pickups</span>
-          <span className="text-3xl font-black text-slate-900 block">{stats?.completedOrders || 342}</span>
-          <span className="text-[11px] text-emerald-600 font-bold">↑ 14% vs last month</span>
+          <span className="text-3xl font-black text-slate-900 block">{metricValue(stats?.completedPickups)}</span>
         </div>
 
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-2">
-          <span className="text-xs font-bold text-slate-500 uppercase">Total Waste Diverted (kg)</span>
-          <span className="text-3xl font-black text-slate-900 block">{stats?.totalWeightKg || 12450} <span className="text-base text-slate-500">kg</span></span>
-          <span className="text-[11px] text-emerald-600 font-bold">100% Certified Recycled</span>
+          <span className="text-xs font-bold text-slate-500 uppercase">Total Waste Collected (kg)</span>
+          <span className="text-3xl font-black text-slate-900 block">{metricValue(stats?.totalWeightKg)} <span className="text-base text-slate-500">kg</span></span>
         </div>
 
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-2">
-          <span className="text-xs font-bold text-slate-500 uppercase">Scrap Customer Payouts</span>
-          <span className="text-3xl font-black text-slate-900 block">₹{stats?.totalCustomerPayouts || 184500}</span>
-          <span className="text-[11px] text-slate-500 font-medium">Direct UPI & Cash Payouts</span>
+          <span className="text-xs font-bold text-slate-500 uppercase">Customer Settlement Records</span>
+          <span className="text-3xl font-black text-slate-900 block">₹{metricValue(stats?.totalCustomerPayouts)}</span>
+          <span className="text-[11px] text-slate-500 font-medium">Ledger total; not proof of transfer</span>
         </div>
 
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-2">
           <span className="text-xs font-bold text-slate-500 uppercase">Dispatch SLA Target</span>
-          <span className="text-3xl font-black text-emerald-600 block">{stats?.slaOnTimeRate || 96.4}%</span>
+          <span className="text-3xl font-black text-emerald-600 block">{metricValue(stats?.slaOnTimeRate)}%</span>
           <span className="text-[11px] text-emerald-700 font-bold">Under 30 Min Arrival</span>
-        </div>
-      </div>
-
-      {/* Analytics Breakdown Card */}
-      <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
-        <h2 className="text-lg font-extrabold text-slate-900">South Bengaluru Volume Breakdown</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
-            <span className="text-xs font-bold text-slate-500 block">JP Nagar Hub</span>
-            <span className="text-2xl font-black text-slate-900">42% Volume</span>
-            <p className="text-[11px] text-slate-500">Avg ETA: 21 mins</p>
-          </div>
-          <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
-            <span className="text-xs font-bold text-slate-500 block">Jayanagar Hub</span>
-            <span className="text-2xl font-black text-slate-900">31% Volume</span>
-            <p className="text-[11px] text-slate-500">Avg ETA: 24 mins</p>
-          </div>
-          <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
-            <span className="text-xs font-bold text-slate-500 block">Electronic City & HSR</span>
-            <span className="text-2xl font-black text-slate-900">27% Volume</span>
-            <p className="text-[11px] text-slate-500">Avg ETA: 27 mins</p>
-          </div>
         </div>
       </div>
     </div>

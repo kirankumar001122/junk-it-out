@@ -25,12 +25,13 @@ export function successResponse<T>(data: T, status = 200, meta?: Record<string, 
 }
 
 export function errorResponse(code: string, message: string, status = 400, details?: any) {
+  const isInternalError = status >= 500;
   const body: ApiErrorResponse = {
     success: false,
     error: {
       code,
-      message,
-      ...(details ? { details } : {}),
+      message: isInternalError ? 'An unexpected error occurred. Please try again.' : message,
+      ...(!isInternalError && details ? { details } : {}),
     },
   };
   return NextResponse.json(body, { status });

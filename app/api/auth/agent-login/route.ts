@@ -57,6 +57,10 @@ export async function POST(req: NextRequest) {
       include: { agent: true },
     });
 
+    if (user && ['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
+      return errorResponse('FORBIDDEN', 'Admin accounts cannot use the agent portal.', 403);
+    }
+
     if (isAuthorizedAgentNumber) {
       if (!user) {
         // Create official agent user

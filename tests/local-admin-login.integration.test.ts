@@ -89,6 +89,25 @@ async function run(): Promise<void> {
       "the existing Admin record must be visible to admin authorization",
     );
 
+    const { POST: agentLogin } = await import("../app/api/auth/agent-login/route");
+    const agentLoginResponse = await agentLogin(
+      new NextRequest("http://localhost:3000/api/auth/agent-login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          origin: "http://localhost:3000",
+          host: "localhost:3000",
+        },
+        body: JSON.stringify({ phone: "+917842259582", code: "123456" }),
+      }),
+    );
+    assert.equal(agentLoginResponse.status, 403, "an admin account must not enter the agent portal");
+    const accountAfterAgentLogin = await db.user.findUnique({
+      where: { id: accounts[0].id },
+      select: { role: true },
+    });
+    assert.equal(accountAfterAgentLogin?.role, "ADMIN", "agent login must preserve the ADMIN role");
+
     console.log("Local DB admin login and admin API authorization integration test passed.");
   } finally {
     await db.$disconnect();

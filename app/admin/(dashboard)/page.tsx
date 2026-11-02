@@ -220,11 +220,11 @@ export default function AdminDashboardPage() {
                 <Package className="w-4 h-4" />
               </div>
             </div>
-            <span className="text-3xl font-black text-slate-900">{stats?.totalOrders || 0}</span>
+            <span className="text-3xl font-black text-slate-900">{stats?.todaysBookings ?? 0}</span>
             <div className="flex items-center gap-2 mt-2 text-xs">
               <span className="text-amber-600 font-bold">{stats?.activeOrders || 0} Active</span>
               <span className="text-slate-400">|</span>
-              <span className="text-emerald-600 font-bold">{stats?.completedOrders || 0} Completed</span>
+              <span className="text-emerald-600 font-bold">{stats?.completedPickups ?? 0} Completed</span>
             </div>
           </div>
 
@@ -241,17 +241,18 @@ export default function AdminDashboardPage() {
 
           <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-slate-500 uppercase">Revenue & Payouts</span>
+              <span className="text-xs font-bold text-slate-500 uppercase">Revenue & Settlements</span>
               <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
                 <CreditCard className="w-4 h-4" />
               </div>
             </div>
             <span className="text-3xl font-black text-slate-900">₹{stats?.totalRevenue || 0}</span>
             <div className="flex items-center gap-2 mt-2 text-xs">
-              <span className="text-emerald-700 font-bold">₹{stats?.paidCustomerPayouts ?? stats?.totalCustomerPayouts ?? 0} Paid</span>
+              <span className="text-emerald-700 font-bold">₹{stats?.paidCustomerPayouts ?? stats?.totalCustomerPayouts ?? 0} Settlement records complete</span>
               <span className="text-slate-300">|</span>
-              <span className="text-amber-700 font-bold">₹{stats?.approvedCustomerPayouts || 0} Approved</span>
+              <span className="text-amber-700 font-bold">₹{stats?.approvedCustomerPayouts || 0} Approved records</span>
             </div>
+            <p className="text-[10px] text-slate-500 mt-1">Ledger status does not verify an external transfer.</p>
           </div>
 
           <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
@@ -261,7 +262,7 @@ export default function AdminDashboardPage() {
                 <Clock className="w-4 h-4" />
               </div>
             </div>
-            <span className="text-3xl font-black text-emerald-600">{stats?.slaOnTimeRate || 96.4}%</span>
+            <span className="text-3xl font-black text-emerald-600">{stats?.slaOnTimeRate ?? 0}%</span>
             <div className="flex items-center gap-1 mt-2 text-xs font-bold text-emerald-700">
               <ShieldCheck className="w-4 h-4" />
               <span>Target 30 Mins Compliant</span>

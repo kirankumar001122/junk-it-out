@@ -2,23 +2,34 @@ import { NextRequest } from 'next/server';
 import { verifyToken, JwtPayload } from './jwt';
 import { db } from '../db';
 
-async function validatePayload(payload: JwtPayload | null): Promise<JwtPayload | null> {
+type AgentTokenVersionLookup = (
+  agentId: string,
+) => Promise<{ tokenVersion?: number | null } | null>;
+
+export async function validatePayload(
+  payload: JwtPayload | null,
+  findAgent: AgentTokenVersionLookup = async (agentId) =>
+    db.agent.findUnique({
+      where: { id: agentId },
+      select: { tokenVersion: true } as any,
+    }) as Promise<{ tokenVersion?: number | null } | null>,
+): Promise<JwtPayload | null> {
   if (!payload) return null;
 
   if (payload.role === 'AGENT' && payload.agentId) {
     try {
-      const agent = await db.agent.findUnique({
-        where: { id: payload.agentId },
-        select: { tokenVersion: true } as any,
-      });
+      const agent = await findAgent(payload.agentId);
       if (!agent) return null;
-      const currentDbVersion = (agent as any).tokenVersion ?? 1;
+      const currentDbVersion = agent.tokenVersion ?? 1;
       const tokenVersion = payload.tokenVersion ?? 1;
       if (tokenVersion < currentDbVersion) {
         return null;
       }
     } catch (e) {
-      console.error('Agent token version check error:', e);
+      console.error('Agent token version validation failed:', {
+        errorType: e instanceof Error ? e.name : 'UnknownError',
+      });
+      return null;
     }
   }
 

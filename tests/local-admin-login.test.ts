@@ -34,6 +34,7 @@ async function run(): Promise<void> {
     email: null,
     role: "ADMIN",
     admin: { id: "preserved-admin-record", userId: "existing-agent-user", accessLevel: "FULL" },
+    agent: { id: "preserved-agent-record", userId: "existing-agent-user", status: "AVAILABLE" },
     customer: { id: "preserved-customer-record" },
   };
   userDelegate.findFirst = async () => ({ ...existingAdminUser });
@@ -69,6 +70,21 @@ async function run(): Promise<void> {
       null,
       "agent sessions must not pass admin authorization",
     );
+
+    const { POST: agentLogin } = await import("../app/api/auth/agent-login/route");
+    const agentLoginResponse = await agentLogin(
+      new NextRequest("http://localhost:3000/api/auth/agent-login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          origin: "http://localhost:3000",
+          host: "localhost:3000",
+        },
+        body: JSON.stringify({ phone: "+917842259582", code: "123456" }),
+      }),
+    );
+    assert.equal(agentLoginResponse.status, 403);
+    assert.equal(existingAdminUser.role, "ADMIN", "agent login must not demote admin accounts");
 
     console.log("Existing ADMIN account login and authorization recognition test passed.");
   } finally {
