@@ -44,7 +44,10 @@ async function testOrderDetailRouteLookupAndOwnership() {
     customer: { userId: "user-1" },
     agentId: null,
   };
-  orderDelegate.findFirst = async ({ where }: { where: { OR: Array<Record<string, string>> } }) => {
+  let capturedQueryArgs: any = null;
+  orderDelegate.findFirst = async (args: any) => {
+    capturedQueryArgs = args;
+    const { where } = args;
     const matches = where.OR.some((candidate) =>
       candidate.id === order.id || candidate.orderNumber === order.orderNumber,
     );
@@ -76,6 +79,17 @@ async function testOrderDetailRouteLookupAndOwnership() {
     assert.ok(token);
     const byDatabaseId = await requestOrder(databaseId);
     assert.equal(byDatabaseId.status, 200, "an authenticated owner can open the order by UUID");
+    assert.ok(capturedQueryArgs?.include?.settlement?.select, "settlement must be queried with explicit select projection");
+    assert.deepEqual(
+      capturedQueryArgs.include.settlement.select,
+      { totalWeightKg: true, amount: true, status: true },
+      "settlement projection must only request totalWeightKg, amount, and status to prevent unmigrated schema failures",
+    );
+    assert.equal(capturedQueryArgs.include.settlement.select.payoutId, undefined);
+    assert.equal(capturedQueryArgs.include.settlement.select.utr, undefined);
+    assert.equal(capturedQueryArgs.include.settlement.select.payoutMethod, undefined);
+    assert.equal(capturedQueryArgs.include.settlement.select.failureReason, undefined);
+    assert.equal(capturedQueryArgs.include.settlement.select.processedAt, undefined);
 
     const byOrderNumber = await requestOrder(orderNumber);
     assert.equal(byOrderNumber.status, 200, "an authenticated owner can open the order by pickup number");
