@@ -68,7 +68,8 @@ export async function POST(
 
     for (const itemInput of actualWeights) {
       const itemId = itemInput?.itemId;
-      const dbItem = typeof itemId === 'string' ? orderItemsById.get(itemId) : undefined;
+      const dbItem = (typeof itemId === 'string' && orderItemsById.get(itemId)) ||
+        order.items.find((i) => !matchedItemIds.has(i.id) && (i.categoryId === itemInput?.categoryId || i.id === itemInput?.categoryId));
 
       if (!dbItem) {
         return errorResponse('INVALID_WEIGH_DATA', 'Each actual weight must reference a valid order item ID.', 400);
@@ -88,7 +89,7 @@ export async function POST(
     if (matchedItemIds.size !== order.items.length) {
       return errorResponse(
         'INVALID_WEIGH_DATA',
-        `Incomplete weighing: all ${order.items.length} order items must be weighed. Received weights for ${matchedItemIds.size}.`,
+        `All order items must have actual weights recorded. Incomplete weighing: all ${order.items.length} order items must be weighed. Received weights for ${matchedItemIds.size}.`,
         400
       );
     }
@@ -101,9 +102,9 @@ export async function POST(
       const txMatchedItemIds = new Set<string>();
 
       for (const itemInput of actualWeights) {
-        const dbItem = order.items.find(
-          (i) => (itemInput?.itemId && i.id === itemInput.itemId) || i.categoryId === itemInput.categoryId || i.id === itemInput.categoryId
-        );
+        const itemId = itemInput?.itemId;
+        const dbItem = (typeof itemId === 'string' && orderItemsById.get(itemId)) ||
+          order.items.find((i) => !txMatchedItemIds.has(i.id) && (i.categoryId === itemInput.categoryId || i.id === itemInput.categoryId));
         if (dbItem) {
           if (txMatchedItemIds.has(dbItem.id)) {
             throw new Error('Duplicate weight entry for the same order item.');
@@ -126,6 +127,9 @@ export async function POST(
         order.discountAmount
       );
 
+      if (txMatchedItemIds.size !== order.items.length) {
+        throw new Error('Incomplete weighing submission: all order items must be weighed.');
+      }
       const actualTotalRecyclable = valuation.totalRecyclableValue;
       const financialDirection = valuation.financialDirection;
       const finalAmount = valuation.netAmount;
@@ -273,7 +277,7 @@ export async function POST(
       return updated;
     }, {
       maxWait: 10000,
-      timeout: 15000,
+      timeout: 25000,
     });
 
     broadcaster.broadcast('ORDER_UPDATED', updatedOrder);

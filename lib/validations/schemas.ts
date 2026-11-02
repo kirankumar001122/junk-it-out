@@ -94,8 +94,33 @@ export function validateCreateOrderInput(body: any): { valid: boolean; error?: s
     return { valid: false, error: 'Pickup type must be ASAP or SCHEDULED.' };
   }
 
-  if (body.pickupType === 'SCHEDULED' && (!body.scheduledSlot || typeof body.scheduledSlot !== 'string')) {
-    return { valid: false, error: 'A valid date and time slot must be selected for scheduled pickups.' };
+  if (body.pickupType === 'SCHEDULED') {
+    if (!body.scheduledSlot || typeof body.scheduledSlot !== 'string' || body.scheduledSlot.trim().length === 0) {
+      return { valid: false, error: 'A valid date and time slot must be selected for scheduled pickups.' };
+    }
+
+    const slotStr = body.scheduledSlot.trim();
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    const dateMatch = slotStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (dateMatch) {
+      const slotDate = new Date(`${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}T23:59:59`);
+      if (slotDate < todayStart) {
+        return { valid: false, error: 'Scheduled pickup date cannot be in the past.' };
+      }
+    } else {
+      const monthMatch = slotStr.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:,?\s+(\d{4}))?/i);
+      if (monthMatch) {
+        const monthName = monthMatch[1];
+        const day = parseInt(monthMatch[2], 10);
+        const year = monthMatch[3] ? parseInt(monthMatch[3], 10) : now.getFullYear();
+        const slotDate = new Date(`${monthName} ${day}, ${year} 23:59:59`);
+        if (!isNaN(slotDate.getTime()) && slotDate < todayStart) {
+          return { valid: false, error: 'Scheduled pickup date cannot be in the past.' };
+        }
+      }
+    }
   }
 
   return { valid: true };

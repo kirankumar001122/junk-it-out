@@ -154,6 +154,10 @@ async function runBenchmark() {
   database.orderItem.update = async ({ data }: any) => ({ ...baseOrder.items[0], ...data });
   database.invoice.create = async () => ({ id: 'inv-1', invoiceNumber: 'INV-PERF-1' });
   database.settlement.create = async () => ({ id: 'set-1' });
+  database.serviceArea = {
+    findFirst: async () => ({ id: 'area-1', name: 'Koramangala', status: 'ACTIVE' }),
+    findMany: async () => [{ id: 'area-1', name: 'Koramangala', status: 'ACTIVE', boundaryPolygon: '[]' }],
+  };
   database.$transaction = async (callback: any) => {
     const tx = {
       $queryRaw: async () => [],

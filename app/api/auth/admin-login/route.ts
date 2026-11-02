@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
           { phone: { in: phoneVariants } },
         ],
       },
-      include: { admin: true, customer: true },
+      include: { admin: true, customer: true, agent: true },
     });
 
     const adminRecord = user?.admin || (user?.id ? await db.admin.findUnique({ where: { userId: user.id } }) : null);
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
       name: user.name,
       role: user.role as 'ADMIN' | 'SUPER_ADMIN',
       customerId: user.customer?.id ?? null,
-      agentId: null,
+      agentId: (user as any).agent?.id ?? null,
       adminId: adminRecord.id,
       tokenVersion: (user as any).tokenVersion ?? 1,
     });

@@ -149,6 +149,26 @@ export default function AgentDashboardPage() {
       } else {
         setMultipleActiveWarning(null);
       }
+
+      const unassignedOpen = data.data.filter(
+        (o: any) => !o.agentId && ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED'].includes(o.status)
+      );
+      if (unassignedOpen.length > 0 && !assigned) {
+        const topUnassigned = unassignedOpen[0];
+        const estQty = (topUnassigned.items || []).reduce(
+          (sum: number, it: any) => sum + (Number(it.estimatedWeight) || 0),
+          0
+        );
+        setNewPickupNotice((current: any) => current || {
+          type: 'NEW_PICKUP_AVAILABLE',
+          orderId: topUnassigned.id,
+          orderNumber: topUnassigned.orderNumber,
+          serviceArea: topUnassigned.address?.area || 'Bengaluru',
+          estimatedQuantity: `${estQty.toFixed(1)} kg`,
+          itemsSummary: `${topUnassigned.items?.length || 0} category item(s)`,
+          createdAt: topUnassigned.createdAt,
+        });
+      }
       setActualWeightsInput(
         assigned
           ? (assigned.items || []).map((i: any) => ({
@@ -415,7 +435,7 @@ export default function AgentDashboardPage() {
     let acceptTimeout: number | undefined;
     try {
       const controller = new AbortController();
-      acceptTimeout = window.setTimeout(() => controller.abort(), 15_000);
+      acceptTimeout = window.setTimeout(() => controller.abort(), 30_000);
       const res = await fetch(`/api/orders/${orderId}/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -425,10 +445,12 @@ export default function AgentDashboardPage() {
       const data = await res.json();
 
       if (res.status === 409) {
-        setStatusNotice('This pickup has already been accepted by another agent.');
+        const errorMsg = data.error?.message || data.message || 'This pickup has already been accepted by another agent.';
+        setStatusNotice(errorMsg);
         setTimeout(() => setStatusNotice(null), 5000);
         setViewPickupModal(null);
         setNewPickupNotice(null);
+        alert(errorMsg);
         return;
       }
 
@@ -570,9 +592,20 @@ export default function AgentDashboardPage() {
   const toggleAgentStatus = async () => {
     if (statusRequestRef.current) return;
     statusRequestRef.current = true;
-    const targetStatus = isOnline ? 'OFFLINE' : 'AVAILABLE';
+
+    const previousOnline = isOnline;
+    const previousAgentStatus = agent?.status;
+
+    // Smoothly resolve target status: if offline and has active order, resume as ASSIGNED; else AVAILABLE
+    const targetStatus = isOnline ? 'OFFLINE' : (activeOrder ? 'ASSIGNED' : 'AVAILABLE');
+    const optimisticOnline = targetStatus !== 'OFFLINE';
+
+    // Optimistic UI state for instant response
+    setIsOnline(optimisticOnline);
+    setAgent((prev: any) => (prev ? { ...prev, status: targetStatus } : prev));
     setStatusUpdating(true);
     setStatusNotice(null);
+
     let statusTimeout: number | undefined;
     try {
       const controller = new AbortController();
@@ -587,18 +620,24 @@ export default function AgentDashboardPage() {
       const data = await res.json();
       if (res.ok && data.success) {
         const newStatus = data.data.status;
-        const nowOnline = newStatus === 'AVAILABLE';
+        const nowOnline = newStatus !== 'OFFLINE';
         setIsOnline(nowOnline);
         setAgent((prev: any) => (prev ? { ...prev, status: newStatus } : prev));
         setStatusNotice(`Status updated to ${newStatus}`);
         setTimeout(() => setStatusNotice(null), 3000);
         if (nowOnline) {
-            void fetchAgentData(false);
+          void fetchAgentData(false);
         }
       } else {
+        // Rollback optimistic update on server error
+        setIsOnline(previousOnline);
+        setAgent((prev: any) => (prev ? { ...prev, status: previousAgentStatus } : prev));
         setStatusNotice(data.error?.message || data.message || 'Failed to update status.');
       }
     } catch (e) {
+      // Rollback optimistic update on network exception
+      setIsOnline(previousOnline);
+      setAgent((prev: any) => (prev ? { ...prev, status: previousAgentStatus } : prev));
       setStatusNotice(
         e instanceof DOMException && e.name === 'AbortError'
           ? 'Status update timed out. Please check connection and try again.'
@@ -626,7 +665,7 @@ export default function AgentDashboardPage() {
     let actionTimeout: number | undefined;
     try {
       const controller = new AbortController();
-      actionTimeout = window.setTimeout(() => controller.abort(), 15_000);
+      actionTimeout = window.setTimeout(() => controller.abort(), 30_000);
       const res = await fetch(`/api/orders/${activeOrder.id}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -732,7 +771,7 @@ export default function AgentDashboardPage() {
     let weighTimeout: number | undefined;
     try {
       const controller = new AbortController();
-      weighTimeout = window.setTimeout(() => controller.abort(), 15_000);
+      weighTimeout = window.setTimeout(() => controller.abort(), 30_000);
       // Submit door-to-door scale weights and complete pickup in a single atomic request
       const completeRes = await fetch(`/api/orders/${activeOrder.id}/complete`, {
         method: 'POST',

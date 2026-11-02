@@ -100,36 +100,75 @@ export async function saveCustomerAddress(
     hasExistingDefault?: boolean;
   }
 ) {
-  // Only execute updateMany if there is an existing default address to unset.
-  // Skipping updateMany when the customer has no existing default address eliminates
-  // an empty database write roundtrip over pooled connections.
-  const shouldResetExisting =
-    addressData.isDefault !== false &&
-    options?.hasExistingDefault !== false;
-
-  if (shouldResetExisting) {
-    await db.address.updateMany({
-      where: { userId },
-      data: { isDefault: false },
-    });
+  if (!addressData.houseNo || !addressData.street || !addressData.area) {
+    throw new Error('Missing required address fields.');
   }
 
-  return db.address.create({
-    data: {
-      userId,
-      label: addressData.label || 'Home',
-      name: addressData.name,
-      phone: addressData.phone,
-      houseNo: addressData.houseNo,
-      building: addressData.building || null,
-      street: addressData.street,
-      area: addressData.area,
-      landmark: addressData.landmark || null,
-      pincode: addressData.pincode,
-      lat: addressData.lat,
-      lng: addressData.lng,
-      googlePlaceId: addressData.googlePlaceId || null,
-      isDefault: addressData.isDefault ?? true,
-    },
-  });
+  const numLat = Number(addressData.lat);
+  const numLng = Number(addressData.lng);
+  if (
+    addressData.lat === undefined ||
+    addressData.lng === undefined ||
+    isNaN(numLat) ||
+    isNaN(numLng) ||
+    !Number.isFinite(numLat) ||
+    !Number.isFinite(numLng) ||
+    numLat < -90 ||
+    numLat > 90 ||
+    numLng < -180 ||
+    numLng > 180 ||
+    (numLat === 0 && numLng === 0)
+  ) {
+    throw new Error('Valid GPS latitude and longitude coordinates are required.');
+  }
+
+  const cleanPincode = typeof addressData.pincode === 'string'
+    ? addressData.pincode.trim()
+    : typeof addressData.pincode === 'number'
+    ? String(addressData.pincode)
+    : '';
+  if (!cleanPincode || !/^[1-9][0-9]{5}$/.test(cleanPincode)) {
+    throw new Error('A valid 6-digit Indian pincode is required.');
+  }
+
+  const isDefault = addressData.isDefault ?? true;
+
+  const runTx = async (tx: any) => {
+    const addressClient = tx?.address || db.address;
+    const shouldResetExisting = isDefault && options?.hasExistingDefault !== false;
+    if (shouldResetExisting && typeof addressClient?.updateMany === 'function') {
+      await addressClient.updateMany({
+        where: { userId },
+        data: { isDefault: false },
+      });
+    }
+
+    if (typeof addressClient?.create === 'function') {
+      return addressClient.create({
+        data: {
+          userId,
+          label: addressData.label || 'Home',
+          name: addressData.name,
+          phone: addressData.phone,
+          houseNo: addressData.houseNo,
+          building: addressData.building || null,
+          street: addressData.street,
+          area: addressData.area,
+          landmark: addressData.landmark || null,
+          pincode: cleanPincode,
+          lat: numLat,
+          lng: numLng,
+          googlePlaceId: addressData.googlePlaceId || null,
+          isDefault,
+        },
+      });
+    }
+
+    return null;
+  };
+
+  if (typeof db.$transaction === 'function') {
+    return db.$transaction(runTx);
+  }
+  return runTx(db);
 }

@@ -1,6 +1,9 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { executeAgentAcceptTransaction } from '@/lib/services/agentService';
+import {
+  executeAgentAcceptTransaction,
+  isAgentEligibleForServiceArea,
+} from '@/lib/services/agentService';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
@@ -38,6 +41,14 @@ export async function POST(
       return errorResponse('AGENT_NOT_FOUND', 'Agent profile not found.', 404);
     }
 
+    if (agent.status === 'SUSPENDED' || agent.status === 'DEACTIVATED') {
+      return errorResponse(
+        'FORBIDDEN',
+        'Agent account is inactive or suspended. Please contact the administrator.',
+        403
+      );
+    }
+
     // 3. Load Order & Address for Service Area Matching
     const order = await db.order.findFirst({
       where: {
@@ -52,11 +63,27 @@ export async function POST(
       return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
     }
 
-    const acceptingOwnAssignment =
-      agent.status === 'ASSIGNED' &&
-      order.agentId === agentId &&
-      order.status === 'AGENT_ASSIGNED';
-    if (agent.status !== 'AVAILABLE' && agent.status !== 'ASSIGNED' && !acceptingOwnAssignment) {
+    if (agent.status === 'OFFLINE') {
+      return errorResponse(
+        'AGENT_NOT_AVAILABLE',
+        'Agent is currently offline or unavailable for new pickups.',
+        400
+      );
+    }
+
+    const isOwnOrder = order.agentId === agentId;
+    const canAcceptOrReaccept =
+      isOwnOrder &&
+      ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED', 'AGENT_ASSIGNED', 'AGENT_ACCEPTED'].includes(order.status);
+
+    if (agent.status !== 'AVAILABLE' && !canAcceptOrReaccept) {
+      if (agent.status === 'ASSIGNED') {
+        return errorResponse(
+          'AGENT_HAS_ACTIVE_ORDER',
+          'Finish or cancel the active pickup before accepting another assignment.',
+          409
+        );
+      }
       return errorResponse(
         'AGENT_NOT_AVAILABLE',
         'Agent is currently offline or unavailable for new pickups.',
@@ -101,26 +128,62 @@ export async function POST(
       return errorResponse('PAYMENT_NOT_CAPTURED', 'This pickup is not available until payment is confirmed.', 409);
     }
 
-    // 5. Service Area Matching Check
-    // If the order is already assigned to this agent by dispatcher/system, bypass area eligibility check
-    if (order.agentId !== agentId) {
-      const orderAreaName = order.address?.area;
-      if (agent.serviceAreas && agent.serviceAreas.trim() !== '' && agent.serviceAreas.toLowerCase() !== 'all' && orderAreaName) {
-        const normalizedArea = orderAreaName.toLowerCase();
-        const agentAreas = agent.serviceAreas.toLowerCase().split(',').map((a) => a.trim());
-        const isEligible = agentAreas.some((area) => normalizedArea.includes(area) || area.includes(normalizedArea));
-
-        if (!isEligible) {
-          return errorResponse(
-            'OUT_OF_SERVICE_AREA',
-            'Order service area is not covered by your agent profile.',
-            403
-          );
-        }
+    // 5. Active Order in Progress Check (Pre-check)
+    if (!isOwnOrder) {
+      const activeOrder = await db.order.findFirst({
+        where: {
+          agentId,
+          status: { in: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WASTE_VERIFICATION', 'WEIGHING'] },
+        },
+        select: { id: true },
+      });
+      if (activeOrder && activeOrder.id !== order.id) {
+        return errorResponse(
+          'AGENT_HAS_ACTIVE_ORDER',
+          'Finish or cancel the active pickup before accepting another assignment.',
+          409
+        );
       }
     }
 
-    // 6. Atomic Conditional Update (Race-Condition Prevention)
+    // 6. Service Area Status & Eligibility Check
+    // If the order is already assigned to this agent by dispatcher/system, bypass area eligibility check
+    if (order.agentId !== agentId) {
+      const orderAreaName = order.address?.area;
+
+      // Verify that the service area itself is ACTIVE in the database
+      if (orderAreaName && typeof db.serviceArea?.findFirst === 'function') {
+        const areaRecord = await db.serviceArea.findFirst({
+          where: {
+            OR: [
+              { name: { equals: orderAreaName, mode: 'insensitive' } },
+              { id: { equals: orderAreaName, mode: 'insensitive' } },
+              { name: { contains: orderAreaName, mode: 'insensitive' } },
+            ],
+          },
+          select: { status: true },
+        }).catch(() => null);
+
+        if (areaRecord && areaRecord.status !== 'ACTIVE') {
+          return errorResponse(
+            'SERVICE_AREA_INACTIVE',
+            'Service area is currently inactive or suspended.',
+            400
+          );
+        }
+      }
+
+      // Verify agent eligibility for the service area
+      if (!isAgentEligibleForServiceArea(agent.serviceAreas, orderAreaName)) {
+        return errorResponse(
+          'OUT_OF_SERVICE_AREA',
+          'Order service area is not covered by your agent profile.',
+          403
+        );
+      }
+    }
+
+    // 7. Atomic Conditional Update (Race-Condition Prevention)
     // Update status to AGENT_ACCEPTED if order is unassigned or assigned to this agent in AGENT_ASSIGNED state
     const assignment = await executeAgentAcceptTransaction(db, {
       order,
@@ -133,6 +196,9 @@ export async function POST(
     const notificationCreated = assignment.notificationCreated;
 
     if (!assignment.changed) {
+      if (assignment.reason === 'agentSuspended') {
+        return errorResponse('FORBIDDEN', 'Agent account is inactive or suspended. Please contact the administrator.', 403);
+      }
       if (assignment.reason === 'agentUnavailable') {
         return errorResponse('AGENT_NOT_AVAILABLE', 'Agent is currently offline or unavailable for new pickups.', 400);
       }

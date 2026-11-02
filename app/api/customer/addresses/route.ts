@@ -35,6 +35,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, message: 'Missing required address fields.' }, { status: 400 });
     }
 
+    if (
+      typeof lat !== 'number' ||
+      typeof lng !== 'number' ||
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lng) ||
+      lat === 0 ||
+      lng === 0
+    ) {
+      return NextResponse.json(
+        { success: false, message: 'Valid GPS latitude and longitude coordinates are required.' },
+        { status: 400 }
+      );
+    }
+
+    const cleanPincode = typeof pincode === 'string' ? pincode.trim() : typeof pincode === 'number' ? String(pincode) : '';
+    if (!cleanPincode || !/^[1-9][0-9]{5}$/.test(cleanPincode)) {
+      return NextResponse.json(
+        { success: false, message: 'A valid 6-digit Indian pincode is required.' },
+        { status: 400 }
+      );
+    }
+
     const user = await db.user.findUnique({
       where: { id: authUser.userId },
       select: { id: true, phone: true, name: true },
@@ -46,24 +68,43 @@ export async function POST(req: NextRequest) {
 
     const phone = user.phone;
     const name = bodyName?.trim() || user.name || 'Customer';
+    const isDefault = body.isDefault !== undefined ? Boolean(body.isDefault) : true;
 
-    const newAddress = await db.address.create({
-      data: {
-        userId: user.id,
-        label: label || 'Home',
-        name,
-        phone,
-        houseNo,
-        building: building || null,
-        street,
-        area,
-        landmark: landmark || null,
-        pincode: pincode || '560078',
-        lat: typeof lat === 'number' ? lat : 12.9077,
-        lng: typeof lng === 'number' ? lng : 77.5854,
-        isDefault: true,
-      },
-    });
+    const runTx = async (tx: any) => {
+      const addressClient = tx?.address || db.address;
+      if (isDefault && typeof addressClient?.updateMany === 'function') {
+        await addressClient.updateMany({
+          where: { userId: user.id },
+          data: { isDefault: false },
+        });
+      }
+
+      if (typeof addressClient?.create === 'function') {
+        return addressClient.create({
+          data: {
+            userId: user.id,
+            label: label || 'Home',
+            name,
+            phone,
+            houseNo,
+            building: building || null,
+            street,
+            area,
+            landmark: landmark || null,
+            pincode: cleanPincode,
+            lat,
+            lng,
+            isDefault,
+          },
+        });
+      }
+
+      return null;
+    };
+
+    const newAddress = typeof db.$transaction === 'function'
+      ? await db.$transaction(runTx)
+      : await runTx(db);
 
     return NextResponse.json({ success: true, data: newAddress });
   } catch (error: any) {

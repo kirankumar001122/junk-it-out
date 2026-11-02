@@ -27,16 +27,21 @@ export async function POST(req: NextRequest) {
   }
 
   const response = successResponse({ message: 'Logged out successfully.' });
-  response.cookies.set({
-    name: 'jio_token',
-    value: '',
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 0,
-    expires: new Date(0),
-  });
-  response.cookies.delete('jio_token');
+
+  const cookieNames = ['jio_token', 'jio_admin_token', 'jio_agent_token'];
+  for (const name of cookieNames) {
+    response.cookies.set({
+      name,
+      value: '',
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 0,
+      expires: new Date(0),
+    });
+    response.cookies.delete(name);
+  }
+
   return response;
 }
