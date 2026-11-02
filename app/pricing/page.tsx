@@ -121,15 +121,11 @@ export default function PriceListPage() {
                     <span className="grid h-9 w-9 place-items-center rounded-lg bg-emerald-50 text-emerald-600">
                       <IconComp className="h-4.5 w-4.5" />
                     </span>
-                    <span
-                      className={`text-[10px] font-bold uppercase px-2.5 py-0.5 rounded border ${
-                        isBuy
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80'
-                          : 'bg-amber-50 text-amber-800 border-amber-200/80'
-                      }`}
-                    >
-                      {isBuy ? 'We Pay Customer' : 'Service Charge'}
-                    </span>
+                    {!isBuy && (
+                      <span className="text-[10px] font-bold uppercase px-2.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-200/80">
+                        Service Charge
+                      </span>
+                    )}
                   </div>
 
                   <div>
