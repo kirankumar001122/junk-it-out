@@ -91,7 +91,13 @@ export async function GET(
             payments: true,
             invoices: true,
             weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
-            settlement: true,
+            settlement: {
+              select: {
+                totalWeightKg: true,
+                amount: true,
+                status: true,
+              },
+            },
           },
         });
 
@@ -172,7 +178,10 @@ export async function GET(
 
     return successResponse({ ...order, locations });
   } catch (err: any) {
-    console.error('Fetch order detail error:', err);
+    console.error('Fetch order detail error:', {
+      code: err?.code || 'UNKNOWN',
+      name: err?.name || 'Error',
+    });
     const errorMessage = String(err?.message || '');
     const databaseUnavailable =
       errorMessage.includes('Can\'t reach database server') ||
