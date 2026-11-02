@@ -1,5 +1,3 @@
-import { getCurrentRequestId } from './requestTiming';
-
 export type LogSeverity = 'info' | 'warn' | 'error';
 export type LogDependency = 'database' | 'razorpay' | 'fast2sms' | 'blob';
 
@@ -191,7 +189,7 @@ export function withApiRequestLogging<TRequest extends Request>(
   return async (request) => {
     const startedAt = Date.now();
     const context: ApiRequestContext = {
-      requestId: getCurrentRequestId() || getRequestId(request.headers),
+      requestId: getRequestId(request.headers),
       route,
       method: HTTP_METHODS.has(request.method) ? request.method : 'OTHER',
     };

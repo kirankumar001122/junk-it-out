@@ -112,6 +112,7 @@ export async function withRequestTiming<T extends Response>(
     route,
     startedAt: performance.now(),
   };
+  request.headers.set('x-request-id', requestId);
 
   return timingContext.run(context, async () => {
     try {

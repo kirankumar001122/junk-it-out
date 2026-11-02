@@ -46,7 +46,7 @@ describe('payment request timing instrumentation', () => {
 
   it('uses monotonic phase durations and joins API logs to the server request ID', async () => {
     const request = new Request('http://localhost/api/test', {
-      headers: { 'X-Request-ID': 'client-supplied-id' },
+      headers: { 'X-Request-ID': 'a12fc2e7-46df-45c0-8dc5-31a8b98573f8' },
     });
     const loggedHandler = withApiRequestLogging('/api/test', async () =>
       Response.json({ success: true }),
@@ -73,6 +73,15 @@ describe('payment request timing instrumentation', () => {
       JSON.parse(String(line)).requestId === requestId,
     )).toBe(true);
     expect(getCurrentRequestId()).toBeUndefined();
+  });
+
+  it('keeps structured logging free of Node-only request context imports', async () => {
+    const source = await import('node:fs/promises').then(({ readFile }) =>
+      readFile(new URL('../lib/observability/structuredLogger.ts', import.meta.url), 'utf8'),
+    );
+
+    expect(source).not.toMatch(/from\s+['"]node:/);
+    expect(source).not.toContain("from './requestTiming'");
   });
 
   it('records safe error metadata without request bodies or error messages', async () => {
