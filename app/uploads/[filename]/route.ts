@@ -12,7 +12,7 @@ export async function GET(
 ) {
   const { filename } = await context.params;
 
-  if (!filename || !/^waste-photo-[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp)$/i.test(filename)) {
+  if (!filename || !/^[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp)$/i.test(filename)) {
     return NextResponse.json(
       { success: false, message: 'Invalid photo filename.' },
       { status: 400, headers: PRIVATE_CACHE_HEADERS }
