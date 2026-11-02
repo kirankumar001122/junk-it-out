@@ -14,6 +14,12 @@ import {
   createRazorpayOrder,
   RazorpayOrderCreationError,
 } from '@/lib/payments/razorpay';
+import {
+  measureTiming,
+  monotonicNow,
+  recordTiming,
+  withRequestTiming,
+} from '@/lib/observability/requestTiming';
 
 const ACTIVE_PAYMENT_STATUSES = [
   'CREATION_PENDING',
@@ -23,7 +29,7 @@ const ACTIVE_PAYMENT_STATUSES = [
 
 async function handlePost(req: NextRequest, context: ApiRequestContext) {
   try {
-    const authUser = await getAuthUser(req);
+    const authUser = await measureTiming('auth.lookup', () => getAuthUser(req));
 
     if (!authUser || authUser.role !== 'CUSTOMER' || !authUser.customerId) {
       return NextResponse.json(
@@ -35,7 +41,7 @@ async function handlePost(req: NextRequest, context: ApiRequestContext) {
       );
     }
 
-    const { orderId } = await req.json();
+    const { orderId } = await measureTiming('request.json_parse', () => req.json());
     if (!orderId) {
       return NextResponse.json(
         { success: false, message: 'Order ID is required.' },
@@ -43,10 +49,13 @@ async function handlePost(req: NextRequest, context: ApiRequestContext) {
       );
     }
 
-    const order = await db.order.findUnique({
-      where: { id: orderId },
-      include: { payments: { orderBy: { createdAt: 'desc' } } },
-    });
+    const order = await measureTiming(
+      'payment.order_lookup',
+      () => db.order.findUnique({
+        where: { id: orderId },
+        include: { payments: { orderBy: { createdAt: 'desc' } } },
+      }),
+    );
 
     if (!order) {
       return NextResponse.json(
@@ -110,8 +119,20 @@ async function handlePost(req: NextRequest, context: ApiRequestContext) {
       );
     }
 
-    const attempt = await db.$transaction(async (tx) => {
+    const transactionStartedAt = monotonicNow();
+    const attempt = await measureTiming(
+      'payment_attempt.transaction.total',
+      () => db.$transaction(async (tx) => {
+      recordTiming('payment_attempt.connection_acquisition_estimate', {
+        durationMs: Number((monotonicNow() - transactionStartedAt).toFixed(2)),
+        outcome: 'success',
+      });
+      const lockStartedAt = monotonicNow();
       await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "id" = ${order.id} FOR UPDATE`;
+      recordTiming('payment_attempt.order_lock', {
+        durationMs: Number((monotonicNow() - lockStartedAt).toFixed(2)),
+        outcome: 'success',
+      });
 
       const currentOrder = await tx.order.findUnique({
         where: { id: order.id },
@@ -164,36 +185,46 @@ async function handlePost(req: NextRequest, context: ApiRequestContext) {
         };
       }
 
-      const activePayment = await tx.payment.findFirst({
-        where: {
-          orderId: currentOrder.id,
-          direction: 'CUSTOMER_PAYS',
-          status: { in: [...ACTIVE_PAYMENT_STATUSES] },
-        },
-        orderBy: { createdAt: 'desc' },
-      });
+      const activePayment = await measureTiming(
+        'payment_attempt.active_lookup',
+        () => tx.payment.findFirst({
+          where: {
+            orderId: currentOrder.id,
+            direction: 'CUSTOMER_PAYS',
+            status: { in: [...ACTIVE_PAYMENT_STATUSES] },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+      );
 
       if (activePayment) {
         return { kind: 'existing' as const, payment: activePayment, order: currentOrder };
       }
 
-      const payment = await tx.payment.create({
-        data: {
-          orderId: currentOrder.id,
-          amount: currentAmount,
-          direction: 'CUSTOMER_PAYS',
-          gateway: 'RAZORPAY',
-          status: 'CREATION_PENDING',
-        },
-      });
+      const payment = await measureTiming(
+        'payment_attempt.create',
+        () => tx.payment.create({
+          data: {
+            orderId: currentOrder.id,
+            amount: currentAmount,
+            direction: 'CUSTOMER_PAYS',
+            gateway: 'RAZORPAY',
+            status: 'CREATION_PENDING',
+          },
+        }),
+      );
 
-      await tx.order.update({
-        where: { id: currentOrder.id },
-        data: { paymentStatus: 'INITIATED' },
-      });
+      await measureTiming(
+        'payment_attempt.set_order_status',
+        () => tx.order.update({
+          where: { id: currentOrder.id },
+          data: { paymentStatus: 'INITIATED' },
+        }),
+      );
 
       return { kind: 'new' as const, payment, order: currentOrder, amount: currentAmount };
-    });
+      }),
+    );
 
     if (attempt.kind === 'rejected') {
       return NextResponse.json(
@@ -254,11 +285,14 @@ async function handlePost(req: NextRequest, context: ApiRequestContext) {
 
     let razorpayOrder;
     try {
-      razorpayOrder = await createRazorpayOrder({
-        amountInPaise: Math.round(attempt.amount * 100),
-        receipt: attempt.order.orderNumber,
-        notes: { orderId: attempt.order.id, orderNumber: attempt.order.orderNumber },
-      });
+      razorpayOrder = await measureTiming(
+        'razorpay.order_create',
+        () => createRazorpayOrder({
+          amountInPaise: Math.round(attempt.amount * 100),
+          receipt: attempt.order.orderNumber,
+          notes: { orderId: attempt.order.id, orderNumber: attempt.order.orderNumber },
+        }),
+      );
     } catch (error) {
       if (!(error instanceof RazorpayOrderCreationError) || !error.uncertain) {
         await db.payment.update({
@@ -269,13 +303,16 @@ async function handlePost(req: NextRequest, context: ApiRequestContext) {
       throw error;
     }
 
-    const payment = await db.payment.update({
-      where: { id: attempt.payment.id },
-      data: {
-        gatewayOrderId: razorpayOrder.id,
-        status: 'INITIATED',
-      },
-    });
+    const payment = await measureTiming(
+      'payment.persist_gateway_order',
+      () => db.payment.update({
+        where: { id: attempt.payment.id },
+        data: {
+          gatewayOrderId: razorpayOrder.id,
+          status: 'INITIATED',
+        },
+      }),
+    );
 
     return NextResponse.json({
       success: true,
@@ -322,4 +359,9 @@ async function handlePost(req: NextRequest, context: ApiRequestContext) {
   }
 }
 
-export const POST = withApiRequestLogging('/api/payments/create', handlePost);
+export const runtime = 'nodejs';
+const loggedPost = withApiRequestLogging('/api/payments/create', handlePost);
+
+export function POST(req: NextRequest) {
+  return withRequestTiming(req, 'POST /api/payments/create', () => loggedPost(req));
+}

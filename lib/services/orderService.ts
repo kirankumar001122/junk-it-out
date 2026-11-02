@@ -18,6 +18,11 @@ import {
   type CalculationItemInput,
   type FinancialDirection,
 } from '../pricing';
+import {
+  measureTiming,
+  monotonicNow,
+  recordTiming,
+} from '../observability/requestTiming';
 
 export { InvalidCouponError };
 
@@ -198,16 +203,21 @@ export async function createOrder(
 
   if (normalizedIdempotencyKey && customerId && durableIdempotencyAvailable) {
     try {
-      const existing = await durableIdempotency.findUnique({
-        where: { customerId_key: { customerId, key: normalizedIdempotencyKey } },
-      });
+      const existing = await measureTiming<any>(
+        'order.idempotency.lookup',
+        () => durableIdempotency.findUnique({
+          where: { customerId_key: { customerId, key: normalizedIdempotencyKey } },
+        }),
+      );
       if (existing) {
         if (existing.payloadHash !== payloadHash) {
           throw new OrderIdempotencyConflictError();
         }
-        const persistedOrder = await db.order.findUnique({
-          where: { id: existing.orderId },
-          include: {
+        const persistedOrder = await measureTiming(
+          'order.idempotency.persisted_order_lookup',
+          () => db.order.findUnique({
+            where: { id: existing.orderId },
+            include: {
             customer: {
               include: {
                 user: {
@@ -228,8 +238,9 @@ export async function createOrder(
               orderBy: { createdAt: 'desc' },
               take: 1,
             },
-          },
-        });
+            },
+          }),
+        );
         if (!persistedOrder) {
           throw new Error('The idempotent order record no longer exists.');
         }
@@ -258,48 +269,63 @@ export async function createOrder(
     : null;
 
   const [geofence, initialUser, dbCategories, couponRecord] = await Promise.all([
-    checkGeofenceServiceability(
-      input.address.lat,
-      input.address.lng,
-      input.address.area
+    measureTiming(
+      'order.lookup.geofence',
+      () => checkGeofenceServiceability(
+        input.address.lat,
+        input.address.lng,
+        input.address.area
+      ),
     ),
     authUser?.userId
-      ? db.user.findUnique({
-          where: {
-            id: authUser.userId,
-          },
-          include: {
-            customer: true,
-            addresses: {
-              where: { isDefault: true },
-              take: 1,
+      ? measureTiming(
+          'order.lookup.customer_profile',
+          () => db.user.findUnique({
+            where: {
+              id: authUser.userId,
             },
-          },
-        })
-      : findOrCreateUserCustomer(input.phone, input.name),
-    (async () => {
-      const cached = getCachedWasteCategories();
-      if (cached && Array.isArray(cached)) {
-        const matching = cached.filter((c: any) => c.active && categoryIds.includes(c.id));
-        if (matching.length === categoryIds.length) {
-          return matching;
+            include: {
+              customer: true,
+              addresses: {
+                where: { isDefault: true },
+                take: 1,
+              },
+            },
+          }),
+        )
+      : measureTiming(
+          'order.lookup.customer_profile',
+          () => findOrCreateUserCustomer(input.phone, input.name),
+        ),
+    measureTiming(
+      'order.lookup.waste_categories',
+      async () => {
+        const cached = getCachedWasteCategories();
+        if (cached && Array.isArray(cached)) {
+          const matching = cached.filter((c: any) => c.active && categoryIds.includes(c.id));
+          if (matching.length === categoryIds.length) {
+            return matching;
+          }
         }
-      }
-      const fetched = await db.wasteCategory.findMany({
-        where: {
-          id: {
-            in: categoryIds,
+        const fetched = await db.wasteCategory.findMany({
+          where: {
+            id: {
+              in: categoryIds,
+            },
+            active: true,
           },
-          active: true,
-        },
-      });
-      if (fetched && fetched.length > 0) {
-        setCachedWasteCategories(fetched);
-      }
-      return fetched;
-    })(),
+        });
+        if (fetched && fetched.length > 0) {
+          setCachedWasteCategories(fetched);
+        }
+        return fetched;
+      },
+    ),
     couponCode
-      ? db.coupon.findUnique({ where: { code: couponCode } }).catch(() => null)
+      ? measureTiming(
+          'order.lookup.coupon',
+          () => db.coupon.findUnique({ where: { code: couponCode } }).catch(() => null),
+        )
       : Promise.resolve(null),
   ]);
 
@@ -318,9 +344,9 @@ export async function createOrder(
   let user: any = initialUser;
 
   if (!user || !user.customer) {
-    user = await findOrCreateUserCustomer(
-      input.phone,
-      input.name
+    user = await measureTiming(
+      'order.customer_profile.ensure',
+      () => findOrCreateUserCustomer(input.phone, input.name),
     );
   }
 
@@ -347,9 +373,11 @@ export async function createOrder(
 
   const savedAddress = isIdenticalAddress
     ? existingDefaultAddr
-    : await saveCustomerAddress(
-        user.id,
-        {
+    : await measureTiming(
+        'order.address.save',
+        () => saveCustomerAddress(
+          user.id,
+          {
           label: input.address.label || 'Home',
           name: input.name,
           phone: input.phone,
@@ -365,8 +393,9 @@ export async function createOrder(
             input.address.googlePlaceId ||
             undefined,
           isDefault: true,
-        },
-        { hasExistingDefault }
+          },
+          { hasExistingDefault }
+        ),
       );
 
   timer?.recordPhase('save_customer_address');
@@ -440,11 +469,14 @@ export async function createOrder(
 
   let discountAmount = 0.0;
   if (input.couponCode && String(input.couponCode).trim()) {
-    const couponValidation = await validateAndCalculateCoupon(
-      input.couponCode,
-      preDiscountSubtotal,
-      user.customer?.id,
-      couponRecord
+    const couponValidation = await measureTiming(
+      'order.coupon.validate',
+      () => validateAndCalculateCoupon(
+        input.couponCode,
+        preDiscountSubtotal,
+        user.customer?.id,
+        couponRecord
+      ),
     );
 
     if (!couponValidation.valid) {
@@ -495,8 +527,15 @@ export async function createOrder(
 
   let newOrder: any;
   try {
-    newOrder = await db.$transaction(
-      async (tx) => {
+    const transactionStartedAt = monotonicNow();
+    newOrder = await measureTiming(
+      'order.db_transaction.total',
+      () => db.$transaction(
+        async (tx) => {
+        recordTiming('order.db_transaction.connection_acquisition_estimate', {
+          durationMs: Number((monotonicNow() - transactionStartedAt).toFixed(2)),
+          outcome: 'success',
+        });
         const createdOrder = await tx.order.create({
           data: {
             orderNumber,
@@ -638,11 +677,12 @@ export async function createOrder(
         };
 
         return assembledOrder;
-      },
-      {
-        maxWait: 5000,
-        timeout: 15000,
-      }
+        },
+        {
+          maxWait: 5000,
+          timeout: 15000,
+        }
+      ),
     );
     timer?.recordPhase('order_creation_tx');
   } catch (error: any) {

@@ -8,26 +8,31 @@ import {
   withApiRequestLogging,
   type ApiRequestContext,
 } from '@/lib/observability/structuredLogger';
+import { measureTiming, withRequestTiming } from '@/lib/observability/requestTiming';
 
 async function handlePost(req: NextRequest, context: ApiRequestContext) {
   try {
-    const authUser = await getAuthUser(req);
+    const authUser = await measureTiming('auth.lookup', () => getAuthUser(req));
     if (!authUser || authUser.role !== 'CUSTOMER' || !authUser.customerId) {
       return NextResponse.json({ success: false, message: 'Authenticated customer access is required.' }, { status: 401 });
     }
 
-    const { orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature } = await req.json();
+    const { orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature } =
+      await measureTiming('request.json_parse', () => req.json());
     if (!orderId || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return NextResponse.json({ success: false, message: 'Payment verification fields are required.' }, { status: 400 });
     }
 
-    const updated = await verifyAndRecordPayment({
-      orderId,
-      razorpayOrderId: razorpay_order_id,
-      razorpayPaymentId: razorpay_payment_id,
-      razorpaySignature: razorpay_signature,
-      customerId: authUser.customerId,
-    });
+    const updated = await measureTiming(
+      'payment.verify_and_record',
+      () => verifyAndRecordPayment({
+        orderId,
+        razorpayOrderId: razorpay_order_id,
+        razorpayPaymentId: razorpay_payment_id,
+        razorpaySignature: razorpay_signature,
+        customerId: authUser.customerId,
+      }),
+    );
     return NextResponse.json({ success: true, data: updated });
   } catch (error: unknown) {
     if (error instanceof PaymentVerificationError) {
@@ -56,4 +61,9 @@ async function handlePost(req: NextRequest, context: ApiRequestContext) {
   }
 }
 
-export const POST = withApiRequestLogging('/api/payments/verify', handlePost);
+export const runtime = 'nodejs';
+const loggedPost = withApiRequestLogging('/api/payments/verify', handlePost);
+
+export function POST(req: NextRequest) {
+  return withRequestTiming(req, 'POST /api/payments/verify', () => loggedPost(req));
+}

@@ -20,16 +20,25 @@ import {
   successResponse,
   errorResponse,
 } from '@/lib/utils/apiResponse';
+import {
+  getCurrentRequestId,
+  measureTiming,
+  monotonicNow,
+  recordTiming,
+  withRequestTiming,
+} from '@/lib/observability/requestTiming';
 
 const inFlightGatewayOrders = new Map<
   string,
   Promise<{ gatewayOrderId: string; keyId: string; amount: number; paymentId: string }>
 >();
 
-export async function POST(req: NextRequest) {
-  const timer = new OrderExecutionTimer(req.headers.get('x-request-id') || undefined);
+export const runtime = 'nodejs';
+
+async function handlePost(req: NextRequest) {
+  const timer = new OrderExecutionTimer(getCurrentRequestId());
   try {
-    const authUser = await getAuthUser(req);
+    const authUser = await measureTiming('auth.lookup', () => getAuthUser(req));
 
     const isAdmin = authUser && ['ADMIN', 'SUPER_ADMIN'].includes(authUser.role);
     const isCustomer = authUser && authUser.role === 'CUSTOMER' && Boolean(authUser.customerId);
@@ -41,7 +50,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const body = await req.json().catch(() => null);
+    const body = await measureTiming(
+      'request.json_parse',
+      () => req.json().catch(() => null),
+    );
 
     const idempotencyKey =
       req.headers.get('Idempotency-Key');
@@ -68,11 +80,9 @@ export async function POST(req: NextRequest) {
 
     timer.recordPhase('auth_and_input_validation');
 
-    const order = await createOrder(
-      body,
-      idempotencyKey,
-      authUser,
-      timer
+    const order = await measureTiming(
+      'order.create.total',
+      () => createOrder(body, idempotencyKey, authUser, timer),
     );
     timer.recordPhase('create_order_complete');
 
@@ -125,26 +135,32 @@ export async function POST(req: NextRequest) {
               };
             } else {
               const gatePromise = (async () => {
-                const razorpayOrder = await createRazorpayOrder({
-                  amountInPaise: Math.round(amount * 100),
-                  receipt: order.orderNumber,
-                  notes: { orderId: order.id, orderNumber: order.orderNumber },
-                });
+                const razorpayOrder = await measureTiming(
+                  'razorpay.order_create',
+                  () => createRazorpayOrder({
+                    amountInPaise: Math.round(amount * 100),
+                    receipt: order.orderNumber,
+                    notes: { orderId: order.id, orderNumber: order.orderNumber },
+                  }),
+                );
                 createdGatewayOrder = razorpayOrder;
 
-                await db.$transaction([
-                  db.payment.update({
-                    where: { id: paymentRecord.id },
-                    data: {
-                      gatewayOrderId: razorpayOrder.id,
-                      status: 'INITIATED',
-                    },
-                  }),
-                  db.order.update({
-                    where: { id: order.id },
-                    data: { paymentStatus: 'INITIATED' },
-                  }),
-                ]);
+                await measureTiming(
+                  'payment.persist_gateway_order',
+                  () => db.$transaction([
+                    db.payment.update({
+                      where: { id: paymentRecord.id },
+                      data: {
+                        gatewayOrderId: razorpayOrder.id,
+                        status: 'INITIATED',
+                      },
+                    }),
+                    db.order.update({
+                      where: { id: order.id },
+                      data: { paymentStatus: 'INITIATED' },
+                    }),
+                  ]),
+                );
 
                 return {
                   gatewayOrderId: razorpayOrder.id,
@@ -180,38 +196,57 @@ export async function POST(req: NextRequest) {
           }
         } else {
           // Fallback path: lock and create payment if not eagerly created
-          const attempt = await db.$transaction(async (tx) => {
+          const transactionStartedAt = monotonicNow();
+          const attempt = await measureTiming(
+            'payment_attempt.transaction.total',
+            () => db.$transaction(async (tx) => {
+            recordTiming('payment_attempt.connection_acquisition_estimate', {
+              durationMs: Number((monotonicNow() - transactionStartedAt).toFixed(2)),
+              outcome: 'success',
+            });
+            const lockStartedAt = monotonicNow();
             if (typeof (tx as any).$executeRaw === 'function') {
               await (tx as any).$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${order.id}, 0))`;
             } else {
               await (tx as any).$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${order.id}, 0))`;
             }
-
-            const existing = await tx.payment.findFirst({
-              where: {
-                orderId: order.id,
-                direction: 'CUSTOMER_PAYS',
-                status: { in: ['CREATION_PENDING', 'INITIATED', 'AUTHORIZED'] },
-              },
-              orderBy: { createdAt: 'desc' },
+            recordTiming('payment_attempt.advisory_lock', {
+              durationMs: Number((monotonicNow() - lockStartedAt).toFixed(2)),
+              outcome: 'success',
             });
+
+            const existing = await measureTiming(
+              'payment_attempt.active_lookup',
+              () => tx.payment.findFirst({
+                where: {
+                  orderId: order.id,
+                  direction: 'CUSTOMER_PAYS',
+                  status: { in: ['CREATION_PENDING', 'INITIATED', 'AUTHORIZED'] },
+                },
+                orderBy: { createdAt: 'desc' },
+              }),
+            );
 
             if (existing) {
               return { kind: 'existing' as const, payment: existing };
             }
 
-            const created = await tx.payment.create({
-              data: {
-                orderId: order.id,
-                amount,
-                direction: 'CUSTOMER_PAYS',
-                gateway: 'RAZORPAY',
-                status: 'CREATION_PENDING',
-              },
-            });
+            const created = await measureTiming(
+              'payment_attempt.create',
+              () => tx.payment.create({
+                data: {
+                  orderId: order.id,
+                  amount,
+                  direction: 'CUSTOMER_PAYS',
+                  gateway: 'RAZORPAY',
+                  status: 'CREATION_PENDING',
+                },
+              }),
+            );
 
             return { kind: 'new' as const, payment: created };
-          });
+            }),
+          );
           timer.recordPhase('payment_lock_and_tx');
           paymentRecord = attempt.payment;
 
@@ -237,27 +272,33 @@ export async function POST(req: NextRequest) {
               }
             }
           } else {
-            const razorpayOrder = await createRazorpayOrder({
-              amountInPaise: Math.round(amount * 100),
-              receipt: order.orderNumber,
-              notes: { orderId: order.id, orderNumber: order.orderNumber },
-            });
+            const razorpayOrder = await measureTiming(
+              'razorpay.order_create',
+              () => createRazorpayOrder({
+                amountInPaise: Math.round(amount * 100),
+                receipt: order.orderNumber,
+                notes: { orderId: order.id, orderNumber: order.orderNumber },
+              }),
+            );
             createdGatewayOrder = razorpayOrder;
             timer.recordPhase('razorpay_gateway_call');
 
-            await db.$transaction([
-              db.payment.update({
-                where: { id: attempt.payment.id },
-                data: {
-                  gatewayOrderId: razorpayOrder.id,
-                  status: 'INITIATED',
-                },
-              }),
-              db.order.update({
-                where: { id: order.id },
-                data: { paymentStatus: 'INITIATED' },
-              }),
-            ]);
+            await measureTiming(
+              'payment.persist_gateway_order',
+              () => db.$transaction([
+                db.payment.update({
+                  where: { id: attempt.payment.id },
+                  data: {
+                    gatewayOrderId: razorpayOrder.id,
+                    status: 'INITIATED',
+                  },
+                }),
+                db.order.update({
+                  where: { id: order.id },
+                  data: { paymentStatus: 'INITIATED' },
+                }),
+              ]),
+            );
             timer.recordPhase('payment_and_order_db_updates');
 
             attempt.payment.gatewayOrderId = razorpayOrder.id;
@@ -393,7 +434,11 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function GET(req: NextRequest) {
+export function POST(req: NextRequest) {
+  return withRequestTiming(req, 'POST /api/orders', () => handlePost(req));
+}
+
+async function handleGet(req: NextRequest) {
   try {
     const authUser =
       await getAuthUser(req);
@@ -751,4 +796,8 @@ export async function GET(req: NextRequest) {
       500
     );
   }
+}
+
+export function GET(req: NextRequest) {
+  return withRequestTiming(req, 'GET /api/orders', () => handleGet(req));
 }

@@ -1,5 +1,9 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import https from "https";
+import {
+  monotonicNow,
+  recordTiming,
+} from "../observability/requestTiming";
 
 export class RazorpayApiError extends Error {
   constructor(
@@ -134,6 +138,19 @@ function executeSingleRazorpayRequest(
   const payload = bodyData ? JSON.stringify(bodyData) : "";
 
   return new Promise((resolve, reject) => {
+    const requestStartedAt = monotonicNow();
+    let requestTimingReported = false;
+    const reportRequestTiming = (
+      fields: { status?: number; outcome: 'success' | 'error'; errorType?: string },
+    ) => {
+      if (requestTimingReported) return;
+      requestTimingReported = true;
+      recordTiming('razorpay.https_request', {
+        durationMs: Number((monotonicNow() - requestStartedAt).toFixed(2)),
+        ...fields,
+      });
+    };
+
     const req = https.request(
       {
         hostname: "api.razorpay.com",
@@ -153,6 +170,14 @@ function executeSingleRazorpayRequest(
         let raw = "";
         res.on("data", (chunk) => (raw += chunk));
         res.on("end", () => {
+          const successfulStatus = Boolean(
+            res.statusCode && res.statusCode >= 200 && res.statusCode < 300,
+          );
+          reportRequestTiming({
+            status: res.statusCode,
+            outcome: successfulStatus ? 'success' : 'error',
+            ...(!successfulStatus ? { errorType: 'RazorpayHttpError' } : {}),
+          });
           try {
             const data = JSON.parse(raw);
             if (
@@ -179,8 +204,42 @@ function executeSingleRazorpayRequest(
       },
     );
 
-    req.on("error", (err) => reject(err));
+    req.on("socket", (socket) => {
+      const socketAssignedAt = monotonicNow();
+      const socketReused = !socket.connecting;
+      recordTiming('razorpay.socket_assigned', {
+        durationMs: Number((socketAssignedAt - requestStartedAt).toFixed(2)),
+        socketReused,
+      });
+
+      if (!socketReused) {
+        socket.once("lookup", () => {
+          recordTiming('razorpay.dns_lookup', {
+            durationMs: Number((monotonicNow() - requestStartedAt).toFixed(2)),
+          });
+        });
+        socket.once("connect", () => {
+          recordTiming('razorpay.tcp_connect', {
+            durationMs: Number((monotonicNow() - requestStartedAt).toFixed(2)),
+          });
+        });
+        socket.once("secureConnect", () => {
+          recordTiming('razorpay.tls_connect', {
+            durationMs: Number((monotonicNow() - requestStartedAt).toFixed(2)),
+          });
+        });
+      }
+    });
+
+    req.on("error", (err) => {
+      reportRequestTiming({
+        outcome: 'error',
+        errorType: err instanceof Error ? 'Error' : 'UnknownError',
+      });
+      reject(err);
+    });
     req.on("timeout", () => {
+      reportRequestTiming({ outcome: 'error', errorType: 'TimeoutError' });
       req.destroy();
       reject(new Error("Connection to Razorpay gateway timed out."));
     });

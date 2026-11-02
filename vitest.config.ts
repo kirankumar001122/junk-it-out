@@ -50,6 +50,7 @@ export default defineConfig({
       'tests/security-phase2b.test.ts',
       'tests/security-phase2c.test.ts',
       'tests/payment-delay-diagnostics.test.ts',
+      'tests/request-timing.test.ts',
       'tests/pricing.test.ts',
       'tests/financial-correctness.test.ts',
       'tests/upload-view-authorization.test.ts',

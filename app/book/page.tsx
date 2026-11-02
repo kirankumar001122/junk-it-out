@@ -51,6 +51,9 @@ const TIME_SLOTS = [
   { id: '18-19', label: '06:00 PM - 07:00 PM', startHour: 18 },
 ];
 
+const checkoutFlowIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export default function BookingPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
@@ -127,6 +130,7 @@ export default function BookingPage() {
   // Idempotency Protection Ref
   const idempotencyKeyRef = useRef<string>('');
   const lastPayloadSignatureRef = useRef<string>('');
+  const checkoutFlowIdRef = useRef<string>('');
   const isRetryingRef = useRef(false);
   const isSubmittingRef = useRef(false);
 
@@ -530,6 +534,15 @@ export default function BookingPage() {
     if (!targetOrder?.id) return;
     if (isRetryingRef.current || loading) return;
     isRetryingRef.current = true;
+    const storedFlowId =
+      typeof targetOrder.checkoutFlowId === 'string' &&
+      checkoutFlowIdPattern.test(targetOrder.checkoutFlowId)
+        ? targetOrder.checkoutFlowId.toLowerCase()
+        : null;
+    const checkoutFlowId =
+      storedFlowId || checkoutFlowIdRef.current || window.crypto.randomUUID();
+    checkoutFlowIdRef.current = checkoutFlowId;
+    targetOrder.checkoutFlowId = checkoutFlowId;
     setLoading(true);
     setBookingStatusText('Re-connecting to secure payment...');
     setErrorMsg('');
@@ -539,7 +552,10 @@ export default function BookingPage() {
     try {
       const payRes = await fetch('/api/payments/create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Checkout-Flow-ID': checkoutFlowId,
+        },
         body: JSON.stringify({ orderId: targetOrder.id }),
       });
 
@@ -588,7 +604,10 @@ export default function BookingPage() {
           try {
             const verifyRes = await fetch('/api/payments/verify', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Checkout-Flow-ID': checkoutFlowId,
+              },
               body: JSON.stringify({
                 orderId: targetOrder.id,
                 razorpay_order_id: response.razorpay_order_id,
@@ -729,7 +748,10 @@ export default function BookingPage() {
     if (!idempotencyKeyRef.current || lastPayloadSignatureRef.current !== currentPayloadSignature) {
       idempotencyKeyRef.current = `booking-${phone.replace(/[\s+]/g, '')}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
       lastPayloadSignatureRef.current = currentPayloadSignature;
+      checkoutFlowIdRef.current = window.crypto.randomUUID();
     }
+    const checkoutFlowId = checkoutFlowIdRef.current || window.crypto.randomUUID();
+    checkoutFlowIdRef.current = checkoutFlowId;
 
     isSubmittingRef.current = true;
     setLoading(true);
@@ -746,6 +768,7 @@ export default function BookingPage() {
         headers: {
           'Content-Type': 'application/json',
           'Idempotency-Key': idempotencyKeyRef.current,
+          'X-Checkout-Flow-ID': checkoutFlowId,
         },
         body: JSON.stringify(bookingPayload),
       });
@@ -770,6 +793,7 @@ export default function BookingPage() {
       }
 
       const orderData = data.data;
+      orderData.checkoutFlowId = checkoutFlowId;
 
       // If order does not require customer payment (e.g. JUNKITOUT_PAYS scrap payout or ZERO_BALANCE), confirm directly
       if (orderData.financialDirection !== 'CUSTOMER_PAYS' || Number(orderData.finalAmount) === 0) {
@@ -796,7 +820,10 @@ export default function BookingPage() {
         setBookingStatusText('Connecting to secure payment...');
         const payRes = await fetch('/api/payments/create', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Checkout-Flow-ID': checkoutFlowId,
+          },
           body: JSON.stringify({ orderId: orderData.id }),
         });
 
@@ -809,6 +836,7 @@ export default function BookingPage() {
               orderNumber: orderData.orderNumber,
               finalAmount: orderData.finalAmount,
               area: orderData.address?.area || area,
+              checkoutFlowId,
             }));
           }
           setLoading(false);
@@ -847,6 +875,7 @@ export default function BookingPage() {
             orderNumber: orderData.orderNumber,
             finalAmount: orderData.finalAmount,
             area: orderData.address?.area || area,
+            checkoutFlowId,
           }));
         }
         setLoading(false);
@@ -868,7 +897,10 @@ export default function BookingPage() {
           try {
             const verifyRes = await fetch('/api/payments/verify', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Checkout-Flow-ID': checkoutFlowId,
+              },
               body: JSON.stringify({
                 orderId: orderData.id,
                 razorpay_order_id: response.razorpay_order_id,
@@ -900,6 +932,7 @@ export default function BookingPage() {
                   orderNumber: orderData.orderNumber,
                   finalAmount: orderData.finalAmount,
                   area: orderData.address?.area || area,
+                  checkoutFlowId,
                 }));
               }
               setErrorMsg(verifyData.message || 'Payment verification failed server-side. Your booking has not been confirmed.');
@@ -913,6 +946,7 @@ export default function BookingPage() {
                 orderNumber: orderData.orderNumber,
                 finalAmount: orderData.finalAmount,
                 area: orderData.address?.area || area,
+                checkoutFlowId,
               }));
             }
             setErrorMsg('Network error verifying payment. Please check your order in My Pickups.');
@@ -935,6 +969,7 @@ export default function BookingPage() {
                 orderNumber: orderData.orderNumber,
                 finalAmount: orderData.finalAmount,
                 area: orderData.address?.area || area,
+                checkoutFlowId,
               }));
             }
             setErrorMsg(`Checkout was cancelled or dismissed. Order #${orderData.orderNumber} is saved. You can retry payment below or view it anytime.`);
@@ -952,6 +987,7 @@ export default function BookingPage() {
             orderNumber: orderData.orderNumber,
             finalAmount: orderData.finalAmount,
             area: orderData.address?.area || area,
+            checkoutFlowId,
           }));
         }
         const reason = response?.error?.description || response?.error?.reason || 'Transaction declined.';

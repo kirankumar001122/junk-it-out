@@ -432,7 +432,8 @@ describe('Payment Delay Diagnostics & Timing Telemetry', () => {
     // Verify diagnostic telemetry event was emitted
     const timingLog = state.logs.find((l) => l.event === 'order.execution.timing');
     assert.ok(timingLog, 'Must emit order.execution.timing log');
-    assert.equal(timingLog.correlationId, 'b87d8916-24a9-4d69-a1d2-08537b0178a9');
+    assert.equal(timingLog.correlationId, res.headers.get('X-Request-ID'));
+    assert.notEqual(timingLog.correlationId, 'b87d8916-24a9-4d69-a1d2-08537b0178a9');
     assert.equal(timingLog.hasPaymentConfig, true);
     assert.ok(timingLog.phases.some((p: any) => p.phase === 'auth_and_input_validation'));
     assert.ok(timingLog.phases.some((p: any) => p.phase === 'order_creation_tx'));
@@ -539,7 +540,7 @@ describe('Payment Delay Diagnostics & Timing Telemetry', () => {
     assert.equal(body.data.paymentStatus, 'INITIATED');
     assert.ok(body.data.paymentConfig);
 
-    const timingLog = state.logs.find((l) => l.correlationId === 'e10f8916-24a9-4d69-a1d2-08537b0178a2');
+    const timingLog = state.logs.find((l) => l.correlationId === res.headers.get('X-Request-ID'));
     assert.ok(timingLog);
     const gwPhase = timingLog.phases.find((p: any) => p.phase === 'razorpay_gateway_call');
     assert.ok(gwPhase);
