@@ -10,6 +10,9 @@ async function run() {
   const originalFindMany = settlementDelegate.findMany;
   const originalUpdate = settlementDelegate.update;
   const originalAuditCreate = auditLogDelegate.create;
+  const userDelegate = db.user as any;
+  const originalUserFindUnique = userDelegate.findUnique;
+  userDelegate.findUnique = async () => ({ tokenVersion: 1 });
 
   let currentSettlement = {
     id: 'settlement-1',
@@ -95,6 +98,7 @@ async function run() {
     settlementDelegate.findMany = originalFindMany;
     settlementDelegate.update = originalUpdate;
     auditLogDelegate.create = originalAuditCreate;
+    userDelegate.findUnique = originalUserFindUnique;
     await db.$disconnect();
   }
 }

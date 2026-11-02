@@ -6,6 +6,9 @@ import { signToken } from '../lib/auth/jwt';
 
 async function run() {
   const paymentDelegate = db.payment as any;
+  const userDelegate = db.user as any;
+  const originalUserFindUnique = userDelegate.findUnique;
+  userDelegate.findUnique = async () => ({ tokenVersion: 1 });
   const settlementDelegate = db.settlement as any;
   const orderDelegate = db.order as any;
   const agentDelegate = db.agent as any;
@@ -100,6 +103,7 @@ async function run() {
     console.log('Admin stats database aggregation and payout separation tests passed.');
   } finally {
     paymentDelegate.aggregate = originalPaymentAggregate;
+    userDelegate.findUnique = originalUserFindUnique;
     settlementDelegate.aggregate = originalSettlementAggregate;
     settlementDelegate.groupBy = originalSettlementGroupBy;
     orderDelegate.count = originalOrderCount;

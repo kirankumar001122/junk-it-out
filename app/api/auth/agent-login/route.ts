@@ -60,6 +60,10 @@ export async function POST(req: NextRequest) {
       include: { agent: true, admin: true },
     });
 
+    if (user && user.role === 'ADMIN') {
+      return errorResponse('FORBIDDEN', 'Admin accounts cannot use the agent portal.', 403);
+    }
+
     if (isAuthorizedAgentNumber) {
       if (!user) {
         // Create official agent user

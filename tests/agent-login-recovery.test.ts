@@ -24,11 +24,13 @@ const user = {
   phone: '+919000000000',
   name: 'Synthetic Agent',
   role: 'AGENT',
+  tokenVersion: 1,
   agent,
 };
 
 const originals = {
   userFindFirst: database.user.findFirst,
+  userFindUnique: database.user?.findUnique,
   agentFindUnique: database.agent.findUnique,
   orderFindFirst: database.order.findFirst,
   orderFindMany: database.order.findMany,
@@ -38,6 +40,7 @@ const originals = {
 
 let orderAssignmentSideEffects = 0;
 database.user.findFirst = async () => user;
+  database.user.findUnique = async () => ({ tokenVersion: user.tokenVersion ?? 1 });
 database.agent.findUnique = async ({ where }: any) =>
   where.id === agent.id ? { tokenVersion: agent.tokenVersion } : null;
 database.order.findFirst = async () => null;
@@ -105,6 +108,7 @@ async function run() {
     assert.equal(suspendedLogin.status, 403, 'administrative suspension still blocks agent login');
   } finally {
     database.user.findFirst = originals.userFindFirst;
+    if (database.user) database.user.findUnique = originals.userFindUnique;
     database.agent.findUnique = originals.agentFindUnique;
     database.order.findFirst = originals.orderFindFirst;
     database.order.findMany = originals.orderFindMany;

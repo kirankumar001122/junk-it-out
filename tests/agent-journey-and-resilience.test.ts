@@ -23,6 +23,7 @@ async function runTests() {
   const { signToken } = await import('../lib/auth/jwt');
 
   const database = db as any;
+database.user = { ...database.user, findUnique: async () => ({ tokenVersion: 1 }) };
 
   function createAgentToken(agentId: string = 'agent-123', userId: string = 'user-agent-123') {
     return signToken({

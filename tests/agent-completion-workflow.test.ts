@@ -9,6 +9,7 @@ import { broadcaster } from '../lib/realtime';
 process.env.JWT_SECRET = 'test-agent-completion-secret-key-2026';
 
 const database = db as any;
+database.user = { ...database.user, findUnique: async () => ({ tokenVersion: 1 }) };
 
 function createAgentToken(agentId: string = 'agent-123', userId: string = 'user-agent-123') {
   return signToken({

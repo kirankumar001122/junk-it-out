@@ -56,6 +56,9 @@ async function run() {
   orderDelegate.findUnique = async () => order;
   orderDelegate.findFirst = async () => order;
   agentDelegate.findUnique = async ({ where }: any) => agents.get(where.id) || agent;
+  const userDelegate = db.user as any;
+  const originalUserFindUnique = userDelegate.findUnique;
+  userDelegate.findUnique = async () => ({ tokenVersion: 1 });
   (db as any).$transaction = async (callback: (tx: any) => Promise<unknown>) => callback({
     $queryRaw: async () => [],
     order: {
@@ -215,6 +218,7 @@ async function run() {
     orderDelegate.findUnique = originalOrderFindUnique;
     orderDelegate.findFirst = originalOrderFindFirst;
     agentDelegate.findUnique = originalAgentFindUnique;
+    userDelegate.findUnique = originalUserFindUnique;
     (db as any).$transaction = originalTransaction;
     await db.$disconnect();
   }

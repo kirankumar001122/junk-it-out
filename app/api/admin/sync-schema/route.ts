@@ -37,13 +37,13 @@ export async function GET(req: NextRequest) {
         userName: authUser.name,
         action: 'SCHEMA_STATUS_INSPECTED',
         oldValue: null,
-        newValue: `Complaint.orderId nullable: ${isNullable}. Runtime DDL execution retired; use version-controlled Prisma migrations.`,
+        newValue: "Complaint.orderId nullable: " + isNullable + ". Runtime DDL execution retired; use version-controlled Prisma migrations.",
       },
     }).catch(() => null);
 
     return NextResponse.json({
       success: true,
-      message: 'Schema inspection complete. Runtime DDL execution is disabled; schema migrations are managed via version-controlled Prisma migrations.',
+      message: 'Complaint schema diagnostic complete. No schema changes were made.',
       details: {
         targetTable: 'Complaint',
         targetColumn: 'orderId',

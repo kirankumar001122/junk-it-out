@@ -7,6 +7,7 @@ import { signToken } from '../lib/auth/jwt';
 process.env.JWT_SECRET = 'agent-accept-concurrency-test-secret';
 
 const database = db as any;
+  database.user = { ...database.user, findUnique: async () => ({ tokenVersion: 1 }) };
 
 function makeOrder(id: string, area: string = 'JP Nagar') {
   return {

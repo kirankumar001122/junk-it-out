@@ -7,6 +7,7 @@ import { signToken } from '../lib/auth/jwt';
 process.env.JWT_SECRET = 'test-agent-accept-secret-key-2026';
 
 const database = db as any;
+database.user = { ...database.user, findUnique: async () => ({ tokenVersion: 1 }) };
 
 function createAgentToken(agentId: string = 'agent-123', userId: string = 'user-agent-123') {
   return signToken({

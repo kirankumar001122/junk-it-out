@@ -95,6 +95,7 @@ const originalHttpsRequest = https.request;
 // Prisma DB mocking
 const originalTransaction = (db as any).$transaction;
 const paymentDelegate = db.payment as any;
+(db as any).user = { ...(db as any).user, findUnique: async () => ({ tokenVersion: 1 }) };
 const orderDelegate = db.order as any;
 const attemptDelegate = (db as any).refundAttempt;
 const eventDelegate = (db as any).refundAttemptEvent;

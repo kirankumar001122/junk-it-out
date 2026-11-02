@@ -35,6 +35,7 @@ async function run() {
     categoryUpdate: categoryDelegate.update,
   };
   let categoryWrites = 0;
+  (db as any).user = { ...(db as any).user, findUnique: async () => ({ tokenVersion: 1 }) };
 
   auditDelegate.findMany = async () => [];
   auditDelegate.create = async () => ({ id: 'audit-test' });

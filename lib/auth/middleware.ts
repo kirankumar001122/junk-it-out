@@ -15,48 +15,29 @@ export async function validatePayload(
   try {
     // 1. Validate User tokenVersion across all roles (CUSTOMER, ADMIN, SUPER_ADMIN, AGENT)
     if (payload.userId) {
-      let user: any = null;
-      try {
-        user = actualUserFinder
-          ? await actualUserFinder(payload.userId)
-          : await db.user.findUnique({
-              where: { id: payload.userId },
-              select: { tokenVersion: true } as any,
-            });
-      } catch (err: any) {
-        if (err?.name === 'PrismaClientInitializationError' && process.env.NODE_ENV === 'test') {
-          user = { tokenVersion: 1 };
-        } else {
-          throw err;
-        }
-      }
+      const user = actualUserFinder
+        ? await actualUserFinder(payload.userId)
+        : await db.user.findUnique({
+            where: { id: payload.userId },
+            select: { tokenVersion: true } as any,
+          });
 
-      if (user) {
-        const currentDbVersion = user.tokenVersion ?? 1;
-        const tokenVersion = payload.tokenVersion ?? 1;
-        if (tokenVersion !== currentDbVersion) {
-          return null;
-        }
+      if (!user) return null;
+      const currentDbVersion = user.tokenVersion ?? 1;
+      const tokenVersion = payload.tokenVersion ?? 1;
+      if (tokenVersion !== currentDbVersion) {
+        return null;
       }
     }
 
     // 2. Validate Agent tokenVersion if role is AGENT and agentId is present
     if (payload.role === 'AGENT' && payload.agentId) {
-      let agent: any = null;
-      try {
-        agent = actualAgentFinder
-          ? await actualAgentFinder(payload.agentId)
-          : await db.agent.findUnique({
-              where: { id: payload.agentId },
-              select: { tokenVersion: true } as any,
-            });
-      } catch (err: any) {
-        if (err?.name === 'PrismaClientInitializationError' && process.env.NODE_ENV === 'test') {
-          agent = { tokenVersion: 1 };
-        } else {
-          throw err;
-        }
-      }
+      const agent = actualAgentFinder
+        ? await actualAgentFinder(payload.agentId)
+        : await db.agent.findUnique({
+            where: { id: payload.agentId },
+            select: { tokenVersion: true } as any,
+          });
 
       if (!agent) return null;
       const currentDbVersion = (agent as any).tokenVersion ?? 1;
@@ -65,8 +46,10 @@ export async function validatePayload(
         return null;
       }
     }
-  } catch (e) {
-    console.error('Token version check error:', e);
+  } catch (e: any) {
+    console.error('Agent token version validation failed:', {
+      errorType: e instanceof Error ? e.name : 'UnknownError',
+    });
     return null;
   }
 
@@ -114,7 +97,7 @@ export async function getAuthUser(req: NextRequest): Promise<JwtPayload | null> 
     }
   }
 
-  // Check Cookies for `jio_token`
+  // Check Cookies for jio_token
   const tokenCookie = req.cookies.get('jio_token')?.value;
   if (tokenCookie) {
     const payload = verifyToken(tokenCookie);

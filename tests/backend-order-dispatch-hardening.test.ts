@@ -27,6 +27,7 @@ async function runHardeningTests() {
   const { db } = await import('../lib/db');
 
   const database = db as any;
+  database.user = { ...database.user, findUnique: async () => ({ id: 'user-sk', tokenVersion: 1 }) };
 
   console.log('--- RUNNING BACKEND ORDER & DISPATCH HARDENING TESTS ---');
 
@@ -324,7 +325,7 @@ async function runHardeningTests() {
       },
       items: [{ categoryId: 'cat-1', estimatedWeight: 10 }],
       pickupType: 'SCHEDULED',
-      scheduledSlot: 'Tomorrow (2026-10-31), 10:00 AM - 12:00 PM',
+      scheduledSlot: 'Tomorrow (2026-11-03), 10:00 AM - 12:00 PM',
     });
     assert.equal(validFuture.valid, true);
 

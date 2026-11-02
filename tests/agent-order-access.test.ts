@@ -19,11 +19,13 @@ let activeOrder: { id: string } | null = null;
 let locationQueries = 0;
 let mockOrdersList: any[] = [];
 
+database.user = { ...database.user, findUnique: async () => ({ tokenVersion: 1 }) };
 const originals = {
   agentFindUnique: database.agent.findUnique,
   orderFindFirst: database.order.findFirst,
   agentLocationFindMany: database.agentLocation.findMany,
   orderFindMany: database.order.findMany,
+  userFindUnique: database.user?.findUnique,
 };
 
 database.agent.findUnique = async ({ where, select }: any) => {
@@ -332,6 +334,7 @@ async function run() {
     database.order.findFirst = originals.orderFindFirst;
     database.agentLocation.findMany = originals.agentLocationFindMany;
     database.order.findMany = originals.orderFindMany;
+    if (database.user) database.user.findUnique = originals.userFindUnique;
   }
 }
 
