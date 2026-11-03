@@ -296,6 +296,16 @@ export default function AgentDashboardPage() {
     }
   }, [isOnline, activeOrder?.status]);
 
+  // Polling fallback: periodically sync agent data when online to recover from dropped SSE
+  useEffect(() => {
+    if (!agent?.id || !isOnline) return;
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      void fetchAgentData(false);
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [agent?.id, isOnline, fetchAgentData]);
+
   // Authenticated Agent SSE Stream Connection for NEW_PICKUP_AVAILABLE Notifications
   useEffect(() => {
     if (!agent?.id || !isOnline) return;
@@ -340,6 +350,24 @@ export default function AgentDashboardPage() {
           console.error('[AGENT SSE] Error parsing assignment notification:', err);
         }
       });
+
+      const handleOrderUpdateOrCancellation = (e: MessageEvent) => {
+        try {
+          const payload = JSON.parse(e.data);
+          const isCancelled =
+            e.type === 'ORDER_CANCELLED' || payload?.status === 'CANCELLED';
+          if (isCancelled) {
+            const num = payload?.orderNumber ? ` #${payload.orderNumber}` : '';
+            setStatusNotice(`Order${num} has been cancelled by the customer.`);
+          }
+          void fetchAgentData(false);
+        } catch (err) {
+          console.error('[AGENT SSE] Error parsing order update/cancellation event:', err);
+        }
+      };
+
+      eventSource.addEventListener('ORDER_CANCELLED', handleOrderUpdateOrCancellation);
+      eventSource.addEventListener('ORDER_UPDATED', handleOrderUpdateOrCancellation);
 
       eventSource.onerror = () => {
         // EventSource will automatically handle reconnection safely

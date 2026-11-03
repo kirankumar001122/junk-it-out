@@ -17,36 +17,53 @@ export const REFUND_REQUEST_STATUSES = [
 
 export type RefundRequestStatus = (typeof REFUND_REQUEST_STATUSES)[number];
 
+export function isTableMissingError(error: unknown): boolean {
+  if (!error) return false;
+  if ((error as any).code === 'P2021') return true;
+  const msg = (error as any).message || String(error);
+  return /table .* does not exist|relation .* does not exist/i.test(msg);
+}
+
 export async function createRefundRequestForCapturedPayment(
   tx: Prisma.TransactionClient,
   orderId: string,
   requestedByUserId: string,
 ) {
-  const existing = await tx.refundRequest.findUnique({
-    where: { orderId },
-  });
-  if (existing) return existing;
+  try {
+    const existing = await tx.refundRequest.findUnique({
+      where: { orderId },
+    });
+    if (existing) return existing;
 
-  const payment = await tx.payment.findFirst({
-    where: {
-      orderId,
-      direction: 'CUSTOMER_PAYS',
-      status: 'CAPTURED',
-      paymentId: { not: null },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
-  if (!payment || !payment.paymentId) return null;
+    const payment = await tx.payment.findFirst({
+      where: {
+        orderId,
+        direction: 'CUSTOMER_PAYS',
+        status: 'CAPTURED',
+        paymentId: { not: null },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!payment || !payment.paymentId) return null;
 
-  return tx.refundRequest.create({
-    data: {
-      orderId,
-      paymentId: payment.id,
-      requestedByUserId,
-      amount: payment.amount,
-      status: 'PENDING_ADMIN_REVIEW',
-    },
-  });
+    return await tx.refundRequest.create({
+      data: {
+        orderId,
+        paymentId: payment.id,
+        requestedByUserId,
+        amount: payment.amount,
+        status: 'PENDING_ADMIN_REVIEW',
+      },
+    });
+  } catch (error: any) {
+    if (isTableMissingError(error)) {
+      console.warn(
+        `[REFUND_REQUEST_NOTICE] Table RefundRequest does not exist in database yet (P2021). Skipping record creation for order ${orderId}.`,
+      );
+      return null;
+    }
+    throw error;
+  }
 }
 
 function isUncertainRefundError(error: unknown) {

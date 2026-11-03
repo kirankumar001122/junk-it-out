@@ -120,7 +120,11 @@ export async function POST(
       );
     }
 
-    if (['CANCELLED', 'PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'].includes(order.status)) {
+    if (order.status === 'CANCELLED') {
+      return errorResponse('ORDER_CANCELLED', 'Order has been cancelled by customer.', 409);
+    }
+
+    if (['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'].includes(order.status)) {
       return errorResponse('ORDER_UNAVAILABLE', 'This pickup is no longer available for acceptance.', 400);
     }
 

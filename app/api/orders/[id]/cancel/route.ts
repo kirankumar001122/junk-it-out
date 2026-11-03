@@ -152,11 +152,24 @@ export async function POST(
           }
         ).refundRequest;
         if (refundRequestModel) {
-          await createRefundRequestForCapturedPayment(
-            tx,
-            order.id,
-            authUser.userId,
-          );
+          try {
+            await createRefundRequestForCapturedPayment(
+              tx,
+              order.id,
+              authUser.userId,
+            );
+          } catch (refundReqErr: any) {
+            if (
+              refundReqErr?.code === 'P2021' ||
+              /does not exist/i.test(refundReqErr?.message || '')
+            ) {
+              console.warn(
+                `[CANCELLATION P2021 NOTICE] RefundRequest table not yet created in DB. Proceeding with order cancellation and setting paymentStatus to REFUND_PENDING.`,
+              );
+            } else {
+              throw refundReqErr;
+            }
+          }
         }
 
         const payment = await tx.payment.findFirst({
@@ -286,6 +299,15 @@ export async function POST(
     }
 
     broadcaster.broadcast('ORDER_UPDATED', cancelledOrder);
+    if (order.agentId) {
+      broadcaster.broadcast('ORDER_CANCELLED', {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        agentId: order.agentId,
+        status: 'CANCELLED',
+        reason,
+      });
+    }
     return NextResponse.json({
       success: true,
       message: isPaid

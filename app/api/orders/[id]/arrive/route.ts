@@ -36,6 +36,10 @@ export async function POST(
       return errorResponse('FORBIDDEN', 'Order is assigned to another agent.', 403);
     }
 
+    if (order.status === 'CANCELLED') {
+      return errorResponse('ORDER_CANCELLED', 'Order has been cancelled by customer.', 409);
+    }
+
     const oldStatus = order.status;
     const newStatus = 'AGENT_ARRIVED';
 
