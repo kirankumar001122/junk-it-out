@@ -15,6 +15,7 @@ const state = {
   gatewayErrorToThrow: null as any,
   gatewayDelayMs: 0,
   postGatewayTxShouldFail: false,
+  auditLogShouldFail: false,
   lastRazorpayOrderParams: null as any,
   currentUser: {
     userId: 'customer-user-timing-1',
@@ -245,7 +246,12 @@ vi.mock('@/lib/db', () => {
   };
 
   const auditLog = {
-    create: vi.fn(async ({ data }: any) => ({ id: 'audit-1', ...data })),
+    create: vi.fn(async ({ data }: any) => {
+      if (state.auditLogShouldFail) {
+        throw new Error('Simulated database audit logging failure (e.g. disk full / constraint error)');
+      }
+      return { id: 'audit-1', ...data };
+    }),
     findFirst: vi.fn(async () => null),
   };
 
@@ -362,6 +368,7 @@ describe('Payment Delay Diagnostics & Timing Telemetry', () => {
     state.gatewayErrorToThrow = null;
     state.gatewayDelayMs = 0;
     state.postGatewayTxShouldFail = false;
+    state.auditLogShouldFail = false;
     state.lastRazorpayOrderParams = null;
     state.logs = [];
     state.serviceAreaFindManyCalls = 0;
@@ -997,5 +1004,62 @@ describe('Payment Delay Diagnostics & Timing Telemetry', () => {
     const badRes = await putServiceArea(badReq);
     assert.equal(badRes.status, 400);
     assert.ok(getCachedServiceAreas(), 'Cache must not be invalidated on invalid input');
+  });
+
+  it('invalidates both service area caches even if audit-log creation fails after service-area mutation', async () => {
+    setCachedServiceAreas([{ id: 'sa-southblr', status: 'ACTIVE' }]);
+    assert.ok(getCachedServiceAreas());
+
+    // Warm up the booking geofence cache
+    state.serviceAreaFindManyCalls = 0;
+    await createOrderRoute(
+      createPostRequest('/api/orders', validBookingPayload, { 'Idempotency-Key': `idem-sa-auditfail-1-${Date.now()}` })
+    );
+    assert.equal(state.serviceAreaFindManyCalls, 1, 'Geofence cache loaded on miss');
+
+    // Simulate audit logging failure
+    state.auditLogShouldFail = true;
+    state.currentUser = { ...state.currentUser, role: 'ADMIN', adminId: 'admin-1' };
+
+    const saPutReq = createPostRequest('/api/service-areas', { id: 'sa-southblr', status: 'INACTIVE' });
+    const saPutRes = await putServiceArea(saPutReq);
+    assert.equal(saPutRes.status, 200, 'Service area update succeeds despite non-critical audit log failure');
+
+    // Crucial check: caches must be invalidated despite audit log failure
+    assert.equal(getCachedServiceAreas(), null, 'serviceAreasCache must be invalidated despite audit log failure');
+
+    state.currentUser = { ...state.currentUser, role: 'CUSTOMER', adminId: undefined };
+    await createOrderRoute(
+      createPostRequest('/api/orders', validBookingPayload, { 'Idempotency-Key': `idem-sa-auditfail-2-${Date.now()}` })
+    );
+    assert.equal(state.serviceAreaFindManyCalls, 2, 'Geofence cache was invalidated and refetched from DB');
+  });
+
+  it('invalidates both service area caches even if audit-log creation fails after admin pricing mutation', async () => {
+    setCachedServiceAreas([{ id: 'sa-southblr', status: 'ACTIVE' }]);
+    assert.ok(getCachedServiceAreas());
+
+    state.serviceAreaFindManyCalls = 0;
+    await createOrderRoute(
+      createPostRequest('/api/orders', validBookingPayload, { 'Idempotency-Key': `idem-pr-auditfail-1-${Date.now()}` })
+    );
+    assert.equal(state.serviceAreaFindManyCalls, 1);
+
+    // Simulate audit logging failure
+    state.auditLogShouldFail = true;
+    state.currentUser = { ...state.currentUser, role: 'ADMIN', adminId: 'admin-1' };
+
+    const pricingReq = createPostRequest('/api/admin/pricing', { basePickupCharge: 50 });
+    const pricingRes = await putPricing(pricingReq);
+    assert.equal(pricingRes.status, 200, 'Pricing update succeeds despite non-critical audit log failure');
+
+    // Crucial check: caches must be invalidated despite audit log failure
+    assert.equal(getCachedServiceAreas(), null, 'serviceAreasCache must be invalidated despite audit log failure');
+
+    state.currentUser = { ...state.currentUser, role: 'CUSTOMER', adminId: undefined };
+    await createOrderRoute(
+      createPostRequest('/api/orders', validBookingPayload, { 'Idempotency-Key': `idem-pr-auditfail-2-${Date.now()}` })
+    );
+    assert.equal(state.serviceAreaFindManyCalls, 2, 'Geofence cache was invalidated despite audit log failure and refetched from DB');
   });
 });
