@@ -30,6 +30,15 @@ export class OrderExecutionTimer {
     return durationMs;
   }
 
+  getServerTimingHeader(): string {
+    const totalDurationMs = Math.round((performance.now() - this.startTime) * 100) / 100;
+    const parts = this.phases.map(
+      (p) => `${p.phase.replace(/[^a-zA-Z0-9_]/g, '_')};dur=${p.durationMs}`
+    );
+    parts.push(`total;dur=${totalDurationMs}`);
+    return parts.join(', ');
+  }
+
   finish(extraMeta?: Record<string, unknown>) {
     const totalDurationMs = Math.round((performance.now() - this.startTime) * 100) / 100;
 

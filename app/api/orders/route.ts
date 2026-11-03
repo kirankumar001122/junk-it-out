@@ -1,6 +1,7 @@
 import {
   createRazorpayOrder,
   RazorpayOrderCreationError,
+  warmRazorpayConnection,
 } from '@/lib/payments/razorpay';
 import { OrderExecutionTimer } from '@/lib/observability/orderTimingDiagnostics';
 import { isAgentEligibleForServiceArea } from '@/lib/services/agentService';
@@ -37,6 +38,9 @@ export const runtime = 'nodejs';
 async function handlePost(req: NextRequest) {
   const timer = new OrderExecutionTimer(getCurrentRequestId());
   try {
+    try {
+      warmRazorpayConnection();
+    } catch {}
     const authUser = await measureTiming('auth.lookup', () => getAuthUser(req));
 
     const isAdmin = authUser && ['ADMIN', 'SUPER_ADMIN'].includes(authUser.role);
@@ -356,6 +360,7 @@ async function handlePost(req: NextRequest) {
       }
     }
 
+    const serverTiming = timer.getServerTimingHeader();
     timer.finish({
       orderId: order.id,
       financialDirection: order.financialDirection,
@@ -365,7 +370,9 @@ async function handlePost(req: NextRequest) {
     const responseData = paymentConfig
       ? { ...order, paymentStatus: 'INITIATED', paymentConfig }
       : order;
-    return successResponse(responseData, 201);
+    const response = successResponse(responseData, 201);
+    response.headers.set('Server-Timing', serverTiming);
+    return response;
   } catch (err: any) {
     console.error(
       'Order creation error:',

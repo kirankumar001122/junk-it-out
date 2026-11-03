@@ -132,6 +132,30 @@ export async function saveCustomerAddress(
   }
 
   const isDefault = addressData.isDefault ?? true;
+  const shouldResetExisting = isDefault && options?.hasExistingDefault !== false;
+
+  // Optimization: If no existing default address needs resetting, execute single create directly
+  // avoiding interactive transaction connection acquisition and lock contention.
+  if (!shouldResetExisting && typeof db.address?.create === 'function') {
+    return db.address.create({
+      data: {
+        userId,
+        label: addressData.label || 'Home',
+        name: addressData.name,
+        phone: addressData.phone,
+        houseNo: addressData.houseNo,
+        building: addressData.building || null,
+        street: addressData.street,
+        area: addressData.area,
+        landmark: addressData.landmark || null,
+        pincode: cleanPincode,
+        lat: numLat,
+        lng: numLng,
+        googlePlaceId: addressData.googlePlaceId || null,
+        isDefault,
+      },
+    });
+  }
 
   const runTx = async (tx: any) => {
     const addressClient = tx?.address || db.address;

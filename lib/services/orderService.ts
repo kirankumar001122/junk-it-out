@@ -268,7 +268,9 @@ export async function createOrder(
         input.address.area
       ),
     ),
-    authUser?.userId
+    (authUser as any)?.user?.customer
+      ? Promise.resolve((authUser as any).user)
+      : authUser?.userId
       ? measureTiming(
           'order.lookup.customer_profile',
           () => db.user.findUnique({
