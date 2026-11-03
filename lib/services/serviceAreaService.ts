@@ -9,7 +9,7 @@ interface CachedServiceArea {
   parsedPolygon: [number, number][];
 }
 
-export const SERVICE_AREAS_CACHE_TTL_MS = 600_000; // 10 minutes cache TTL for zone boundaries
+export const SERVICE_AREAS_CACHE_TTL_MS = 120_000; // 2 minutes cache TTL for zone boundaries
 
 let serviceAreaCache: { areas: CachedServiceArea[]; expiresAt: number } | null = null;
 

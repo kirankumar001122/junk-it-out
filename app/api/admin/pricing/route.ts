@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { invalidateServiceAreasCache } from '@/lib/cache/serviceAreasCache';
+import { invalidateServiceAreaCache } from '@/lib/services/serviceAreaService';
 import { invalidateAdminStatsCache } from '@/lib/cache/adminStatsCache';
 
 const DEFAULT_PRICING = {
@@ -138,6 +139,7 @@ export async function PUT(req: NextRequest) {
 
     // 3. Invalidate relevant caches
     invalidateServiceAreasCache();
+    invalidateServiceAreaCache();
     invalidateAdminStatsCache();
 
     return successResponse(updatedRates);

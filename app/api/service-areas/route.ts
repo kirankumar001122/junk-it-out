@@ -5,6 +5,7 @@ import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 
 import { getCachedServiceAreas, setCachedServiceAreas, invalidateServiceAreasCache } from '@/lib/cache/serviceAreasCache';
+import { invalidateServiceAreaCache } from '@/lib/services/serviceAreaService';
 
 export async function GET(req: NextRequest) {
   try {
@@ -94,6 +95,7 @@ export async function PUT(req: NextRequest) {
     }).catch(() => null);
 
     invalidateServiceAreasCache();
+    invalidateServiceAreaCache();
     return successResponse(updated);
   } catch (err: any) {
     console.error('Update service area error:', err);
