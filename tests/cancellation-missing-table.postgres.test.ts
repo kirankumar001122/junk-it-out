@@ -96,7 +96,6 @@ async function run() {
         phone: testUserPhone,
         name: 'PG Test Customer',
         role: 'CUSTOMER',
-        tokenVersion: 1,
       },
     });
 
