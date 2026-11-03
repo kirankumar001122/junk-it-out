@@ -41,6 +41,99 @@ const STALE_AFTER_MS = 30_000;
 const DEFAULT_PICKUP_LAT = 12.9077;
 const DEFAULT_PICKUP_LNG = 77.5854;
 
+function ScaleProofEvidence({
+  weightRecord,
+  orderId,
+}: {
+  weightRecord: any;
+  orderId: string;
+}) {
+  const [imageError, setImageError] = useState(false);
+  const rawPhotoUrl =
+    typeof weightRecord?.scalePhotoUrl === 'string'
+      ? weightRecord.scalePhotoUrl.trim()
+      : null;
+  const secureUrl = rawPhotoUrl ? getSecurePhotoUrl(rawPhotoUrl, orderId) : null;
+  const hasValidPhoto = Boolean(secureUrl && !imageError);
+
+  const formattedDate = weightRecord?.createdAt
+    ? new Date(weightRecord.createdAt).toLocaleString(undefined, {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      })
+    : null;
+
+  return (
+    <div className="pt-4 border-t border-slate-100 bg-slate-50 p-4 rounded-2xl">
+      <h4 className="text-xs font-bold text-slate-700 mb-2.5 flex items-center gap-1.5">
+        <Scale className="w-4 h-4 text-emerald-600" />
+        Verified Weighing Scale Photo Proof
+      </h4>
+
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
+        {hasValidPhoto ? (
+          <a
+            href={secureUrl!}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block group shrink-0 relative"
+            title="Click to view full photograph"
+          >
+            <img
+              src={secureUrl!}
+              alt="Weighing Scale Proof"
+              loading="lazy"
+              decoding="async"
+              onError={() => setImageError(true)}
+              className="w-24 h-24 sm:w-28 sm:h-28 rounded-xl object-cover border border-slate-300 shadow-sm group-hover:scale-105 group-hover:shadow-md transition-all duration-200 bg-slate-100"
+            />
+            <span className="absolute bottom-1 right-1 bg-slate-900/70 text-white text-[10px] px-1.5 py-0.5 rounded backdrop-blur-xs pointer-events-none">
+              View
+            </span>
+          </a>
+        ) : (
+          <div
+            role="status"
+            aria-label="Doorstep scale verification note"
+            className="w-full sm:w-auto flex items-center gap-3 p-3 rounded-xl border border-dashed border-emerald-300 bg-emerald-50/70 shrink-0"
+          >
+            <div className="w-10 h-10 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-800">
+                Doorstep Scale Verification
+              </p>
+              <p className="text-[11px] text-slate-500">
+                {imageError
+                  ? 'Photo proof temporarily unavailable.'
+                  : 'Calibrated digital scale verification performed on site.'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div className="text-xs text-slate-600 space-y-1">
+          <p className="font-bold text-slate-900 flex items-center gap-1">
+            <CheckCircle className="w-3.5 h-3.5 text-emerald-600 inline" />
+            Recorded on Digital Scale
+          </p>
+
+          {formattedDate && (
+            <p className="text-slate-500 text-[11px]">
+              Recorded at: {formattedDate}
+            </p>
+          )}
+
+          <p className="text-emerald-700 font-semibold text-[11px]">
+            Verified by agent on site.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export const isCustomerCancellable = (status?: string): boolean => {
   return [
     'BOOKING_RECEIVED',
@@ -1368,7 +1461,7 @@ export default function OrderTrackingPage() {
 
               <div className="flex flex-wrap items-center gap-3">
                 {parsedPhotos.map((url: string, idx: number) => {
-                  const displayUrl = getSecurePhotoUrl(url);
+                  const displayUrl = getSecurePhotoUrl(url, order.id);
 
                   return (
                     <a
@@ -1395,37 +1488,10 @@ export default function OrderTrackingPage() {
 
         {/* SCALE PROOF PHOTO */}
         {order.weightRecords && order.weightRecords.length > 0 && (
-          <div className="pt-4 border-t border-slate-100 bg-slate-50 p-4 rounded-2xl">
-            <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
-              <Scale className="w-4 h-4 text-emerald-600" />
-              Verified Weighing Scale Photo Proof
-            </h4>
-
-            <div className="flex items-center gap-4">
-              <img
-                src={getSecurePhotoUrl(order.weightRecords[0].scalePhotoUrl)}
-                alt="Weighing Scale Proof"
-                loading="lazy"
-                decoding="async"
-                className="w-24 h-24 rounded-xl object-cover border border-slate-300 shadow-sm"
-              />
-
-              <div className="text-xs text-slate-600 space-y-1">
-                <p className="font-bold text-slate-900">
-                  Recorded on Digital Scale
-                </p>
-
-                <p>
-                  Recorded at:{" "}
-                  {new Date(order.weightRecords[0].createdAt).toLocaleString()}
-                </p>
-
-                <p className="text-emerald-700 font-semibold">
-                  Verified by agent on site.
-                </p>
-              </div>
-            </div>
-          </div>
+          <ScaleProofEvidence
+            weightRecord={order.weightRecords[0]}
+            orderId={order.id}
+          />
         )}
 
         {/* SCRAP SETTLEMENT */}

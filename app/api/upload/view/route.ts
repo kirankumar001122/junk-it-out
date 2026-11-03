@@ -14,12 +14,18 @@ const PRIVATE_CACHE_HEADERS = {
 
 function extractFilename(targetUrl: string): string | null {
   try {
-    let pathname = targetUrl.split('?')[0];
+    let decoded = targetUrl;
+    try {
+      decoded = decodeURIComponent(targetUrl);
+    } catch {
+      // Keep original string if decode fails
+    }
+    let pathname = decoded.split('?')[0];
     if (pathname.startsWith('http://') || pathname.startsWith('https://')) {
-      pathname = new URL(targetUrl).pathname;
+      pathname = new URL(decoded).pathname;
     }
     const filename = path.basename(pathname);
-    return /^waste-photo-[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp)$/i.test(filename) ? filename : null;
+    return /^[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp)$/i.test(filename) ? filename : null;
   } catch {
     return null;
   }
@@ -30,7 +36,7 @@ function isValidBlobTarget(targetUrl: string): boolean {
     const parsed = new URL(targetUrl);
     return parsed.protocol === 'https:' && parsed.hostname.endsWith('.blob.vercel-storage.com');
   } catch {
-    return /^(\/)?waste-photo-[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp)$/i.test(targetUrl);
+    return /^(\/)?([a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp))$/i.test(targetUrl);
   }
 }
 
