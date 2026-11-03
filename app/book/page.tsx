@@ -27,7 +27,7 @@ import CustomerOtpLogin from '@/components/CustomerOtpLogin';
 import WeightQuantityInput from '@/components/WeightQuantityInput';
 import LocationSearchModal from '@/components/LocationSearchModal';
 import InteractiveMap, { loadGoogleMaps } from '@/components/InteractiveMap';
-import { readPickupCart } from '@/lib/pickupCart';
+import { clearPickupCart, pickupCartEvent, readPickupCart, replacePickupCart } from '@/lib/pickupCart';
 import { getSelectedLocation, setSelectedLocation, LOCATION_CHANGE_EVENT } from '@/lib/selectedLocation';
 import { loadRazorpayScript } from '@/lib/razorpayClient';
 import { isCustomerWasteCategory, getMaterialImageUrl, subscribeWasteCategoriesChanged } from '@/lib/customerWasteCategories';
@@ -372,6 +372,42 @@ export default function BookingPage() {
       selectedItems.map((i) => (i.categoryId === catId ? { ...i, estimatedWeight: safeWeight } : i))
     );
   };
+
+  // Keep the Pickup Cart drawer in sync with the materials/weights selected here,
+  // so the cart summary and the booking summary always show the same prices.
+  const cartSyncReadyRef = useRef(false);
+  useEffect(() => {
+    if (categories.length === 0 || selectedItems.length === 0) return;
+    if (successOrder) {
+      clearPickupCart();
+      return;
+    }
+    cartSyncReadyRef.current = true;
+    replacePickupCart(
+      selectedItems.map((item) => ({ categoryId: item.categoryId, quantity: item.estimatedWeight }))
+    );
+  }, [selectedItems, categories.length, successOrder]);
+
+  // Reflect quantity changes made inside the Pickup Cart drawer back on this page.
+  useEffect(() => {
+    const handleCartChange = () => {
+      if (!cartSyncReadyRef.current) return;
+      const cart = readPickupCart().filter((item) => categories.some((c: any) => c.id === item.categoryId));
+      if (cart.length === 0) return; // Booking always keeps at least one material
+      setSelectedItems((prev) => {
+        const next = cart.map((item) => ({
+          categoryId: item.categoryId,
+          estimatedWeight: Math.max(1, item.quantity || 1),
+        }));
+        const same =
+          prev.length === next.length &&
+          prev.every((p, idx) => p.categoryId === next[idx].categoryId && p.estimatedWeight === next[idx].estimatedWeight);
+        return same ? prev : next;
+      });
+    };
+    window.addEventListener(pickupCartEvent, handleCartChange);
+    return () => window.removeEventListener(pickupCartEvent, handleCartChange);
+  }, [categories]);
 
   const calculateEstimate = () => {
     const summary = calculatePickupSummary(
