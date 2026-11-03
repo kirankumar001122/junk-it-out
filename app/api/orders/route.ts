@@ -5,6 +5,7 @@ import {
 } from '@/lib/payments/razorpay';
 import { OrderExecutionTimer } from '@/lib/observability/orderTimingDiagnostics';
 import { isAgentEligibleForServiceArea } from '@/lib/services/agentService';
+import { shouldHideAgentContact } from '@/lib/orders/lifecycle';
 import { NextRequest } from 'next/server';
 import {
   createOrder,
@@ -769,8 +770,27 @@ async function handleGet(req: NextRequest) {
 
     const total = await db.order.count({ where: whereClause }).catch(() => orders.length);
 
+    const isAdmin = authUser.role === 'ADMIN' || authUser.role === 'SUPER_ADMIN';
+    const sanitizedOrders = !isAdmin
+      ? orders.map((o: any) => {
+          if (o.agent?.user && shouldHideAgentContact(o.status)) {
+            return {
+              ...o,
+              agent: {
+                ...o.agent,
+                user: {
+                  ...o.agent.user,
+                  phone: null,
+                },
+              },
+            };
+          }
+          return o;
+        })
+      : orders;
+
     return successResponse(
-      orders,
+      sanitizedOrders,
       200,
       {
         page,

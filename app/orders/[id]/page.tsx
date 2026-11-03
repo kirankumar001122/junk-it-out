@@ -24,6 +24,7 @@ import {
   X,
 } from "lucide-react";
 import CustomerOtpLogin from "@/components/CustomerOtpLogin";
+import { canCustomerContactAgent, isPickupCompletedStatus } from "@/lib/orders/lifecycle";
 import InteractiveMap from "@/components/InteractiveMap";
 import { getSecurePhotoUrl } from "@/lib/utils/photoUrl";
 import { getApiErrorMessage } from "@/lib/utils/apiErrorMessage";
@@ -1263,15 +1264,23 @@ export default function OrderTrackingPage() {
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-                <a
-                  href={`tel:${order.agent.user.phone}`}
-                  className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-xs py-2.5 rounded-xl border border-emerald-200 flex items-center justify-center gap-2 transition-colors"
-                >
-                  <PhoneCall className="w-4 h-4" />
-                  Call Agent ({order.agent.user.phone})
-                </a>
-              </div>
+              {canCustomerContactAgent(order.status) && order.agent.user?.phone ? (
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                  <a
+                    href={`tel:${order.agent.user.phone}`}
+                    className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-xs py-2.5 rounded-xl border border-emerald-200 flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <PhoneCall className="w-4 h-4" />
+                    Call Agent ({order.agent.user.phone})
+                  </a>
+                </div>
+              ) : isPickupCompletedStatus(order.status) ? (
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-center">
+                  <span className="text-[11px] font-semibold text-slate-500">
+                    Pickup completed by verified agent
+                  </span>
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-amber-900 text-xs font-semibold">

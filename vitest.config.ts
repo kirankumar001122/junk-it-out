@@ -58,6 +58,7 @@ export default defineConfig({
       'tests/receipt-pdf-download.test.ts',
       'tests/booking-payment-resilience.test.ts',
       'tests/accepted-materials-and-admin-audit.test.ts',
+      'tests/agent-contact-privacy.test.ts',
     ],
   },
 });
