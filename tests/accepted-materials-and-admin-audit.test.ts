@@ -21,24 +21,76 @@ process.env.JWT_SECRET =
 
 describe('Admin Accepted Materials CRUD, Image Upload & Customer Website Sync', () => {
   const createdCategoryIds: string[] = [];
+  const createdUserIds: string[] = [];
+  const createdOrderIds: string[] = [];
+  const createdOrderItemIds: string[] = [];
+  const createdAddressIds: string[] = [];
   const uploadedFiles: string[] = [
     path.join(process.cwd(), 'storage', 'uploads', 'material-photo-1793697492193-g1f5j57.png'),
   ];
   let origUserFindUnique: any;
+  let testAdminUser: any;
 
-  beforeAll(() => {
+  async function getOrInitTestAdmin() {
+    if (testAdminUser?.id && testAdminUser?.admin?.id) {
+      return testAdminUser;
+    }
+    const testAdminPhone = `+91999${Math.floor(1000000 + Math.random() * 9000000)}`;
+    testAdminUser = await db.user.create({
+      data: {
+        phone: testAdminPhone,
+        name: 'CI Test Admin',
+        email: `ci_admin_${Date.now()}_${Math.random().toString(36).slice(2)}@example.com`,
+        role: 'SUPER_ADMIN',
+        tokenVersion: 1,
+        admin: {
+          create: {
+            department: 'Operations',
+            accessLevel: 'SUPER_ADMIN',
+          },
+        },
+      },
+      include: { admin: true },
+    });
+    createdUserIds.push(testAdminUser.id);
+    return testAdminUser;
+  }
+
+  beforeAll(async () => {
     // Restore real Prisma db.user.findUnique (tests/setup.ts stubs it with tokenVersion: 1)
     origUserFindUnique = (db.user as any).findUnique;
     (db.user as any).findUnique = (args: any) => (db.user as any).findFirst(args);
+
+    await getOrInitTestAdmin();
   });
 
   afterAll(async () => {
     if (origUserFindUnique) {
       (db.user as any).findUnique = origUserFindUnique;
     }
+    // Clean up order items
+    for (const id of createdOrderItemIds) {
+      await db.orderItem.delete({ where: { id } }).catch(() => null);
+    }
+    // Clean up orders
+    for (const id of createdOrderIds) {
+      await db.order.delete({ where: { id } }).catch(() => null);
+    }
+    // Clean up addresses
+    for (const id of createdAddressIds) {
+      await db.address.delete({ where: { id } }).catch(() => null);
+    }
+    // Clean up categories
     for (const id of createdCategoryIds) {
       await db.wasteCategory.delete({ where: { id } }).catch(() => null);
     }
+    // Clean up users (cascades to Admin and Customer)
+    for (const id of createdUserIds) {
+      await db.admin.deleteMany({ where: { userId: id } }).catch(() => null);
+      await db.customer.deleteMany({ where: { userId: id } }).catch(() => null);
+      await db.user.delete({ where: { id } }).catch(() => null);
+    }
+    // Clean up uploaded files
     for (const filePath of uploadedFiles) {
       await fs.promises.unlink(filePath).catch(() => null);
     }
@@ -48,27 +100,25 @@ describe('Admin Accepted Materials CRUD, Image Upload & Customer Website Sync', 
   test(
     '1. Verifies Material Image Upload (JPG/PNG/WebP), validation, and public serving',
     async () => {
-      const kiranUser = await db.user.findFirst({
-        where: { phone: '+918884176048' },
-        include: { admin: true },
-      });
-      assert.ok(kiranUser);
+      const adminUser = await getOrInitTestAdmin();
+      assert.ok(adminUser, 'Admin user must be initialized');
+      assert.ok(adminUser.admin?.id, 'Admin profile must be initialized');
 
       const adminToken = signToken({
-        userId: kiranUser.id,
-        phone: kiranUser.phone,
-        name: kiranUser.name,
+        userId: adminUser.id,
+        phone: adminUser.phone,
+        name: adminUser.name,
         role: 'SUPER_ADMIN',
-        adminId: kiranUser.admin?.id,
-        tokenVersion: kiranUser.tokenVersion ?? 1,
+        adminId: adminUser.admin.id,
+        tokenVersion: adminUser.tokenVersion ?? 1,
       });
 
       const customerToken = signToken({
-        userId: kiranUser.id,
-        phone: kiranUser.phone,
-        name: kiranUser.name,
+        userId: adminUser.id,
+        phone: adminUser.phone,
+        name: adminUser.name,
         role: 'CUSTOMER',
-        tokenVersion: kiranUser.tokenVersion ?? 1,
+        tokenVersion: adminUser.tokenVersion ?? 1,
       });
 
       // Valid 16-byte PNG header
@@ -142,19 +192,17 @@ describe('Admin Accepted Materials CRUD, Image Upload & Customer Website Sync', 
   test(
     '2. Verifies full Accepted Materials CRUD, Customer Website sync, and Safe Soft-Delete for referenced materials',
     async () => {
-      const kiranUser = await db.user.findFirst({
-        where: { phone: '+918884176048' },
-        include: { admin: true },
-      });
-      assert.ok(kiranUser);
+      const adminUser = await getOrInitTestAdmin();
+      assert.ok(adminUser, 'Admin user must be initialized');
+      assert.ok(adminUser.admin?.id, 'Admin profile must be initialized');
 
       const adminToken = signToken({
-        userId: kiranUser.id,
-        phone: kiranUser.phone,
-        name: kiranUser.name,
+        userId: adminUser.id,
+        phone: adminUser.phone,
+        name: adminUser.name,
         role: 'SUPER_ADMIN',
-        adminId: kiranUser.admin?.id,
-        tokenVersion: kiranUser.tokenVersion ?? 1,
+        adminId: adminUser.admin.id,
+        tokenVersion: adminUser.tokenVersion ?? 1,
       });
 
       const uniqueMaterialName = `Copper Wire Scrap ${Date.now()}`;
@@ -288,49 +336,103 @@ describe('Admin Accepted Materials CRUD, Image Upload & Customer Website Sync', 
       assert.equal(afterDelete, null, 'Unreferenced material must be permanently removed on delete');
 
       // F. Safe Soft-Delete when material is referenced by historical OrderItems
-      const eWaste = await db.wasteCategory.findUnique({ where: { name: 'E-Waste' } });
-      assert.ok(eWaste, 'Core E-Waste category must exist');
-      const historicalItemBefore = await db.orderItem.findFirst({
-        where: { categoryId: eWaste.id },
+      const referencedMaterial = await db.wasteCategory.create({
+        data: {
+          name: `Referenced Scrap ${Date.now()}`,
+          description: 'Historical material referenced by orders',
+          category: 'Metal & Scrap',
+          type: 'RECYCLABLE_BUY',
+          pricePerKg: 300,
+          active: true,
+        },
+      });
+      createdCategoryIds.push(referencedMaterial.id);
+
+      const custUser = await db.user.create({
+        data: {
+          phone: `+91998${Math.floor(1000000 + Math.random() * 9000000)}`,
+          name: 'Test Customer User',
+          email: `cust_${Date.now()}_${Math.random().toString(36).slice(2)}@example.com`,
+          role: 'CUSTOMER',
+          tokenVersion: 1,
+          customer: {
+            create: {},
+          },
+        },
+        include: { customer: true },
+      });
+      createdUserIds.push(custUser.id);
+
+      const custAddress = await db.address.create({
+        data: {
+          userId: custUser.id,
+          name: custUser.name,
+          phone: custUser.phone,
+          houseNo: '42',
+          street: 'Test Road',
+          area: 'Test Area',
+          city: 'Bengaluru',
+          pincode: '560001',
+          lat: 12.9716,
+          lng: 77.5946,
+        },
+      });
+      createdAddressIds.push(custAddress.id);
+
+      const testOrder = await db.order.create({
+        data: {
+          orderNumber: `ORD-TEST-${Date.now()}`,
+          customerId: custUser.customer!.id,
+          addressId: custAddress.id,
+          status: 'BOOKING_RECEIVED',
+        },
+      });
+      createdOrderIds.push(testOrder.id);
+
+      const historicalItemBefore = await db.orderItem.create({
+        data: {
+          orderId: testOrder.id,
+          categoryId: referencedMaterial.id,
+          estimatedWeight: 5.0,
+          ratePerKg: 300,
+          subtotal: 1500,
+        },
+      });
+      createdOrderItemIds.push(historicalItemBefore.id);
+
+      const safeDeleteRes = await deleteMaterial(
+        new NextRequest(`http://localhost:3000/api/waste-categories?id=${encodeURIComponent(referencedMaterial.id)}`, {
+          method: 'DELETE',
+          headers: { Cookie: `jio_admin_token=${adminToken}` },
+        })
+      );
+      assert.equal(safeDeleteRes.status, 200);
+      const safeDeleteBody = await safeDeleteRes.json();
+      assert.equal(
+        safeDeleteBody.data.softDeleted,
+        true,
+        'Referenced material must be soft-deleted/archived rather than hard-deleted'
+      );
+      assert.ok(safeDeleteBody.data.orderItemsCount > 0);
+
+      // Verify historical OrderItem record and its snapshot ratePerKg remain 100% intact
+      const historicalItemAfter = await db.orderItem.findUnique({
+        where: { id: historicalItemBefore.id },
         select: { id: true, ratePerKg: true },
       });
-      assert.ok(historicalItemBefore, 'E-Waste must have historical OrderItem references');
+      assert.ok(historicalItemAfter, 'Historical OrderItem must remain intact after soft delete');
+      assert.equal(
+        historicalItemAfter.ratePerKg,
+        historicalItemBefore.ratePerKg,
+        'Historical OrderItem snapshot ratePerKg must never change'
+      );
 
-      try {
-        const safeDeleteRes = await deleteMaterial(
-          new NextRequest(`http://localhost:3000/api/waste-categories?id=${encodeURIComponent(eWaste.id)}`, {
-            method: 'DELETE',
-            headers: { Cookie: `jio_admin_token=${adminToken}` },
-          })
-        );
-        assert.equal(safeDeleteRes.status, 200);
-        const safeDeleteBody = await safeDeleteRes.json();
-        assert.equal(
-          safeDeleteBody.data.softDeleted,
-          true,
-          'Referenced material must be soft-deleted/archived rather than hard-deleted'
-        );
-        assert.ok(safeDeleteBody.data.orderItemsCount > 0);
-
-        // Verify historical OrderItem record and its snapshot ratePerKg remain 100% intact
-        const historicalItemAfter = await db.orderItem.findUnique({
-          where: { id: historicalItemBefore.id },
-          select: { id: true, ratePerKg: true },
-        });
-        assert.ok(historicalItemAfter, 'Historical OrderItem must remain intact after soft delete');
-        assert.equal(
-          historicalItemAfter.ratePerKg,
-          historicalItemBefore.ratePerKg,
-          'Historical OrderItem snapshot ratePerKg must never change'
-        );
-      } finally {
-        // Restore E-Waste to active=true
-        await db.wasteCategory.update({
-          where: { id: eWaste.id },
-          data: { active: true },
-        });
-        invalidateCategoriesCache();
-      }
+      // Verify material in DB is now inactive (soft-deleted)
+      const softDeletedCat = await db.wasteCategory.findUnique({
+        where: { id: referencedMaterial.id },
+      });
+      assert.ok(softDeletedCat);
+      assert.equal(softDeletedCat.active, false, 'Soft-deleted material must have active=false in DB');
     },
     90_000
   );
