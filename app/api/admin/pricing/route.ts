@@ -6,8 +6,8 @@ import { invalidateServiceAreasCache } from '@/lib/cache/serviceAreasCache';
 import { invalidateAdminStatsCache } from '@/lib/cache/adminStatsCache';
 
 const DEFAULT_PRICING = {
-  basePickupCharge: 49,
-  minPickupCharge: 49,
+  basePickupCharge: 50,
+  minPickupCharge: 50,
   urgentSurcharge: 29,
   weekendFee: 19,
   heavyItemHandlingFee: 199,

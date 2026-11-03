@@ -93,7 +93,7 @@ export function toRupees(paise: number): number {
  * Single authoritative order valuation calculation.
  *
  * @param itemsInput List of items with weights, category types, and rates per kg.
- * @param basePickupCharge Base doorstep collection charge (default: 69.0).
+ * @param basePickupCharge Base doorstep collection charge (default: 50.0).
  * @param couponDiscount Verified coupon discount applied against customer charges (default: 0.0).
  * @param urgentSurcharge Surcharge for immediate or off-hour pickup (default: 0.0).
  */

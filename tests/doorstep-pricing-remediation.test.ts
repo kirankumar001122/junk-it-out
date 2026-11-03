@@ -47,7 +47,7 @@ async function run() {
 
     assert.equal(valuation.totalRecyclableValue, 42.0, 'Scrap valuation should be ₹42.00');
     assert.equal(valuation.financialDirection, 'JUNKITOUT_PAYS', 'Financial direction must be JUNKITOUT_PAYS');
-    assert.equal(valuation.netAmount, 42.0, 'Customer should receive full ₹42.00 scrap valuation, not owe ₹27');
+    assert.equal(valuation.netAmount, 42.0, 'Customer should receive full ₹42.00 scrap valuation, not owe ₹8');
   }
 
   // TEST 3: Doorstep Weighing with Captured Booking Payment (10 kg Plastic Screenshot Example)
@@ -78,7 +78,7 @@ async function run() {
   // TEST 4: Doorstep Weighing with Unpaid Booking Payment
   // Pickup charge: ₹50.00 (payment pending / cash on pickup)
   // Doorstep actual weight: 3 kg Paper & Cardboard @ ₹14.00/kg = ₹42.00
-  // Scrap offsets part of the fee: 42 - 50 = -8 -> CUSTOMER_PAYS ₹27.00
+  // Scrap offsets part of the fee: 42 - 50 = -8 -> CUSTOMER_PAYS ₹8.00
   console.log('Test 4: Doorstep weighing with uncollected booking fee correctly offsets fee against scrap...');
   {
     const items = [
@@ -97,7 +97,7 @@ async function run() {
 
     assert.equal(valuation.totalRecyclableValue, 42.0);
     assert.equal(valuation.financialDirection, 'CUSTOMER_PAYS', 'Customer must pay remaining fee balance');
-    assert.equal(valuation.netAmount, 27.0, 'Customer owes ₹27.00 remaining balance');
+    assert.equal(valuation.netAmount, 8.0, 'Customer owes ₹8.00 remaining balance');
   }
 
   // TEST 5: Doorstep Weighing with Additional Disposal Charges (WASTE_CHARGE)
@@ -128,6 +128,36 @@ async function run() {
     assert.equal(valuation.netAmount, 32.0, 'Customer receives net ₹32.00 (42 scrap - 10 disposal charge)');
   }
 
+  // TEST 6: Default Order Valuation Parameter Standardized to ₹50
+  console.log('Test 6: Order valuation engine defaults base pickup charge to exactly ₹50.00...');
+  {
+    const items = [
+      { categoryId: 'cat-dry', categoryName: 'Household Dry Waste', type: 'RECYCLABLE_BUY', pricePerKg: 8.0, weightKg: 1 },
+    ];
+    // Invoked without supplying basePickupCharge argument
+    const valuation = calculateOrderValuation(items);
+    assert.equal(valuation.basePickupCharge, 50.0, 'Default base pickup charge must be ₹50.00');
+  }
+
+  // TEST 7: Legacy Service-Area Fallback & Admin Pricing Default Standardized to ₹50
+  console.log('Test 7: Admin pricing defaults and service-area fallbacks are standardized to ₹50...');
+  {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const rootDir = path.resolve('C:/Users/dega parthiv/Downloads/junk-it-out-service-charge-50');
+
+    const saCode = fs.readFileSync(path.join(rootDir, 'app/api/service-areas/route.ts'), 'utf8');
+    assert.match(saCode, /basePickupCharge:\s*defaultZone\?\.basePickupCharge\s*\|\|\s*50/);
+
+    const apCode = fs.readFileSync(path.join(rootDir, 'app/api/admin/pricing/route.ts'), 'utf8');
+    assert.match(apCode, /basePickupCharge:\s*50/);
+    assert.match(apCode, /minPickupCharge:\s*50/);
+
+    const adminPageCode = fs.readFileSync(path.join(rootDir, 'app/admin/(dashboard)/pricing/page.tsx'), 'utf8');
+    assert.match(adminPageCode, /basePickupCharge:\s*50/);
+    assert.match(adminPageCode, /minPickupCharge:\s*50/);
+  }
+
   console.log('ALL DOORSTEP PRICING & BOOKING VALUATION REGRESSION TESTS PASSED CLEANLY.');
 }
 
@@ -135,4 +165,3 @@ run().catch((err) => {
   console.error(err);
   process.exit(1);
 });
-
