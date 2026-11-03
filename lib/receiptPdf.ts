@@ -1,4 +1,5 @@
 import { formatPickupAddress } from './address';
+import { DEFAULT_SERVICE_CHARGE } from './geofence';
 import { isPickupCompletedStatus } from './orders/lifecycle';
 
 /**
@@ -287,7 +288,7 @@ export function generateReceiptPdfBytes(order: any): Uint8Array {
 
   const pickupCharge = typeof order.pickupCharge === 'number'
     ? order.pickupCharge
-    : (typeof order.pickupFee === 'number' ? order.pickupFee : 69.0);
+    : (typeof order.pickupFee === 'number' ? order.pickupFee : DEFAULT_SERVICE_CHARGE);
 
   const isBookingPaid = order.paymentStatus === 'CAPTURED' || order.paymentStatus === 'SUCCESS';
   const isJunkItOutPays = order.financialDirection === 'JUNKITOUT_PAYS';

@@ -15,7 +15,7 @@ export function invalidateServiceAreaCache(): void {
   serviceAreaCache = null;
 }
 
-import { BENGALURU_ZONES, BENGALURU_MASTER_POLYGON, isPointInPolygon, calculateDistanceKm } from '../geofence';
+import { BENGALURU_ZONES, BENGALURU_MASTER_POLYGON, DEFAULT_SERVICE_CHARGE, isPointInPolygon, calculateDistanceKm } from '../geofence';
 
 export async function checkGeofenceServiceability(
   lat: number,
@@ -45,7 +45,7 @@ export async function checkGeofenceServiceability(
             id: area.id,
             name: area.name,
             etaMinutes: area.etaMinutes,
-            basePickupCharge: area.basePickupCharge,
+            basePickupCharge: DEFAULT_SERVICE_CHARGE,
             status: area.status,
             parsedPolygon: polygon,
           });
@@ -83,7 +83,7 @@ export async function checkGeofenceServiceability(
               id: area.id,
               name: area.name,
               etaMinutes: area.etaMinutes,
-              basePickupCharge: area.basePickupCharge,
+              basePickupCharge: DEFAULT_SERVICE_CHARGE,
             },
           };
         } else {

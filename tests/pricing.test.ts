@@ -3,6 +3,7 @@ import { describe, it } from 'vitest';
 import {
   calculateOrderValuation,
   calculateValuationAdjustment,
+  calculateBookingTotalPayable,
   toPaise,
   toRupees,
 } from '../lib/pricing';
@@ -214,6 +215,66 @@ describe('Authoritative Pricing Engine', () => {
       assert.equal(adj.adjustmentType, 'ZERO_BALANCE_REFUND');
       assert.equal(adj.refundAmount, 100);
       assert.equal(adj.settlementAmount, 0);
+    });
+  });
+  describe('Total Payable Calculation Invariants (Fixed ₹50 Service Charge)', () => {
+    it('₹41 waste -> ₹50 service charge -> ₹91 total payable', () => {
+      const total = calculateBookingTotalPayable(41.0, 50.0, 0.0);
+      assert.equal(total, 91.0);
+      assert.equal(toPaise(total), 9100);
+    });
+
+    it('₹100 waste -> ₹50 service charge -> ₹150 total payable', () => {
+      const total = calculateBookingTotalPayable(100.0, 50.0, 0.0);
+      assert.equal(total, 150.0);
+      assert.equal(toPaise(total), 15000);
+    });
+
+    it('₹250 waste -> ₹50 service charge -> ₹300 total payable', () => {
+      const total = calculateBookingTotalPayable(250.0, 50.0, 0.0);
+      assert.equal(total, 300.0);
+      assert.equal(toPaise(total), 30000);
+    });
+
+    it('₹500 waste -> ₹50 service charge -> ₹550 total payable', () => {
+      const total = calculateBookingTotalPayable(500.0, 50.0, 0.0);
+      assert.equal(total, 550.0);
+      assert.equal(toPaise(total), 55000);
+    });
+
+    it('adding more waste increases total waste value and total payable proportionally', () => {
+      const initialWaste = 41.0;
+      const initialTotal = calculateBookingTotalPayable(initialWaste, 50.0, 0.0);
+      assert.equal(initialTotal, 91.0);
+
+      const addedWaste = 70.0;
+      const updatedWaste = initialWaste + addedWaste;
+      const updatedTotal = calculateBookingTotalPayable(updatedWaste, 50.0, 0.0);
+      assert.equal(updatedWaste, 111.0);
+      assert.equal(updatedTotal, 161.0);
+      assert.equal(updatedTotal - initialTotal, addedWaste, 'Payable must increase by exactly the added waste amount');
+    });
+
+    it('service charge remains strictly ₹50 after changing waste quantity and category', () => {
+      const fixedServiceCharge = 50.0;
+      const cartVariations = [
+        [{ categoryId: 'paper', rate: 14, weight: 1 }],
+        [{ categoryId: 'paper', rate: 14, weight: 5 }],
+        [{ categoryId: 'plastic', rate: 18, weight: 10 }],
+        [{ categoryId: 'ewaste', rate: 25, weight: 10 }, { categoryId: 'metal', rate: 30, weight: 5 }],
+      ];
+
+      for (const cart of cartVariations) {
+        const wasteVal = cart.reduce((sum, item) => sum + item.rate * item.weight, 0);
+        const payable = calculateBookingTotalPayable(wasteVal, fixedServiceCharge, 0);
+        assert.equal(payable, wasteVal + 50.0, 'Payable must equal waste value plus strictly ₹50 fee');
+      }
+    });
+
+    it('preserves separate bulky / non-recyclable disposal charges on top of ₹50 service charge', () => {
+      const payable = calculateBookingTotalPayable(41.0, 50.0, 25.0);
+      assert.equal(payable, 116.0);
+      assert.equal(toPaise(payable), 11600);
     });
   });
 });
