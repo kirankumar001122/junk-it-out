@@ -10,6 +10,38 @@
 
 export type FinancialDirection = 'JUNKITOUT_PAYS' | 'CUSTOMER_PAYS' | 'ZERO_BALANCE';
 
+export const PICKUP_SERVICE_CHARGE = 50.0;
+
+export interface PickupSummaryItemInput {
+  categoryId: string;
+  categoryName?: string;
+  type?: string;
+  pricePerKg: number;
+  weightKg: number;
+}
+
+export interface PickupSummaryItemResult {
+  categoryId: string;
+  categoryName: string;
+  type: string;
+  pricePerKg: number;
+  weightKg: number;
+  materialAmount: number;
+  materialAmountPaise: number;
+}
+
+export interface PickupSummaryResult {
+  items: PickupSummaryItemResult[];
+  materialCount: number;
+  totalWeightKg: number;
+  pickupValue: number;
+  pickupValuePaise: number;
+  serviceCharge: number;
+  serviceChargePaise: number;
+  totalAmountPayable: number;
+  totalAmountPayablePaise: number;
+}
+
 export interface CalculationItemInput {
   categoryId: string;
   categoryName?: string;
@@ -109,6 +141,75 @@ export function calculateBookingTotalPayable(
   const servicePaise = toPaise(Math.max(0, basePickupCharge));
   const disposalPaise = toPaise(Math.max(0, disposalCharges));
   return toRupees(wastePaise + servicePaise + disposalPaise);
+}
+
+/**
+ * Authoritative customer pickup summary calculation.
+ *
+ * Formula:
+ * - Material Amount = Price Per KG × Selected Weight
+ * - Pickup Value = Sum of all Material Amounts
+ * - Service Charge = ₹50
+ * - Total Amount Payable = Pickup Value + ₹50
+ */
+export function calculatePickupSummary(
+  itemsInput: PickupSummaryItemInput[],
+  serviceChargeInput: number = PICKUP_SERVICE_CHARGE
+): PickupSummaryResult {
+  let pickupValuePaise = 0;
+  let totalWeightMilliKg = 0;
+  const validItems: PickupSummaryItemResult[] = [];
+
+  if (Array.isArray(itemsInput)) {
+    for (const item of itemsInput) {
+      if (!item || typeof item !== 'object') continue;
+      const weight =
+        typeof item.weightKg === 'number' && Number.isFinite(item.weightKg) && item.weightKg > 0
+          ? item.weightKg
+          : 0;
+      const rate =
+        typeof item.pricePerKg === 'number' && Number.isFinite(item.pricePerKg) && item.pricePerKg >= 0
+          ? item.pricePerKg
+          : 0;
+
+      if (weight <= 0) {
+        continue;
+      }
+
+      const materialAmountPaise = Math.round((weight * rate + Number.EPSILON) * 100);
+      pickupValuePaise += materialAmountPaise;
+      totalWeightMilliKg += Math.round((weight + Number.EPSILON) * 1000);
+
+      validItems.push({
+        categoryId: String(item.categoryId || ''),
+        categoryName: String(item.categoryName || item.categoryId || ''),
+        type: String(item.type || 'RECYCLABLE_BUY'),
+        pricePerKg: rate,
+        weightKg: Math.round((weight + Number.EPSILON) * 1000) / 1000,
+        materialAmount: toRupees(materialAmountPaise),
+        materialAmountPaise,
+      });
+    }
+  }
+
+  const serviceChargePaise = toPaise(
+    typeof serviceChargeInput === 'number' && Number.isFinite(serviceChargeInput) && serviceChargeInput >= 0
+      ? serviceChargeInput
+      : PICKUP_SERVICE_CHARGE
+  );
+  const totalAmountPayablePaise = pickupValuePaise + serviceChargePaise;
+
+  return {
+    items: validItems,
+    materialCount: validItems.length,
+    totalWeightKg: Math.round(totalWeightMilliKg) / 1000,
+    pickupValue: toRupees(pickupValuePaise),
+    pickupValuePaise,
+    serviceCharge: toRupees(serviceChargePaise),
+    serviceChargePaise,
+    totalAmountPayable: toRupees(totalAmountPayablePaise),
+    totalAmountPayablePaise,
+  };
 }
 
 /**

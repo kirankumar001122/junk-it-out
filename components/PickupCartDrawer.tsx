@@ -21,7 +21,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import WeightQuantityInput from '@/components/WeightQuantityInput';
-import { calculateOrderValuation } from '@/lib/pricing';
+import { calculatePickupSummary, PICKUP_SERVICE_CHARGE } from '@/lib/pricing';
 import {
   pickupCartEvent,
   readPickupCart,
@@ -32,7 +32,7 @@ import {
 } from '@/lib/pickupCart';
 import { getCachedClientJson, invalidateCachedClientJson } from '@/lib/clientRequestCache';
 import { clearSelectedLocation } from '@/lib/selectedLocation';
-import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
+import { isCustomerWasteCategory, getMaterialImageUrl, subscribeWasteCategoriesChanged } from '@/lib/customerWasteCategories';
 
 type Props = { open: boolean; onClose: () => void };
 
@@ -126,8 +126,8 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
       getCachedClientJson<any>(
         'public-customer-waste-categories',
         '/api/waste-categories?customer=true',
-        60_000,
-        { cache: 'force-cache' }
+        5_000,
+        { cache: 'no-store' }
       ),
       checkAuth(true),
     ])
@@ -147,10 +147,26 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
     const handleAuthChange = () => {
       void checkAuth(true);
     };
+    const unsubscribeWasteCategories = subscribeWasteCategoriesChanged(() => {
+      invalidateCachedClientJson('public-customer-waste-categories');
+      getCachedClientJson<any>(
+        'public-customer-waste-categories',
+        '/api/waste-categories?customer=true',
+        5_000,
+        { cache: 'no-store', force: true }
+      )
+        .then((categoryData) => {
+          if (categoryData?.success && Array.isArray(categoryData.data)) {
+            setCategories(categoryData.data.filter(isCustomerWasteCategory));
+          }
+        })
+        .catch(() => {});
+    });
     window.addEventListener('jio_auth_change', handleAuthChange);
     return () => {
       window.removeEventListener(pickupCartEvent, refresh);
       window.removeEventListener('jio_auth_change', handleAuthChange);
+      unsubscribeWasteCategories();
     };
   }, [open, checkAuth]);
 
@@ -277,21 +293,22 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
     [items, categories]
   );
 
-  const valuation = useMemo(
+  const summary = useMemo(
     () =>
-      calculateOrderValuation(
+      calculatePickupSummary(
         cartItems.map((item) => ({
           categoryId: item.category.id,
           categoryName: item.category.name,
           type: item.category.type,
-          pricePerKg: item.category.pricePerKg,
-          weightKg: item.quantity,
-        }))
+          pricePerKg: Number(item.category.pricePerKg),
+          weightKg: Number(item.quantity),
+        })),
+        PICKUP_SERVICE_CHARGE
       ),
     [cartItems]
   );
 
-  const totalWeight = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+  const totalWeight = summary.totalWeightKg;
   const updateQuantity = (categoryId: string, quantity: number) => setItems(updatePickupCartQuantity(categoryId, quantity));
   const remove = (categoryId: string) => setItems(removeFromPickupCart(categoryId));
 
@@ -328,7 +345,7 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
               <div>
                 <h3 className="text-sm font-black text-emerald-950">Doorstep Pickup Benefits</h3>
                 <p className="mt-1 text-xs leading-relaxed text-emerald-800">
-                  Transparent category rates, verified digital scale weighing, live tracking, and instant scrap settlement.
+                  Transparent material pricing, verified digital scale weighing, live tracking, and convenient doorstep recycling.
                 </p>
               </div>
             </div>
@@ -526,7 +543,7 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
                           )}
                         </div>
                         <p className="mt-0.5 text-xs font-semibold text-emerald-700">
-                          ₹{item.category.pricePerKg}/kg · {item.category.type === 'RECYCLABLE_BUY' ? 'Recyclable value' : 'Service category'}
+                          ₹{item.category.pricePerKg}/kg × {item.quantity} kg = ₹{(Number(item.category.pricePerKg || 0) * Number(item.quantity || 0)).toFixed(2)}
                         </p>
                       </div>
                       <button
@@ -616,7 +633,7 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
                 <div className="mt-3 space-y-2 text-xs">
                   <div className="flex justify-between text-slate-300">
                     <span>Waste types</span>
-                    <strong className="text-white">{cartItems.length}</strong>
+                    <strong className="text-white">{summary.materialCount}</strong>
                   </div>
                   <div className="flex justify-between text-slate-300">
                     <span>Estimated weight</span>
@@ -624,15 +641,15 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
                   </div>
                   <div className="flex justify-between text-slate-300">
                     <span>Pickup Value</span>
-                    <strong className="text-emerald-300">₹{valuation.totalRecyclableValue.toFixed(2)}</strong>
+                    <strong className="text-emerald-300">₹{summary.pickupValue.toFixed(2)}</strong>
                   </div>
                   <div className="flex justify-between text-slate-300">
-                    <span>Pickup Service Charge</span>
-                    <strong className="text-white">₹{valuation.basePickupCharge.toFixed(2)}</strong>
+                    <span>Service Charge</span>
+                    <strong className="text-white">₹{summary.serviceCharge.toFixed(2)}</strong>
                   </div>
                   <div className="border-t border-white/10 pt-2 text-sm font-black flex justify-between">
                     <span>Total Amount Payable</span>
-                    <span className="text-emerald-300">₹{valuation.netAmount.toFixed(2)}</span>
+                    <span className="text-emerald-300">₹{summary.totalAmountPayable.toFixed(2)}</span>
                   </div>
                 </div>
                 <p className="mt-3 text-[11px] leading-relaxed text-slate-400">

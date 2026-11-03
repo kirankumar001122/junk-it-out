@@ -245,16 +245,16 @@ describe('Booking Flow and Pricing Correctness (Coupons Removed)', () => {
   });
 
   describe('1. Clean Order Creation & Authoritative Pricing', () => {
-    it('creates standard scrap booking charging exactly base pickup service fee upfront', async () => {
-      // 5 kg E-Waste @ ₹15/kg = ₹75.00 scrap buy value
-      // Base pickup charge = ₹50.00
-      // Customer pays strictly ₹50.00 upfront service fee
+    it('creates standard scrap booking charging Pickup Value + ₹50 service charge upfront', async () => {
+      // 5 kg E-Waste @ ₹15/kg = ₹75.00 Pickup Value
+      // Service charge = ₹50.00
+      // Customer pays ₹75.00 + ₹50.00 = ₹125.00 Total Amount Payable
       const order = await createOrder(baseBookingInput, `idem-${Date.now()}-1`, state.currentUser);
 
       assert.equal(order.pickupCharge, 50.0);
       assert.equal(order.discountAmount, 0.0, 'Discounts must be 0.0 with coupons removed');
-      assert.equal(order.finalAmount, 125.0, 'Customer upfront payable equals estimated scrap plus service charge (75 + 50 = 125)');
-      assert.equal(order.estimatedTotal, 75.0, 'Scrap buy value is recorded as estimatedTotal');
+      assert.equal(order.estimatedTotal, 75.0, 'Pickup Value is recorded as estimatedTotal');
+      assert.equal(order.finalAmount, 125.0, 'Customer payable must equal Pickup Value (₹75) + Service Charge (₹50) = ₹125.00');
       assert.equal(order.financialDirection, 'CUSTOMER_PAYS');
     });
 
@@ -269,13 +269,13 @@ describe('Booking Flow and Pricing Correctness (Coupons Removed)', () => {
       const order = await createOrder(manipulatedInput, `idem-${Date.now()}-2`, state.currentUser);
 
       assert.equal(order.discountAmount, 0.0, 'Must ignore client discount and coupon code');
-      assert.equal(order.finalAmount, 125.0, 'Final amount must remain authoritative scrap plus service charge (125)');
+      assert.equal(order.finalAmount, 125.0, 'Final amount must remain authoritative Pickup Value + ₹50 service charge');
     });
 
-    it('correctly adds waste disposal charges to upfront customer charges', async () => {
-      // 2 kg Bulky Waste (WASTE_CHARGE) @ ₹20/kg = ₹40.00 disposal charge
-      // Base pickup charge = ₹50.00
-      // Total customer upfront payable = 50 + 40 = ₹90.00
+    it('correctly adds material amount to ₹50 service charge for bulky waste categories', async () => {
+      // 2 kg Bulky Waste @ ₹20/kg = ₹40.00 material amount
+      // Service charge = ₹50.00
+      // Total customer payable = 40 + 50 = ₹90.00
       const bulkyInput = {
         ...baseBookingInput,
         items: [{ categoryId: 'cat_bulky_03', estimatedWeight: 2 }],
@@ -285,7 +285,8 @@ describe('Booking Flow and Pricing Correctness (Coupons Removed)', () => {
 
       assert.equal(order.pickupCharge, 50.0);
       assert.equal(order.discountAmount, 0.0);
-      assert.equal(order.finalAmount, 90.0, 'Disposal charges must add to base pickup charge');
+      assert.equal(order.estimatedTotal, 40.0);
+      assert.equal(order.finalAmount, 90.0, 'Material amount (₹40) must add to ₹50 service charge = ₹90.00');
     });
   });
 
@@ -345,7 +346,7 @@ describe('Booking Flow and Pricing Correctness (Coupons Removed)', () => {
         id: 'retry-order-1',
         pickupCharge: 50,
         discountAmount: 0,
-        finalAmount: 50,
+        finalAmount: 125,
       };
 
       const payReq = createPostRequest('/api/payments/create', { orderId: 'retry-order-1' });
@@ -353,8 +354,8 @@ describe('Booking Flow and Pricing Correctness (Coupons Removed)', () => {
 
       assert.equal(payRes.status, 200);
       const body = await payRes.json();
-      assert.equal(body.data.amount, 50.0);
-      assert.equal(state.lastRazorpayOrderParams.amountInPaise, 5000);
+      assert.equal(body.data.amount, 125.0);
+      assert.equal(state.lastRazorpayOrderParams.amountInPaise, 12500);
     });
   });
 

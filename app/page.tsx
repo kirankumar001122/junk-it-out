@@ -35,8 +35,8 @@ import {
 import CustomerReviews from '@/components/CustomerReviews';
 import WeightQuantityInput from '@/components/WeightQuantityInput';
 import ScrollReveal from '@/components/ScrollReveal';
-import { getCachedClientJson } from '@/lib/clientRequestCache';
-import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
+import { getCachedClientJson, invalidateCachedClientJson } from '@/lib/clientRequestCache';
+import { isCustomerWasteCategory, getMaterialImageUrl, subscribeWasteCategoriesChanged } from '@/lib/customerWasteCategories';
 
 const categoryImages: Record<string, string> = {
   'E-Waste': '/categories/e-waste.webp',
@@ -44,6 +44,14 @@ const categoryImages: Record<string, string> = {
   'Paper & Cardboard': '/categories/paper-carboard.jpg',
   'Plastic Waste': '/categories/plastic-waste.jpg?v=2',
 };
+
+function resolveCustomerCardImage(category: any): string {
+  const custom = typeof category?.imageUrl === 'string' ? category.imageUrl.trim() : '';
+  if (custom && !custom.startsWith('/categories/')) {
+    return custom;
+  }
+  return categoryImages[category?.name] || custom || getMaterialImageUrl(category);
+}
 
 const categoryIcons = [
   FileText,
@@ -66,8 +74,8 @@ export default function HomePage() {
     getCachedClientJson<{ success: boolean; data?: any[] }>(
       'public-customer-waste-categories',
       '/api/waste-categories?customer=true',
-      60_000,
-      { cache: 'force-cache' }
+      5_000,
+      { cache: 'no-store' }
     )
       .then((d) =>
         setCategories(
@@ -136,15 +144,15 @@ export default function HomePage() {
             </div>
 
             <h1 className="customer-hero-title max-w-3xl text-4xl font-black leading-[1.02] tracking-[-0.06em] text-white sm:text-6xl lg:text-7xl">
-              Turn scrap &amp; waste <br className="hidden sm:inline" />
+              Doorstep waste pickup, <br className="hidden sm:inline" />
               <span className="text-emerald-300 drop-shadow-[0_0_24px_rgba(110,231,183,0.2)]">
-                into instant value.
+                made simple &amp; fast.
               </span>
             </h1>
 
             <p className="customer-hero-copy mt-4 max-w-xl text-sm leading-relaxed text-slate-300 sm:text-base">
               Select items, schedule doorstep pickup in Bengaluru, and
-              track your request live from collection to settlement.
+              track your request live from collection to recycling.
             </p>
 
             <div className="customer-hero-actions mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -189,7 +197,7 @@ export default function HomePage() {
                 </strong>
 
                 <span className="text-[11px] text-slate-400">
-                  Fair value per kg
+                  Clear pricing per kg
                 </span>
               </div>
 
@@ -341,10 +349,13 @@ export default function HomePage() {
                           <>
                             <div className="customer-category-image mb-3 h-28 overflow-hidden rounded-2xl bg-emerald-50">
                               <img
-                                src="/categories/household-waste.webp"
+                                src={resolveCustomerCardImage(category)}
                                 alt="Wet Waste and Dry Waste"
                                 loading="lazy"
                                 decoding="async"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLImageElement).src = '/categories/household-waste.webp';
+                                }}
                                 className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                               />
                             </div>
@@ -354,8 +365,10 @@ export default function HomePage() {
                             </h3>
 
                             <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
-                              Old furniture, mattresses, appliances, and general
-                              household clutter cleared out fast.
+                              {category.description &&
+                              category.description !== 'Clean dry packaging, fabric scraps, wooden pieces, rubber items'
+                                ? category.description
+                                : 'Old furniture, mattresses, appliances, and general household clutter cleared out fast.'}
                             </p>
 
                             <div className="mt-2.5 grid grid-cols-2 gap-2">
@@ -381,21 +394,18 @@ export default function HomePage() {
                           </>
                         ) : (
                           <>
-                            {categoryImages[category.name] ? (
-                              <div className="customer-category-image mb-3 h-28 w-full overflow-hidden rounded-2xl bg-emerald-50">
-                                <img
-                                  src={categoryImages[category.name]}
-                                  alt={category.name}
-                                  loading="lazy"
-                                  decoding="async"
-                                  className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
-                                />
-                              </div>
-                            ) : (
-                              <div className="mb-3 grid h-24 w-full place-items-center rounded-xl bg-emerald-50 text-emerald-700">
-                                <IconComp className="h-8 w-8 text-emerald-600" />
-                              </div>
-                            )}
+                            <div className="customer-category-image mb-3 h-28 w-full overflow-hidden rounded-2xl bg-emerald-50">
+                              <img
+                                src={resolveCustomerCardImage(category)}
+                                alt={category.name}
+                                loading="lazy"
+                                decoding="async"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLImageElement).src = '/categories/household-waste.webp';
+                                }}
+                                className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
+                              />
+                            </div>
 
                             <h3 className="text-sm font-bold leading-tight text-slate-900">
                               {category.name}

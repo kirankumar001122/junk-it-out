@@ -11,7 +11,8 @@ import {
 } from '../cache/wasteCategoriesCache';
 import {
   calculateOrderValuation,
-  calculateBookingTotalPayable,
+  calculatePickupSummary,
+  PICKUP_SERVICE_CHARGE,
   type CalculationItemInput,
   type FinancialDirection,
 } from '../pricing';
@@ -429,27 +430,33 @@ export async function createOrder(
     }
   }
 
-  const basePickupCharge = 50.0;
+  const basePickupCharge = PICKUP_SERVICE_CHARGE;
   const urgentSurcharge = (input.pickupType as string) === 'URGENT' ? 29.0 : 0.0;
 
   const calculationItems: CalculationItemInput[] = input.items.map((item) => {
     const category = dbCategories.find((cat) => cat.id === item.categoryId);
+    if (
+      !category ||
+      typeof category.pricePerKg !== 'number' ||
+      !Number.isFinite(category.pricePerKg) ||
+      category.pricePerKg < 0
+    ) {
+      throw new InvalidWasteCategoryError(
+        'One or more selected waste categories have an invalid price.'
+      );
+    }
     return {
       categoryId: item.categoryId,
-      categoryName: category?.name || item.categoryId,
-      type: category?.type || 'RECYCLABLE_BUY',
-      pricePerKg: category?.pricePerKg ?? 20.0,
+      categoryName: category.name || item.categoryId,
+      type: category.type || 'RECYCLABLE_BUY',
+      pricePerKg: category.pricePerKg,
       weightKg: item.estimatedWeight,
     };
   });
 
-  let totalItemsEstimatedValue = 0;
-  for (const item of calculationItems) {
-    totalItemsEstimatedValue += Math.round((item.weightKg * item.pricePerKg + Number.EPSILON) * 100) / 100;
-  }
-  totalItemsEstimatedValue = Math.round(totalItemsEstimatedValue * 100) / 100;
-
   timer?.recordPhase('order_valuation');
+
+  const pickupSummary = calculatePickupSummary(calculationItems, basePickupCharge);
 
   // Authoritative valuation using standardized engine (coupons removed)
   const valuation = calculateOrderValuation(
@@ -459,25 +466,20 @@ export async function createOrder(
     urgentSurcharge
   );
 
-  const orderItemsData = valuation.items.map((vi) => ({
+  const orderItemsData = pickupSummary.items.map((vi) => ({
     categoryId: vi.categoryId,
     estimatedWeight: vi.weightKg,
-    ratePerKg: vi.ratePerKg,
-    subtotal: vi.subtotal,
+    ratePerKg: vi.pricePerKg,
+    subtotal: vi.materialAmount,
   }));
 
   const financialDirection = input.financialDirection === 'JUNKITOUT_PAYS'
     ? valuation.financialDirection
     : 'CUSTOMER_PAYS';
 
-  const estimatedTotal = valuation.totalRecyclableValue;
-  const upfrontCustomerCharge = calculateBookingTotalPayable(
-    valuation.totalRecyclableValue,
-    basePickupCharge,
-    valuation.totalWasteCharge + urgentSurcharge
-  );
+  const estimatedTotal = pickupSummary.pickupValue;
   const finalAmount = financialDirection === 'CUSTOMER_PAYS'
-    ? Math.max(1, Math.round(upfrontCustomerCharge * 100) / 100)
+    ? pickupSummary.totalAmountPayable
     : valuation.netAmount;
 
   const orderNumber =

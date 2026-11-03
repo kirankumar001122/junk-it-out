@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { Search, ArrowRight, ShoppingBasket, CheckCircle2, ShieldCheck, Banknote, FileText, Recycle, Cpu, Box, Wine, Sofa } from 'lucide-react';
 import { addToPickupCart } from '@/lib/pickupCart';
-import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
+import { isCustomerWasteCategory, getMaterialImageUrl, subscribeWasteCategoriesChanged } from '@/lib/customerWasteCategories';
 
 const icons = [FileText, Recycle, Box, Cpu, Wine, Sofa];
 
@@ -15,7 +15,7 @@ export default function PriceListPage() {
   const [addedItem, setAddedItem] = useState('');
 
   useEffect(() => {
-    fetch('/api/waste-categories?customer=true')
+    fetch('/api/waste-categories?customer=true', { cache: 'no-store' })
       .then((r) => r.json())
       .then((d) => {
         if (d.success) setCategories((d.data || []).filter(isCustomerWasteCategory));
@@ -43,7 +43,7 @@ export default function PriceListPage() {
           Official Scrap Price List
         </h1>
         <p className="customer-subtitle mx-auto mt-2">
-          We pay top rate per kg for recyclable scrap. Rates are determined directly at doorstep weighing with digital scale verification.
+          Transparent per-kg material pricing for doorstep waste collection, verified at pickup with calibrated digital scales.
         </p>
       </div>
 
@@ -54,8 +54,8 @@ export default function PriceListPage() {
             <Banknote className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="font-bold text-xs text-slate-900">Direct Scrap Payouts</h3>
-            <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">Recyclables earn instant payout direct to your UPI account.</p>
+            <h3 className="font-bold text-xs text-slate-900">Doorstep Waste Collection</h3>
+            <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">Convenient doorstep pickup and eco-friendly recycling for household materials.</p>
           </div>
         </div>
 
@@ -74,8 +74,8 @@ export default function PriceListPage() {
             <ShieldCheck className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="font-bold text-xs text-slate-900">Guaranteed Live Rates</h3>
-            <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">Same database rates used in final pickup valuation.</p>
+            <h3 className="font-bold text-xs text-slate-900">Transparent Material Pricing</h3>
+            <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">Clear per-kg material rates applied with digital weighing.</p>
           </div>
         </div>
       </div>
@@ -118,14 +118,30 @@ export default function PriceListPage() {
               >
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="grid h-9 w-9 place-items-center rounded-lg bg-emerald-50 text-emerald-600">
-                      <IconComp className="h-4.5 w-4.5" />
+                    <span className="grid h-10 w-10 place-items-center overflow-hidden rounded-xl border border-emerald-100 bg-emerald-50 text-emerald-600">
+                      <img
+                        src={getMaterialImageUrl(cat)}
+                        alt={cat.name}
+                        loading="lazy"
+                        decoding="async"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).src = '/categories/household-waste.webp';
+                        }}
+                        className="h-full w-full object-cover"
+                      />
                     </span>
-                    {!isBuy && (
-                      <span className="text-[10px] font-bold uppercase px-2.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-200/80">
-                        Service Charge
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5">
+                      {cat.category && (
+                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200/80">
+                          {cat.category}
+                        </span>
+                      )}
+                      {!isBuy && (
+                        <span className="text-[10px] font-bold uppercase px-2.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-200/80">
+                          Service Charge
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div>

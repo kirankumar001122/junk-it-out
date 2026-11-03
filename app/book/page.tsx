@@ -30,8 +30,8 @@ import InteractiveMap, { loadGoogleMaps } from '@/components/InteractiveMap';
 import { readPickupCart } from '@/lib/pickupCart';
 import { getSelectedLocation, setSelectedLocation, LOCATION_CHANGE_EVENT } from '@/lib/selectedLocation';
 import { loadRazorpayScript } from '@/lib/razorpayClient';
-import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
-import { calculateBookingTotalPayable } from '@/lib/pricing';
+import { isCustomerWasteCategory, getMaterialImageUrl, subscribeWasteCategoriesChanged } from '@/lib/customerWasteCategories';
+import { calculateBookingTotalPayable, calculatePickupSummary, PICKUP_SERVICE_CHARGE } from '@/lib/pricing';
 
 // Small category images used in the booking cards.
 const CATEGORY_IMAGES: Record<string, string> = {
@@ -40,6 +40,14 @@ const CATEGORY_IMAGES: Record<string, string> = {
   'Paper & Cardboard': '/categories/paper-carboard.jpg',
   'Plastic Waste': '/categories/plastic-waste.jpg?v=2',
 };
+
+function resolveBookingCardImage(cat: any): string {
+  const custom = typeof cat?.imageUrl === 'string' ? cat.imageUrl.trim() : '';
+  if (custom && !custom.startsWith('/categories/')) {
+    return custom;
+  }
+  return CATEGORY_IMAGES[cat?.name?.trim()] || custom || getMaterialImageUrl(cat);
+}
 
 // Standard 1-hour pickup time slots
 const TIME_SLOTS = [
@@ -211,7 +219,7 @@ export default function BookingPage() {
     checkAuth();
     loadLocationFromStore();
 
-    fetch('/api/waste-categories?customer=true')
+    fetch('/api/waste-categories?customer=true', { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
         if (data.success && Array.isArray(data.data)) {
@@ -280,10 +288,21 @@ export default function BookingPage() {
 
     window.addEventListener('jio_auth_change', checkAuth);
     window.addEventListener(LOCATION_CHANGE_EVENT, handleLocUpdate);
+    const unsubscribeWasteCategories = subscribeWasteCategoriesChanged(() => {
+      fetch('/api/waste-categories?customer=true', { cache: 'no-store' })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data?.success && Array.isArray(data.data)) {
+            setCategories(data.data.filter(isCustomerWasteCategory));
+          }
+        })
+        .catch(() => {});
+    });
 
     return () => {
       window.removeEventListener('jio_auth_change', checkAuth);
       window.removeEventListener(LOCATION_CHANGE_EVENT, handleLocUpdate);
+      unsubscribeWasteCategories();
     };
   }, []);
 
@@ -355,35 +374,33 @@ export default function BookingPage() {
   };
 
   const calculateEstimate = () => {
-    let totalWasteItemsValue = 0;
-    let totalWasteCharge = 0;
-    const baseCharge = 50.0;
-
-    selectedItems.forEach((item) => {
-      const cat = categories.find((c) => c.id === item.categoryId);
-      if (cat) {
-        if (cat.type === 'WASTE_CHARGE') {
-          totalWasteCharge += item.estimatedWeight * cat.pricePerKg;
-        } else {
-          totalWasteItemsValue += item.estimatedWeight * cat.pricePerKg;
-        }
-      }
-    });
-
-    const upfrontCustomerCharge = calculateBookingTotalPayable(
-      totalWasteItemsValue,
-      baseCharge,
-      totalWasteCharge
+    const summary = calculatePickupSummary(
+      selectedItems
+        .map((item) => {
+          const cat = categories.find((c) => c.id === item.categoryId);
+          if (!cat) return null;
+          return {
+            categoryId: cat.id,
+            categoryName: cat.name,
+            type: cat.type,
+            pricePerKg: Number(cat.pricePerKg),
+            weightKg: Number(item.estimatedWeight),
+          };
+        })
+        .filter((item): item is NonNullable<typeof item> => Boolean(item)),
+      PICKUP_SERVICE_CHARGE
     );
-    const netPayable = Math.max(1, upfrontCustomerCharge);
 
     return {
-      totalWasteItemsValue: Math.round(totalWasteItemsValue * 100) / 100,
-      baseCharge,
-      totalWasteCharge: Math.round(totalWasteCharge * 100) / 100,
-      subtotal: upfrontCustomerCharge,
+      items: summary.items,
+      materialCount: summary.materialCount,
+      totalWeightKg: summary.totalWeightKg,
+      totalWasteItemsValue: summary.pickupValue,
+      baseCharge: summary.serviceCharge,
+      totalWasteCharge: 0,
+      subtotal: summary.totalAmountPayable,
       discountAmount: 0,
-      netAmount: netPayable,
+      netAmount: summary.totalAmountPayable,
       direction: 'CUSTOMER_PAYS' as const,
     };
   };
@@ -1190,17 +1207,16 @@ export default function BookingPage() {
                           : 'border-slate-200 bg-slate-50 group-hover:border-emerald-200'
                       }`}
                     >
-                      {CATEGORY_IMAGES[cat.name?.trim()] ? (
-                        <img
-                          src={CATEGORY_IMAGES[cat.name.trim()]}
-                          alt={cat.name}
-                          loading="lazy"
-                          decoding="async"
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <Sparkles className="h-4 w-4 text-emerald-600" />
-                      )}
+                      <img
+                        src={resolveBookingCardImage(cat)}
+                        alt={cat.name}
+                        loading="lazy"
+                        decoding="async"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).src = '/categories/household-waste.webp';
+                        }}
+                        className="h-full w-full object-cover"
+                      />
                     </span>
                     <div className="min-w-0">
                       <span className="block text-xs font-bold text-slate-900 truncate">{cat.name}</span>
@@ -1251,6 +1267,23 @@ export default function BookingPage() {
               );
             })}
           </div>
+
+          {selectedItems.length > 0 && (
+            <div className="rounded-2xl bg-slate-900 p-4 text-white space-y-2 border border-slate-800">
+              <div className="flex items-center justify-between text-xs text-slate-300">
+                <span>Selected Materials ({estimate.materialCount}) · Est. Weight ({estimate.totalWeightKg} kg)</span>
+                <span className="font-semibold text-emerald-300">Pickup Value: ₹{estimate.totalWasteItemsValue.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-slate-300">
+                <span>Service Charge</span>
+                <span>₹{estimate.baseCharge.toFixed(2)}</span>
+              </div>
+              <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-sm font-bold">
+                <span>Total Amount Payable</span>
+                <span className="text-emerald-400 font-extrabold">₹{estimate.netAmount.toFixed(2)}</span>
+              </div>
+            </div>
+          )}
 
           <div className="pt-4 border-t border-slate-100 flex justify-end">
             <button
@@ -1567,19 +1600,32 @@ export default function BookingPage() {
 
             {/* SELECTED WASTE CATEGORIES SUMMARY */}
             <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-200/80 space-y-2.5">
-              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Selected Waste Items</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Selected Waste Items</h3>
+                <span className="text-[11px] font-bold text-slate-600">
+                  {estimate.materialCount} {estimate.materialCount === 1 ? 'item' : 'items'} · {estimate.totalWeightKg} kg
+                </span>
+              </div>
               <div className="space-y-1.5 text-xs">
                 {selectedItems.map((item) => {
                   const cat = categories.find((c) => c.id === item.categoryId);
+                  const itemAmount = Math.round(((Number(cat?.pricePerKg || 0) * Number(item.estimatedWeight || 0)) + Number.EPSILON) * 100) / 100;
                   return (
                     <div key={item.categoryId} className="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-200/80">
                       <div>
                         <span className="font-bold text-slate-900 text-xs block">{cat?.name}</span>
-                        <span className="text-[10px] text-slate-500 font-medium">Rate: ₹{cat?.pricePerKg}/kg</span>
+                        <span className="text-[10px] text-slate-500 font-medium">
+                          ₹{cat?.pricePerKg}/kg × {item.estimatedWeight} kg
+                        </span>
                       </div>
-                      <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-[11px]">
-                        {item.estimatedWeight} kg (Est)
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded text-[11px]">
+                          {item.estimatedWeight} kg
+                        </span>
+                        <span className="font-extrabold text-emerald-700 text-xs">
+                          ₹{itemAmount.toFixed(2)}
+                        </span>
+                      </div>
                     </div>
                   );
                 })}
@@ -1590,22 +1636,24 @@ export default function BookingPage() {
           {/* FINANCIAL SUMMARY BOX */}
           <div className="bg-slate-900 text-white p-4 sm:p-5 rounded-xl space-y-2.5 shadow-sm border border-slate-800">
             <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800 pb-2">
-              Payment Summary
+              Pickup Summary
             </h3>
+            <div className="flex items-center justify-between text-xs text-slate-300">
+              <span>Waste Types:</span>
+              <span className="font-semibold text-white">{estimate.materialCount}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs text-slate-300">
+              <span>Estimated Weight:</span>
+              <span className="font-semibold text-white">{estimate.totalWeightKg} kg</span>
+            </div>
             <div className="flex items-center justify-between text-xs text-slate-300">
               <span>Pickup Value:</span>
               <span className="text-emerald-300 font-semibold">₹{estimate.totalWasteItemsValue.toFixed(2)}</span>
             </div>
             <div className="flex items-center justify-between text-xs text-slate-300">
-              <span>Doorstep Pickup Service Charge:</span>
+              <span>Service Charge:</span>
               <span className="font-semibold text-white">₹{estimate.baseCharge.toFixed(2)}</span>
             </div>
-            {estimate.totalWasteCharge > 0 && (
-              <div className="flex items-center justify-between text-xs text-slate-300">
-                <span>Disposal / Bulky Charge:</span>
-                <span className="font-semibold text-white">₹{estimate.totalWasteCharge.toFixed(2)}</span>
-              </div>
-            )}
             <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between text-sm font-bold">
               <span>Total Amount Payable:</span>
               <span className="text-lg text-emerald-400 font-extrabold">₹{estimate.netAmount.toFixed(2)}</span>

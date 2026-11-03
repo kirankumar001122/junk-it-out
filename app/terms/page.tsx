@@ -3,7 +3,7 @@ import { FileText, ShieldCheck, Scale, Banknote, RefreshCw, AlertTriangle, Arrow
 
 export const metadata = {
   title: 'Terms & Conditions — Junk It Out Doorstep Waste Pickup',
-  description: 'Official Terms & Conditions governing Junk It Out doorstep scrap pickup, weighing, Razorpay payments, customer payouts, and cancellation policies in Bengaluru.',
+  description: 'Official Terms & Conditions governing Junk It Out doorstep waste pickup, weighing, transparent pricing, Razorpay payments, and cancellation policies in Bengaluru.',
 };
 
 export default function TermsPage() {
@@ -66,26 +66,26 @@ export default function TermsPage() {
         <section className="space-y-3 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
           <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
             <span className="w-7 h-7 rounded-xl bg-emerald-100 text-emerald-800 text-xs flex items-center justify-center font-bold">3</span>
-            Financial Direction & Payment Terms
+            Pricing & Payment Terms
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
             <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 space-y-2">
               <h3 className="font-extrabold text-xs text-emerald-950 uppercase tracking-wider flex items-center gap-1.5">
                 <Banknote className="w-4 h-4 text-emerald-600" />
-                Case A: Junk It Out Pays Customer (Scrap Payout)
+                Transparent Material Pricing
               </h3>
               <p className="text-xs text-emerald-900 leading-relaxed">
-                When recyclable value exceeds any applicable doorstep service fee (`JUNKITOUT_PAYS`), Junk It Out transfers the net scrap payout directly to the customer’s UPI ID/bank account upon completion.
+                Pickup charges are calculated transparently based on each selected material’s configured per-kg rate multiplied by its weight, plus a standard ₹50 doorstep service charge.
               </p>
             </div>
 
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
               <h3 className="font-extrabold text-xs text-slate-950 uppercase tracking-wider flex items-center gap-1.5">
                 <ShieldCheck className="w-4 h-4 text-slate-600" />
-                Case B: Customer Pays Service Charge (Razorpay)
+                Secure Online Payment (Razorpay)
               </h3>
               <p className="text-xs text-slate-700 leading-relaxed">
-                For heavy bulky debris, un-recyclable junk removal, or orders where service fee exceeds scrap value (`CUSTOMER_PAYS`), the customer completes payment securely via the Razorpay Checkout gateway.
+                Customers complete payment for their doorstep pickup order securely via the Razorpay Checkout gateway using UPI, cards, or net banking.
               </p>
             </div>
           </div>
