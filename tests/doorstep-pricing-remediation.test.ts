@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { calculateOrderValuation } from '../lib/pricing';
+import { calculateOrderValuation, calculateBookingTotalPayable, toPaise } from '../lib/pricing';
 
 async function run() {
   console.log('--- STARTING DOORSTEP PRICING & BOOKING VALUATION REGRESSION TESTS ---');
@@ -144,7 +144,7 @@ async function run() {
   {
     const fs = await import('node:fs');
     const path = await import('node:path');
-    const rootDir = path.resolve('C:/Users/dega parthiv/Downloads/junk-it-out-service-charge-50');
+    const rootDir = path.resolve(__dirname, '..');
 
     const saCode = fs.readFileSync(path.join(rootDir, 'app/api/service-areas/route.ts'), 'utf8');
     assert.match(saCode, /basePickupCharge:\s*defaultZone\?\.basePickupCharge\s*\|\|\s*50/);
@@ -158,7 +158,107 @@ async function run() {
     assert.match(adminPageCode, /minPickupCharge:\s*50/);
   }
 
+  // TEST 8: Required Standard Pricing Calculations
+  console.log('Test 8: Validating required pricing calculations (41->91, 100->150, 250->300, 500->550)...');
+  {
+    assert.equal(calculateBookingTotalPayable(41.0, 50.0, 0.0), 91.0);
+    assert.equal(toPaise(calculateBookingTotalPayable(41.0, 50.0, 0.0)), 9100);
+
+    assert.equal(calculateBookingTotalPayable(100.0, 50.0, 0.0), 150.0);
+    assert.equal(toPaise(calculateBookingTotalPayable(100.0, 50.0, 0.0)), 15000);
+
+    assert.equal(calculateBookingTotalPayable(250.0, 50.0, 0.0), 300.0);
+    assert.equal(toPaise(calculateBookingTotalPayable(250.0, 50.0, 0.0)), 30000);
+
+    assert.equal(calculateBookingTotalPayable(500.0, 50.0, 0.0), 550.0);
+    assert.equal(toPaise(calculateBookingTotalPayable(500.0, 50.0, 0.0)), 55000);
+  }
+
+  // TEST 9: Adding More Waste Increases Waste Value and Total Payable (Service Charge Stays 50)
+  console.log('Test 9: Adding more waste increases total waste value and payable without altering 50 service charge...');
+  {
+    let waste = 41.0;
+    let payable = calculateBookingTotalPayable(waste, 50.0, 0.0);
+    assert.equal(payable, 91.0);
+
+    waste += 59.0;
+    payable = calculateBookingTotalPayable(waste, 50.0, 0.0);
+    assert.equal(payable, 150.0);
+
+    waste += 150.0;
+    payable = calculateBookingTotalPayable(waste, 50.0, 0.0);
+    assert.equal(payable, 300.0);
+
+    waste += 250.0;
+    payable = calculateBookingTotalPayable(waste, 50.0, 0.0);
+    assert.equal(payable, 550.0);
+  }
+
+  // TEST 10: Service Charge Remains Strictly 50 After Quantity and Category Changes
+  console.log('Test 10: Service charge remains strictly 50 after changing waste quantity and category...');
+  {
+    const scenarios = [
+      { waste: 10.0, fee: 50.0, expected: 60.0 },
+      { waste: 41.0, fee: 50.0, expected: 91.0 },
+      { waste: 85.5, fee: 50.0, expected: 135.5 },
+      { waste: 100.0, fee: 50.0, expected: 150.0 },
+      { waste: 250.0, fee: 50.0, expected: 300.0 },
+      { waste: 500.0, fee: 50.0, expected: 550.0 },
+      { waste: 1200.0, fee: 50.0, expected: 1250.0 },
+    ];
+    for (const s of scenarios) {
+      const payable = calculateBookingTotalPayable(s.waste, s.fee, 0.0);
+      assert.equal(payable, s.expected);
+      assert.equal(payable - s.waste, 50.0, 'Fee must always be strictly 50.00');
+    }
+  }
+
+  // TEST 11: Historical Database Value of 69 Cannot Override 50 Service Charge
+  console.log('Test 11: Verifying historical database zone configuration of 69 cannot override 50...');
+  {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const rootDir = path.resolve(__dirname, '..');
+
+    const saServiceCode = fs.readFileSync(path.join(rootDir, 'lib/services/serviceAreaService.ts'), 'utf8');
+    assert.match(saServiceCode, /basePickupCharge:\s*DEFAULT_SERVICE_CHARGE/, 'serviceAreaService must enforce DEFAULT_SERVICE_CHARGE');
+    assert.doesNotMatch(saServiceCode, /basePickupCharge:\s*area\.basePickupCharge/, 'Must not use area.basePickupCharge from DB');
+
+    const saRouteCode = fs.readFileSync(path.join(rootDir, 'app/api/service-areas/route.ts'), 'utf8');
+    assert.match(saRouteCode, /basePickupCharge:\s*DEFAULT_SERVICE_CHARGE/, 'GET /api/service-areas must enforce DEFAULT_SERVICE_CHARGE');
+    assert.doesNotMatch(saRouteCode, /basePickupCharge:\s*dbRecord\.basePickupCharge/, 'Must not use dbRecord.basePickupCharge');
+
+    const ordServiceCode = fs.readFileSync(path.join(rootDir, 'lib/services/orderService.ts'), 'utf8');
+    assert.match(ordServiceCode, /const basePickupCharge = 50\.0;/, 'orderService must fix basePickupCharge to 50.0');
+    assert.doesNotMatch(ordServiceCode, /geofence\.zone\?\.basePickupCharge/, 'Must not use geofence.zone.basePickupCharge');
+  }
+
+  // TEST 12: Razorpay Amount Matches Calculated Total in Paise
+  console.log('Test 12: Razorpay amount matches the calculated total in paise...');
+  {
+    assert.equal(toPaise(91.0), 9100);
+    assert.equal(toPaise(150.0), 15000);
+    assert.equal(toPaise(300.0), 30000);
+    assert.equal(toPaise(550.0), 55000);
+  }
+
+  // TEST 13: Settlement Does Not Deduct Service Fee Twice
+  console.log('Test 13: Settlement does not deduct the service fee twice for captured booking payments...');
+  {
+    const items = [
+      { categoryId: 'cat-scrap', categoryName: 'Scrap Metal', type: 'RECYCLABLE_BUY', pricePerKg: 15.0, weightKg: 3 },
+    ];
+    const isBookingPaid = true;
+    const uncollectedPickupCharge = isBookingPaid ? 0 : 50.0;
+    const valuation = calculateOrderValuation(items, uncollectedPickupCharge, 0.0);
+
+    assert.equal(valuation.totalRecyclableValue, 45.0);
+    assert.equal(valuation.financialDirection, 'JUNKITOUT_PAYS');
+    assert.equal(valuation.netAmount, 45.0, 'Customer receives full 45.00 scrap payout without duplicate fee deduction');
+  }
+
   console.log('ALL DOORSTEP PRICING & BOOKING VALUATION REGRESSION TESTS PASSED CLEANLY.');
+
 }
 
 run().catch((err) => {

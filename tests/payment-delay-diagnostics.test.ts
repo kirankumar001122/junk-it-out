@@ -424,8 +424,9 @@ describe('Payment Delay Diagnostics & Timing Telemetry', () => {
 
     // Verify paymentConfig is returned
     assert.ok(body.data.paymentConfig, 'Must return paymentConfig in single round-trip');
-    assert.equal(body.data.paymentConfig.amount, 69);
+    assert.equal(body.data.paymentConfig.amount, 150);
     assert.equal(body.data.paymentConfig.currency, 'INR');
+    assert.equal(state.lastRazorpayOrderParams.amountInPaise, 15000);
     assert.ok(body.data.paymentConfig.gatewayOrderId.startsWith('order_rzp_mock_'));
     assert.equal(state.gatewayCalls, 1);
 

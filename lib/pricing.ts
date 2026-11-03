@@ -90,6 +90,28 @@ export function toRupees(paise: number): number {
 }
 
 /**
+ * Calculate the upfront customer booking total payable.
+ * Business Rule: Total Payable = Total Waste Value + Fixed Service Charge (₹50) + Applicable Disposal Charges
+ *
+ * The service charge must ALWAYS remain exactly ₹50 for every eligible delivery,
+ * regardless of the quantity, weight, category or value of waste.
+ *
+ * @param totalWasteValue Sum of recyclable waste scrap values (₹)
+ * @param basePickupCharge Fixed doorstep pickup service fee (strictly ₹50.00)
+ * @param disposalCharges Separate bulky or non-recyclable disposal charges (₹)
+ */
+export function calculateBookingTotalPayable(
+  totalWasteValue: number,
+  basePickupCharge: number = 50.0,
+  disposalCharges: number = 0.0
+): number {
+  const wastePaise = toPaise(Math.max(0, totalWasteValue));
+  const servicePaise = toPaise(Math.max(0, basePickupCharge));
+  const disposalPaise = toPaise(Math.max(0, disposalCharges));
+  return toRupees(wastePaise + servicePaise + disposalPaise);
+}
+
+/**
  * Single authoritative order valuation calculation.
  *
  * @param itemsInput List of items with weights, category types, and rates per kg.

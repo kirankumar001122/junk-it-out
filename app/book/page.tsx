@@ -31,6 +31,7 @@ import { readPickupCart } from '@/lib/pickupCart';
 import { getSelectedLocation, setSelectedLocation, LOCATION_CHANGE_EVENT } from '@/lib/selectedLocation';
 import { loadRazorpayScript } from '@/lib/razorpayClient';
 import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
+import { calculateBookingTotalPayable } from '@/lib/pricing';
 
 // Small category images used in the booking cards.
 const CATEGORY_IMAGES: Record<string, string> = {
@@ -381,7 +382,11 @@ export default function BookingPage() {
       }
     });
 
-    const upfrontCustomerCharge = Math.round((totalWasteItemsValue + baseCharge + totalWasteCharge) * 100) / 100;
+    const upfrontCustomerCharge = calculateBookingTotalPayable(
+      totalWasteItemsValue,
+      baseCharge,
+      totalWasteCharge
+    );
     const netPayable = Math.max(1, upfrontCustomerCharge);
 
     return {

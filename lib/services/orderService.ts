@@ -11,6 +11,7 @@ import {
 } from '../cache/wasteCategoriesCache';
 import {
   calculateOrderValuation,
+  calculateBookingTotalPayable,
   type CalculationItemInput,
   type FinancialDirection,
 } from '../pricing';
@@ -470,7 +471,11 @@ export async function createOrder(
     : 'CUSTOMER_PAYS';
 
   const estimatedTotal = valuation.totalRecyclableValue;
-  const upfrontCustomerCharge = Math.round((valuation.totalRecyclableValue + valuation.totalCustomerCharges) * 100) / 100;
+  const upfrontCustomerCharge = calculateBookingTotalPayable(
+    valuation.totalRecyclableValue,
+    basePickupCharge,
+    valuation.totalWasteCharge + urgentSurcharge
+  );
   const finalAmount = financialDirection === 'CUSTOMER_PAYS'
     ? Math.max(1, Math.round(upfrontCustomerCharge * 100) / 100)
     : valuation.netAmount;

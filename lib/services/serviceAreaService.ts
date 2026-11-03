@@ -83,7 +83,7 @@ export async function checkGeofenceServiceability(
               id: area.id,
               name: area.name,
               etaMinutes: area.etaMinutes,
-              basePickupCharge: area.basePickupCharge,
+              basePickupCharge: DEFAULT_SERVICE_CHARGE,
             },
           };
         } else {
