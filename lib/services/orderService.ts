@@ -4,10 +4,6 @@ import {
   saveCustomerAddress,
 } from './customerService';
 import { checkGeofenceServiceability } from './serviceAreaService';
-import {
-  validateAndCalculateCoupon,
-  InvalidCouponError,
-} from './couponService';
 import { calculateTotalBookingWeight } from '../validations/schemas';
 import {
   getCachedWasteCategories,
@@ -24,7 +20,6 @@ import {
   recordTiming,
 } from '../observability/requestTiming';
 
-export { InvalidCouponError };
 
 export class OrderIdempotencyConflictError extends Error {
   constructor(
@@ -86,7 +81,6 @@ export function createOrderPayloadHash(input: any): string {
     scheduledSlot: input.scheduledSlot || null,
     notes: String(input.notes || '').trim(),
     financialDirection: input.financialDirection || 'CUSTOMER_PAYS',
-    couponCode: String(input.couponCode || '').trim().toUpperCase(),
   };
 
   return JSON.stringify(canonical);
@@ -258,17 +252,13 @@ export async function createOrder(
     timer?.recordPhase('idempotency_lookup');
 
   // ---------------------------------------------------------
-  // 2. PARALLEL LOOKUP: GEOFENCE, USER PROFILE, WASTE CATEGORIES, AND COUPON
+  // 2. PARALLEL LOOKUP: GEOFENCE, USER PROFILE, AND WASTE CATEGORIES
   // ---------------------------------------------------------
   const categoryIds = input.items.map(
     (item) => item.categoryId
   );
 
-  const couponCode = input.couponCode && String(input.couponCode).trim()
-    ? String(input.couponCode).trim().toUpperCase()
-    : null;
-
-  const [geofence, initialUser, dbCategories, couponRecord] = await Promise.all([
+  const [geofence, initialUser, dbCategories] = await Promise.all([
     measureTiming(
       'order.lookup.geofence',
       () => checkGeofenceServiceability(
@@ -321,12 +311,6 @@ export async function createOrder(
         return fetched;
       },
     ),
-    couponCode
-      ? measureTiming(
-          'order.lookup.coupon',
-          () => db.coupon.findUnique({ where: { code: couponCode } }).catch(() => null),
-        )
-      : Promise.resolve(null),
   ]);
 
   timer?.recordPhase('parallel_lookups');
@@ -465,36 +449,13 @@ export async function createOrder(
   }
   totalItemsEstimatedValue = Math.round(totalItemsEstimatedValue * 100) / 100;
 
-  const preDiscountSubtotal = totalItemsEstimatedValue + basePickupCharge;
+  timer?.recordPhase('order_valuation');
 
-  let discountAmount = 0.0;
-  if (input.couponCode && String(input.couponCode).trim()) {
-    const couponValidation = await measureTiming(
-      'order.coupon.validate',
-      () => validateAndCalculateCoupon(
-        input.couponCode,
-        preDiscountSubtotal,
-        user.customer?.id,
-        couponRecord
-      ),
-    );
-
-    if (!couponValidation.valid) {
-      throw new InvalidCouponError(
-        couponValidation.error || 'Invalid or ineligible coupon code.'
-      );
-    }
-
-    discountAmount = couponValidation.discountAmount;
-  }
-
-  timer?.recordPhase('coupon_validation');
-
-  // Authoritative valuation using standardized engine
+  // Authoritative valuation using standardized engine (coupons removed)
   const valuation = calculateOrderValuation(
     calculationItems,
     basePickupCharge,
-    discountAmount,
+    0.0,
     urgentSurcharge
   );
 
@@ -509,10 +470,10 @@ export async function createOrder(
     ? valuation.financialDirection
     : 'CUSTOMER_PAYS';
 
-  const estimatedTotal = totalItemsEstimatedValue;
-  const rawPayable = preDiscountSubtotal - discountAmount;
+  const estimatedTotal = valuation.totalRecyclableValue;
+  const upfrontCustomerCharge = valuation.totalCustomerCharges;
   const finalAmount = financialDirection === 'CUSTOMER_PAYS'
-    ? Math.max(1, Math.round(rawPayable * 100) / 100)
+    ? Math.max(1, Math.round(upfrontCustomerCharge * 100) / 100)
     : valuation.netAmount;
 
   const orderNumber =
@@ -563,7 +524,7 @@ export async function createOrder(
               basePickupCharge,
 
             discountAmount:
-              valuation.discountAmount,
+              0.0,
 
             finalAmount,
 

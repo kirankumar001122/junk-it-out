@@ -8,7 +8,6 @@ import { NextRequest } from 'next/server';
 import {
   createOrder,
   OrderIdempotencyConflictError,
-  InvalidCouponError,
   InvalidWasteCategoryError,
   InvalidBookingWeightError,
   InvalidIdempotencyKeyError,
@@ -382,17 +381,6 @@ async function handlePost(req: NextRequest) {
         err.message ||
           'Idempotency key was already used for a different booking payload.',
         409
-      );
-    }
-
-    if (
-      err instanceof InvalidCouponError ||
-      err?.name === 'InvalidCouponError'
-    ) {
-      return errorResponse(
-        'INVALID_COUPON',
-        err.message || 'Invalid or ineligible coupon code.',
-        400
       );
     }
 

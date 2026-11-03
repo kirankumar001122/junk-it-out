@@ -128,9 +128,12 @@ export async function POST(
         }
       }
 
+      const isBookingPaid = order.paymentStatus === 'CAPTURED' || order.paymentStatus === 'SUCCESS';
+      const uncollectedPickupCharge = isBookingPaid ? 0 : order.pickupCharge;
+
       completionValuation = calculateOrderValuation(
         calculationItems,
-        order.pickupCharge,
+        uncollectedPickupCharge,
         order.discountAmount
       );
 

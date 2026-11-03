@@ -9,7 +9,6 @@ import {
   Mail,
   MapPin,
   Package,
-  Ticket,
   AlertCircle,
   LogOut,
   ChevronRight,
@@ -102,7 +101,6 @@ export default function CustomerProfilePage() {
       items: [
         { label: 'My Pickups & Order History', href: '/my-pickups', icon: Package },
         { label: 'Saved Addresses (Home, Work)', href: '/customer/addresses', icon: MapPin },
-        { label: 'Offers & Coupons', href: '/customer/coupons', icon: Ticket },
       ],
     },
     {
