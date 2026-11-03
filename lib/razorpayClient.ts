@@ -3,8 +3,8 @@ const RAZORPAY_SCRIPT_SRC = 'https://checkout.razorpay.com/v1/checkout.js';
 
 let razorpayScriptPromise: Promise<boolean> | null = null;
 
-function hasRazorpay(): boolean {
-  return Boolean((window as Window & { Razorpay?: unknown }).Razorpay);
+export function hasRazorpay(): boolean {
+  return typeof (window as Window & { Razorpay?: unknown }).Razorpay === 'function';
 }
 
 export function loadRazorpayScript(): Promise<boolean> {
@@ -28,11 +28,11 @@ export function loadRazorpayScript(): Promise<boolean> {
     ) as HTMLScriptElement | null;
 
     if (existing) {
-      if (hasRazorpay() || existing.getAttribute('data-loaded') === 'true') {
+      if (hasRazorpay()) {
         finish(true);
         return;
       }
-      if (existing.getAttribute('data-failed') === 'true') {
+      if (existing.getAttribute('data-loaded') === 'true' || existing.getAttribute('data-failed') === 'true') {
         existing.remove();
       } else {
         existing.addEventListener('load', () => {

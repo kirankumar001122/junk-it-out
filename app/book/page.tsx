@@ -437,6 +437,61 @@ export default function BookingPage() {
     setStep(1);
   };
 
+  // Safe JSON parsing helper to guard against unexpected non-JSON (e.g. 500/502/504 HTML) responses
+  const safeParseJsonResponse = async (res: Response): Promise<{ ok: boolean; status: number; data: any; parseError?: string }> => {
+    try {
+      const text = await res.text();
+      if (!text || !text.trim()) {
+        return { ok: res.ok, status: res.status, data: null, parseError: "Empty response from server" };
+      }
+      const json = JSON.parse(text);
+      return { ok: res.ok, status: res.status, data: json };
+    } catch (parseErr: any) {
+      return {
+        ok: false,
+        status: res.status,
+        data: null,
+        parseError: parseErr instanceof Error ? parseErr.message : "Invalid JSON",
+      };
+    }
+  };
+
+  const getFriendlyApiErrorMessage = (parsed: { ok: boolean; status: number; data: any; parseError?: string }, defaultMsg: string): string => {
+    const data = parsed.data;
+    if (data) {
+      const serverMsg = data.error?.message || data.message;
+      if (serverMsg && typeof serverMsg === "string") return serverMsg;
+    }
+    if (parsed.status === 504) {
+      return "The booking request timed out on the server. Please check your connection or retry in a moment.";
+    }
+    if (parsed.status === 502 || parsed.status === 503) {
+      return `The Junk It Out service is momentarily unavailable (HTTP ${parsed.status}). Please try again shortly.`;
+    }
+    if (parsed.status === 401) {
+      return "Your login session expired. Please verify your mobile number and retry.";
+    }
+    if (parsed.status === 403) {
+      return "You are not authorized to complete this booking.";
+    }
+    if (parsed.status >= 500) {
+      return `A server error occurred (HTTP ${parsed.status}). Please try again or retry payment below.`;
+    }
+    return defaultMsg;
+  };
+
+  const savePendingOrderToStorage = (orderData: any, areaName: string, flowId: string) => {
+    if (typeof window !== "undefined" && orderData?.id) {
+      sessionStorage.setItem("jio_pending_order", JSON.stringify({
+        id: orderData.id,
+        orderNumber: orderData.orderNumber,
+        finalAmount: orderData.finalAmount,
+        area: orderData.address?.area || areaName,
+        checkoutFlowId: flowId,
+      }));
+    }
+  };
+
   // Safe retry payment for existing unpaid order (no duplicate order creation)
   const handleRetryPayment = async (orderToRetry?: any) => {
     const targetOrder = orderToRetry || pendingOrder;
@@ -444,7 +499,7 @@ export default function BookingPage() {
     if (isRetryingRef.current || loading) return;
     isRetryingRef.current = true;
     const storedFlowId =
-      typeof targetOrder.checkoutFlowId === 'string' &&
+      typeof targetOrder.checkoutFlowId === "string" &&
       checkoutFlowIdPattern.test(targetOrder.checkoutFlowId)
         ? targetOrder.checkoutFlowId.toLowerCase()
         : null;
@@ -453,69 +508,88 @@ export default function BookingPage() {
     checkoutFlowIdRef.current = checkoutFlowId;
     targetOrder.checkoutFlowId = checkoutFlowId;
     setLoading(true);
-    setBookingStatusText('Re-connecting to secure payment...');
-    setErrorMsg('');
+    setBookingStatusText("Re-connecting to secure payment...");
+    setErrorMsg("");
 
     const scriptPromise = loadRazorpayScript();
 
     try {
-      const payRes = await fetch('/api/payments/create', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Checkout-Flow-ID': checkoutFlowId,
-        },
-        body: JSON.stringify({ orderId: targetOrder.id }),
-      });
-
-      const payData = await payRes.json();
-      if (!payRes.ok || !payData.success) {
+      let payRes: Response;
+      try {
+        payRes = await fetch("/api/payments/create", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Checkout-Flow-ID": checkoutFlowId,
+          },
+          body: JSON.stringify({ orderId: targetOrder.id }),
+        });
+      } catch (fetchErr: any) {
+        console.error("[PAYMENT_RETRY_FETCH_FAILED]", fetchErr);
         setLoading(false);
         isRetryingRef.current = false;
-        setErrorMsg(payData.message || 'Unable to resume payment for this order.');
+        setErrorMsg("Unable to connect to payment server. Please check your internet connection.");
+        return;
+      }
+
+      const payParsed = await safeParseJsonResponse(payRes);
+      const payData = payParsed.data;
+
+      if (!payRes.ok || !payData?.success) {
+        setLoading(false);
+        isRetryingRef.current = false;
+        const msg = getFriendlyApiErrorMessage(payParsed, "Unable to resume payment for this order.");
+        setErrorMsg(msg);
         return;
       }
 
       if (payData.alreadyPaid) {
-        if (typeof window !== 'undefined') {
-          sessionStorage.removeItem('jio_pending_order');
+        if (typeof window !== "undefined") {
+          sessionStorage.removeItem("jio_pending_order");
         }
         setPendingOrder(null);
         setLoading(false);
         isRetryingRef.current = false;
         setSuccessOrder({
           ...targetOrder,
-          paymentStatus: 'CAPTURED',
-          status: 'BOOKING_RECEIVED',
+          paymentStatus: "CAPTURED",
+          status: "BOOKING_RECEIVED",
         });
         return;
       }
 
-      const scriptLoaded = await scriptPromise;
-      if (!scriptLoaded) {
+      const razorpayConfig = payData.data;
+      if (!razorpayConfig?.key || !razorpayConfig?.gatewayOrderId) {
         setLoading(false);
         isRetryingRef.current = false;
-        setErrorMsg('Failed to load Razorpay payment SDK. Please check your network connection.');
+        setErrorMsg("Payment gateway configuration is incomplete. Please contact support or try again later.");
         return;
       }
 
-      const razorpayConfig = payData.data;
+      const scriptLoaded = await scriptPromise;
+      if (!scriptLoaded || typeof (window as any).Razorpay !== "function") {
+        setLoading(false);
+        isRetryingRef.current = false;
+        setErrorMsg("Failed to load payment checkout SDK. Please disable ad-blockers or check your connection and retry.");
+        return;
+      }
+
       const options = {
         key: razorpayConfig.key,
-        amount: Math.round(razorpayConfig.amount * 100),
-        currency: razorpayConfig.currency || 'INR',
-        name: 'Junk It Out',
+        amount: Math.round(Number(razorpayConfig.amount) * 100),
+        currency: razorpayConfig.currency || "INR",
+        name: "Junk It Out",
         description: razorpayConfig.description || `Pickup Order #${targetOrder.orderNumber}`,
-        image: typeof window !== 'undefined' ? `${window.location.origin}/logo.png` : '/logo.png',
+        image: typeof window !== "undefined" ? `${window.location.origin}/logo.png` : "/logo.png",
         order_id: razorpayConfig.gatewayOrderId,
         handler: async function (response: any) {
           setLoading(true);
           try {
-            const verifyRes = await fetch('/api/payments/verify', {
-              method: 'POST',
+            const verifyRes = await fetch("/api/payments/verify", {
+              method: "POST",
               headers: {
-                'Content-Type': 'application/json',
-                'X-Checkout-Flow-ID': checkoutFlowId,
+                "Content-Type": "application/json",
+                "X-Checkout-Flow-ID": checkoutFlowId,
               },
               body: JSON.stringify({
                 orderId: targetOrder.id,
@@ -525,37 +599,40 @@ export default function BookingPage() {
               }),
             });
 
-            const verifyData = await verifyRes.json();
+            const verifyParsed = await safeParseJsonResponse(verifyRes);
+            const verifyData = verifyParsed.data;
             setLoading(false);
             isRetryingRef.current = false;
 
-            if (verifyRes.ok && verifyData.success) {
-              idempotencyKeyRef.current = '';
-              lastPayloadSignatureRef.current = '';
+            if (verifyRes.ok && verifyData?.success) {
+              idempotencyKeyRef.current = "";
+              lastPayloadSignatureRef.current = "";
               setPendingOrder(null);
-              if (typeof window !== 'undefined') {
-                sessionStorage.removeItem('jio_pending_order');
+              if (typeof window !== "undefined") {
+                sessionStorage.removeItem("jio_pending_order");
               }
               setSuccessOrder({
                 ...targetOrder,
-                paymentStatus: 'CAPTURED',
-                status: 'BOOKING_RECEIVED',
+                paymentStatus: "CAPTURED",
+                status: "BOOKING_RECEIVED",
               });
             } else {
-              setErrorMsg(verifyData.message || 'Payment verification failed server-side. Your booking has not been confirmed.');
+              const verifyMsg = getFriendlyApiErrorMessage(verifyParsed, "Payment verification failed server-side. Your booking has not been confirmed.");
+              setErrorMsg(verifyMsg);
             }
-          } catch {
+          } catch (verifyErr: any) {
+            console.error("[RETRY_VERIFY_NETWORK_ERROR]", verifyErr);
             setLoading(false);
             isRetryingRef.current = false;
-            setErrorMsg('Network error verifying payment. Please check your order in My Pickups.');
+            setErrorMsg("Network error verifying payment. Please check your order in My Pickups.");
           }
         },
         prefill: {
-          name: name || 'Customer',
-          contact: phone || '',
+          name: name || "Customer",
+          contact: phone || "",
         },
         theme: {
-          color: '#059669',
+          color: "#059669",
         },
         modal: {
           ondismiss: function () {
@@ -567,20 +644,35 @@ export default function BookingPage() {
         },
       };
 
-      const rzp = new (window as any).Razorpay(options);
-      rzp.on('payment.failed', function (response: any) {
+      try {
+        const rzp = new (window as any).Razorpay(options);
+        rzp.on("payment.failed", function (response: any) {
+          setLoading(false);
+          isSubmittingRef.current = false;
+          isRetryingRef.current = false;
+          const reason = response?.error?.description || response?.error?.reason || "Transaction declined.";
+          setErrorMsg(`Payment failed: ${reason} Order #${targetOrder.orderNumber} is saved. Please retry payment whenever ready.`);
+        });
+
+        rzp.open();
+      } catch (sdkErr: any) {
+        console.error("[RETRY_RAZORPAY_SDK_ERROR]", sdkErr);
         setLoading(false);
         isSubmittingRef.current = false;
         isRetryingRef.current = false;
-        const reason = response?.error?.description || response?.error?.reason || 'Transaction declined.';
-        setErrorMsg(`Payment failed: ${reason} Order #${targetOrder.orderNumber} is saved. You can retry payment whenever ready.`);
-      });
-
-      rzp.open();
-    } catch {
+        const sdkMsg = sdkErr instanceof Error ? sdkErr.message : "Unable to launch checkout.";
+        setErrorMsg(`Order #${targetOrder.orderNumber} is saved. ${sdkMsg} Please retry payment.`);
+      }
+    } catch (err: any) {
+      console.error("[PAYMENT_RETRY_MASTER_ERROR]", err);
       setLoading(false);
       isRetryingRef.current = false;
-      setErrorMsg('Network error while retrying payment. Please try again.');
+      const isNetworkErr = err instanceof TypeError && /fetch|network/i.test(err.message || "");
+      setErrorMsg(
+        isNetworkErr
+          ? "Unable to connect to payment server. Please check your internet connection and try again."
+          : (err instanceof Error ? err.message : "Failed to retry payment. Please try again.")
+      );
     }
   };
 
@@ -589,17 +681,17 @@ export default function BookingPage() {
     if (isSubmittingRef.current || loading) return;
     if (!isCustomer) {
       setLoginOpen(true);
-      setErrorMsg('Authentication is required. Please log in with mobile OTP to complete your booking.');
+      setErrorMsg("Authentication is required. Please log in with mobile OTP to complete your booking.");
       return;
     }
 
     if (!area || !geofenceResult?.serviceable) {
-      setErrorMsg(geofenceResult?.message || 'Please select a valid pickup location in Bengaluru before confirming.');
+      setErrorMsg(geofenceResult?.message || "Please select a valid pickup location in Bengaluru before confirming.");
       return;
     }
 
     if (selectedItems.length === 0) {
-      setErrorMsg('Please select at least one waste category.');
+      setErrorMsg("Please select at least one waste category.");
       return;
     }
 
@@ -613,39 +705,39 @@ export default function BookingPage() {
       phone,
       name,
       address: {
-        label: addressLabel || 'Home',
-        houseNo: houseNo || area || 'Pickup Location',
+        label: addressLabel || "Home",
+        houseNo: houseNo || area || "Pickup Location",
         building: building || undefined,
-        street: street || area || 'Main Road',
+        street: street || area || "Main Road",
         area,
         landmark: landmark || undefined,
-        pincode: pincode || '560001',
+        pincode: pincode || "560001",
         lat,
         lng,
         googlePlaceId: placeId,
       },
       items: selectedItems,
       pickupType,
-      scheduledSlot: pickupType === 'SCHEDULED' ? formattedScheduledSlot : null,
+      scheduledSlot: pickupType === "SCHEDULED" ? formattedScheduledSlot : null,
       photos: [], // Photo upload removed per user requirement
       notes: instructions,
-      financialDirection: 'CUSTOMER_PAYS' as const,
+      financialDirection: "CUSTOMER_PAYS" as const,
     };
 
     const currentPayloadSignature = JSON.stringify({
       phone: phone.trim(),
       name: name.trim(),
       area: area.trim(),
-      houseNo: (houseNo || area || 'Pickup Location').trim(),
-      street: (street || area || 'Main Road').trim(),
-      pincode: (pincode || '560001').trim(),
+      houseNo: (houseNo || area || "Pickup Location").trim(),
+      street: (street || area || "Main Road").trim(),
+      pincode: (pincode || "560001").trim(),
       lat,
       lng,
       items: selectedItems
         .map((i) => ({ categoryId: i.categoryId, weight: i.estimatedWeight }))
         .sort((a, b) => a.categoryId.localeCompare(b.categoryId)),
       pickupType,
-      scheduledSlot: pickupType === 'SCHEDULED' ? formattedScheduledSlot : null,
+      scheduledSlot: pickupType === "SCHEDULED" ? formattedScheduledSlot : null,
       notes: instructions.trim(),
     });
 
@@ -653,7 +745,7 @@ export default function BookingPage() {
     // If the booking payload was edited since last submission, or no key was assigned yet, generate a new key.
     // If the exact same booking is retried, preserve the key so duplicate orders are prevented.
     if (!idempotencyKeyRef.current || lastPayloadSignatureRef.current !== currentPayloadSignature) {
-      idempotencyKeyRef.current = `booking-${phone.replace(/[\s+]/g, '')}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      idempotencyKeyRef.current = `booking-${phone.replace(/[\s+]/g, "")}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
       lastPayloadSignatureRef.current = currentPayloadSignature;
       checkoutFlowIdRef.current = window.crypto.randomUUID();
     }
@@ -662,32 +754,43 @@ export default function BookingPage() {
 
     isSubmittingRef.current = true;
     setLoading(true);
-    setErrorMsg('');
-    setBookingStatusText('Securing your booking slot...');
+    setErrorMsg("");
+    setBookingStatusText("Securing your booking slot...");
 
     // Preload / load SDK in parallel with API calls
     const scriptPromise = loadRazorpayScript();
+    let createdOrderData: any = null;
 
     try {
       // 1. Create order on server (CUSTOMER_PAYS)
-      const res = await fetch('/api/orders', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': idempotencyKeyRef.current,
-          'X-Checkout-Flow-ID': checkoutFlowId,
-        },
-        body: JSON.stringify(bookingPayload),
-      });
+      let res: Response;
+      try {
+        res = await fetch("/api/orders", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Idempotency-Key": idempotencyKeyRef.current,
+            "X-Checkout-Flow-ID": checkoutFlowId,
+          },
+          body: JSON.stringify(bookingPayload),
+        });
+      } catch (fetchErr: any) {
+        console.error("[BOOKING_FETCH_FAILED]", fetchErr);
+        setLoading(false);
+        isSubmittingRef.current = false;
+        setErrorMsg("Unable to connect to Junk It Out. Please check your internet connection and try again.");
+        return;
+      }
 
-      const data = await res.json();
+      const parsed = await safeParseJsonResponse(res);
+      const data = parsed.data;
 
-      if (!res.ok || !data.success) {
-        const errorCode = data.error?.code || data.code;
-        const errorMsg = data.error?.message || data.message || 'Failed to place order. Please verify your details and try again.';
-        if (res.status === 409 || errorCode === 'IDEMPOTENCY_CONFLICT') {
-          idempotencyKeyRef.current = '';
-          lastPayloadSignatureRef.current = '';
+      if (!res.ok || !data?.success) {
+        const errorCode = data?.error?.code || data?.code;
+        const errorMsg = getFriendlyApiErrorMessage(parsed, "Failed to place order. Please verify your details and try again.");
+        if (res.status === 409 || errorCode === "IDEMPOTENCY_CONFLICT") {
+          idempotencyKeyRef.current = "";
+          lastPayloadSignatureRef.current = "";
         }
         setLoading(false);
         isSubmittingRef.current = false;
@@ -696,22 +799,30 @@ export default function BookingPage() {
       }
 
       const orderData = data.data;
+      if (!orderData || !orderData.id) {
+        setLoading(false);
+        isSubmittingRef.current = false;
+        setErrorMsg("Order was created, but response was invalid. Please check My Pickups or refresh.");
+        return;
+      }
+
+      createdOrderData = orderData;
       orderData.checkoutFlowId = checkoutFlowId;
 
       // If order does not require customer payment (e.g. JUNKITOUT_PAYS scrap payout or ZERO_BALANCE), confirm directly
-      if (orderData.financialDirection !== 'CUSTOMER_PAYS' || Number(orderData.finalAmount) === 0) {
-        idempotencyKeyRef.current = '';
-        lastPayloadSignatureRef.current = '';
+      if (orderData.financialDirection !== "CUSTOMER_PAYS" || Number(orderData.finalAmount) === 0) {
+        idempotencyKeyRef.current = "";
+        lastPayloadSignatureRef.current = "";
         setPendingOrder(null);
-        if (typeof window !== 'undefined') {
-          sessionStorage.removeItem('jio_pending_order');
+        if (typeof window !== "undefined") {
+          sessionStorage.removeItem("jio_pending_order");
         }
         setLoading(false);
         isSubmittingRef.current = false;
         setSuccessOrder({
           ...orderData,
-          paymentStatus: 'NOT_APPLICABLE',
-          status: 'BOOKING_RECEIVED',
+          paymentStatus: "NOT_APPLICABLE",
+          status: "BOOKING_RECEIVED",
         });
         return;
       }
@@ -720,47 +831,53 @@ export default function BookingPage() {
       let razorpayConfig = orderData.paymentConfig;
 
       if (!razorpayConfig) {
-        setBookingStatusText('Connecting to secure payment...');
-        const payRes = await fetch('/api/payments/create', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Checkout-Flow-ID': checkoutFlowId,
-          },
-          body: JSON.stringify({ orderId: orderData.id }),
-        });
-
-        const payData = await payRes.json();
-        if (!payRes.ok || !payData.success) {
+        setBookingStatusText("Connecting to secure payment...");
+        let payRes: Response;
+        try {
+          payRes = await fetch("/api/payments/create", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Checkout-Flow-ID": checkoutFlowId,
+            },
+            body: JSON.stringify({ orderId: orderData.id }),
+          });
+        } catch (payFetchErr: any) {
+          console.error("[PAYMENT_CREATE_FETCH_FAILED]", payFetchErr);
           setPendingOrder(orderData);
-          if (typeof window !== 'undefined') {
-            sessionStorage.setItem('jio_pending_order', JSON.stringify({
-              id: orderData.id,
-              orderNumber: orderData.orderNumber,
-              finalAmount: orderData.finalAmount,
-              area: orderData.address?.area || area,
-              checkoutFlowId,
-            }));
-          }
+          savePendingOrderToStorage(orderData, area, checkoutFlowId);
           setLoading(false);
           isSubmittingRef.current = false;
-          setErrorMsg(payData.message || 'Failed to initialize Razorpay payment order. Your order is saved and you can retry payment.');
+          setErrorMsg(`Order #${orderData.orderNumber} is saved. Network error reaching payment gateway. Please retry payment below.`);
+          return;
+        }
+
+        const payParsed = await safeParseJsonResponse(payRes);
+        const payData = payParsed.data;
+
+        if (!payRes.ok || !payData?.success) {
+          setPendingOrder(orderData);
+          savePendingOrderToStorage(orderData, area, checkoutFlowId);
+          setLoading(false);
+          isSubmittingRef.current = false;
+          const payMsg = getFriendlyApiErrorMessage(payParsed, "Failed to initialize payment gateway.");
+          setErrorMsg(`Order #${orderData.orderNumber} is saved. ${payMsg} You can retry payment below.`);
           return;
         }
 
         if (payData.alreadyPaid) {
-          idempotencyKeyRef.current = '';
-          lastPayloadSignatureRef.current = '';
+          idempotencyKeyRef.current = "";
+          lastPayloadSignatureRef.current = "";
           setPendingOrder(null);
-          if (typeof window !== 'undefined') {
-            sessionStorage.removeItem('jio_pending_order');
+          if (typeof window !== "undefined") {
+            sessionStorage.removeItem("jio_pending_order");
           }
           setLoading(false);
           isSubmittingRef.current = false;
           setSuccessOrder({
             ...orderData,
-            paymentStatus: 'CAPTURED',
-            status: 'BOOKING_RECEIVED',
+            paymentStatus: "CAPTURED",
+            status: "BOOKING_RECEIVED",
           });
           return;
         }
@@ -768,41 +885,45 @@ export default function BookingPage() {
         razorpayConfig = payData.data;
       }
 
-      setBookingStatusText('Opening Razorpay checkout...');
-      const scriptLoaded = await scriptPromise;
-      if (!scriptLoaded) {
+      // Validate payment configuration
+      if (!razorpayConfig?.key || !razorpayConfig?.gatewayOrderId) {
+        console.error("[PAYMENT_CONFIG_INCOMPLETE]", razorpayConfig);
         setPendingOrder(orderData);
-        if (typeof window !== 'undefined') {
-          sessionStorage.setItem('jio_pending_order', JSON.stringify({
-            id: orderData.id,
-            orderNumber: orderData.orderNumber,
-            finalAmount: orderData.finalAmount,
-            area: orderData.address?.area || area,
-            checkoutFlowId,
-          }));
-        }
+        savePendingOrderToStorage(orderData, area, checkoutFlowId);
         setLoading(false);
         isSubmittingRef.current = false;
-        setErrorMsg('Failed to load Razorpay payment SDK. Please check your network connection and retry payment below.');
+        setErrorMsg(`Order #${orderData.orderNumber} is saved, but payment gateway configuration is incomplete. Please retry payment below.`);
+        return;
+      }
+
+      setBookingStatusText("Opening Razorpay checkout...");
+      const scriptLoaded = await scriptPromise;
+      if (!scriptLoaded || typeof (window as any).Razorpay !== "function") {
+        console.warn("[RAZORPAY_SCRIPT_UNAVAILABLE]", { scriptLoaded, hasWindowRazorpay: typeof (window as any).Razorpay });
+        setPendingOrder(orderData);
+        savePendingOrderToStorage(orderData, area, checkoutFlowId);
+        setLoading(false);
+        isSubmittingRef.current = false;
+        setErrorMsg(`Order #${orderData.orderNumber} is saved. Unable to load payment checkout (ad-blocker or connection issue). Please disable ad-blockers and retry payment below.`);
         return;
       }
 
       const options = {
         key: razorpayConfig.key,
-        amount: Math.round(razorpayConfig.amount * 100),
-        currency: razorpayConfig.currency || 'INR',
-        name: 'Junk It Out',
+        amount: Math.round(Number(razorpayConfig.amount) * 100),
+        currency: razorpayConfig.currency || "INR",
+        name: "Junk It Out",
         description: razorpayConfig.description || `Pickup Order #${orderData.orderNumber}`,
-        image: typeof window !== 'undefined' ? `${window.location.origin}/logo.png` : '/logo.png',
+        image: typeof window !== "undefined" ? `${window.location.origin}/logo.png` : "/logo.png",
         order_id: razorpayConfig.gatewayOrderId,
         handler: async function (response: any) {
           setLoading(true);
           try {
-            const verifyRes = await fetch('/api/payments/verify', {
-              method: 'POST',
+            const verifyRes = await fetch("/api/payments/verify", {
+              method: "POST",
               headers: {
-                'Content-Type': 'application/json',
-                'X-Checkout-Flow-ID': checkoutFlowId,
+                "Content-Type": "application/json",
+                "X-Checkout-Flow-ID": checkoutFlowId,
               },
               body: JSON.stringify({
                 orderId: orderData.id,
@@ -812,97 +933,92 @@ export default function BookingPage() {
               }),
             });
 
-            const verifyData = await verifyRes.json();
+            const verifyParsed = await safeParseJsonResponse(verifyRes);
+            const verifyData = verifyParsed.data;
             setLoading(false);
 
-            if (verifyRes.ok && verifyData.success) {
-              idempotencyKeyRef.current = '';
-              lastPayloadSignatureRef.current = '';
+            if (verifyRes.ok && verifyData?.success) {
+              idempotencyKeyRef.current = "";
+              lastPayloadSignatureRef.current = "";
               setPendingOrder(null);
-              if (typeof window !== 'undefined') {
-                sessionStorage.removeItem('jio_pending_order');
+              if (typeof window !== "undefined") {
+                sessionStorage.removeItem("jio_pending_order");
               }
               setSuccessOrder({
                 ...orderData,
-                paymentStatus: 'CAPTURED',
-                status: 'BOOKING_RECEIVED',
+                paymentStatus: "CAPTURED",
+                status: "BOOKING_RECEIVED",
               });
             } else {
               setPendingOrder(orderData);
-              if (typeof window !== 'undefined') {
-                sessionStorage.setItem('jio_pending_order', JSON.stringify({
-                  id: orderData.id,
-                  orderNumber: orderData.orderNumber,
-                  finalAmount: orderData.finalAmount,
-                  area: orderData.address?.area || area,
-                  checkoutFlowId,
-                }));
-              }
-              setErrorMsg(verifyData.message || 'Payment verification failed server-side. Your booking has not been confirmed.');
+              savePendingOrderToStorage(orderData, area, checkoutFlowId);
+              const verifyMsg = getFriendlyApiErrorMessage(verifyParsed, "Payment verification failed server-side. Your booking has not been confirmed.");
+              setErrorMsg(verifyMsg);
             }
-          } catch {
+          } catch (verifyErr: any) {
+            console.error("[PAYMENT_VERIFY_NETWORK_ERROR]", verifyErr);
             setLoading(false);
             setPendingOrder(orderData);
-            if (typeof window !== 'undefined') {
-              sessionStorage.setItem('jio_pending_order', JSON.stringify({
-                id: orderData.id,
-                orderNumber: orderData.orderNumber,
-                finalAmount: orderData.finalAmount,
-                area: orderData.address?.area || area,
-                checkoutFlowId,
-              }));
-            }
-            setErrorMsg('Network error verifying payment. Please check your order in My Pickups.');
+            savePendingOrderToStorage(orderData, area, checkoutFlowId);
+            setErrorMsg(`Order #${orderData.orderNumber} is saved. Network error verifying payment. Please check your order in My Pickups.`);
           }
         },
         prefill: {
-          name: name || 'Customer',
-          contact: phone || '',
+          name: name || "Customer",
+          contact: phone || "",
         },
         theme: {
-          color: '#059669', // Emerald 600
+          color: "#059669", // Emerald 600
         },
         modal: {
           ondismiss: function () {
             setLoading(false);
             setPendingOrder(orderData);
-            if (typeof window !== 'undefined') {
-              sessionStorage.setItem('jio_pending_order', JSON.stringify({
-                id: orderData.id,
-                orderNumber: orderData.orderNumber,
-                finalAmount: orderData.finalAmount,
-                area: orderData.address?.area || area,
-                checkoutFlowId,
-              }));
-            }
+            savePendingOrderToStorage(orderData, area, checkoutFlowId);
             setErrorMsg(`Checkout was cancelled or dismissed. Order #${orderData.orderNumber} is saved. You can retry payment below or view it anytime.`);
           },
         },
       };
 
-      const rzp = new (window as any).Razorpay(options);
-      rzp.on('payment.failed', function (response: any) {
-        setLoading(false);
-        setPendingOrder(orderData);
-        if (typeof window !== 'undefined') {
-          sessionStorage.setItem('jio_pending_order', JSON.stringify({
-            id: orderData.id,
-            orderNumber: orderData.orderNumber,
-            finalAmount: orderData.finalAmount,
-            area: orderData.address?.area || area,
-            checkoutFlowId,
-          }));
-        }
-        const reason = response?.error?.description || response?.error?.reason || 'Transaction declined.';
-        setErrorMsg(`Payment failed: ${reason} Order #${orderData.orderNumber} is saved. Please retry payment below.`);
-      });
+      try {
+        const rzp = new (window as any).Razorpay(options);
+        rzp.on("payment.failed", function (response: any) {
+          setLoading(false);
+          setPendingOrder(orderData);
+          savePendingOrderToStorage(orderData, area, checkoutFlowId);
+          const reason = response?.error?.description || response?.error?.reason || "Transaction declined.";
+          setErrorMsg(`Payment failed: ${reason} Order #${orderData.orderNumber} is saved. Please retry payment below.`);
+        });
 
-      // Open Razorpay Checkout (BEFORE confirming booking)
-      rzp.open();
+        // Open Razorpay Checkout (BEFORE confirming booking)
+        rzp.open();
+      } catch (sdkInitErr: any) {
+        console.error("[RAZORPAY_SDK_INIT_ERROR]", sdkInitErr);
+        setPendingOrder(orderData);
+        savePendingOrderToStorage(orderData, area, checkoutFlowId);
+        setLoading(false);
+        isSubmittingRef.current = false;
+        const sdkMsg = sdkInitErr instanceof Error ? sdkInitErr.message : "Unable to launch checkout.";
+        setErrorMsg(`Order #${orderData.orderNumber} is saved. ${sdkMsg} Please retry payment below.`);
+      }
     } catch (err: any) {
+      console.error("[BOOKING_MASTER_HANDLER_ERROR]", err);
       setLoading(false);
       isSubmittingRef.current = false;
-      setErrorMsg('Network error while processing booking request. Please try again.');
+
+      if (createdOrderData) {
+        setPendingOrder(createdOrderData);
+        savePendingOrderToStorage(createdOrderData, area, checkoutFlowId);
+        const detailMsg = err instanceof Error ? err.message : "Payment setup encountered an issue.";
+        setErrorMsg(`Order #${createdOrderData.orderNumber} is saved. ${detailMsg} You can retry payment below.`);
+      } else {
+        const isNetworkErr = err instanceof TypeError && /fetch|network/i.test(err.message || "");
+        setErrorMsg(
+          isNetworkErr
+            ? "Unable to connect to Junk It Out. Please check your internet connection and try again."
+            : (err instanceof Error ? err.message : "An unexpected error occurred while placing your booking. Please try again.")
+        );
+      }
     }
   };
 
