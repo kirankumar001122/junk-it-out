@@ -17,13 +17,13 @@ async function handleProxy(req: NextRequest, props: Props) {
   const targetUrl = `${baseUrl}/api/${subPath}${search}`;
 
   const cookieStore = await cookies();
-  let token = cookieStore.get('jio_token')?.value;
+  let token = cookieStore.get('jio_token')?.value || cookieStore.get('jio_admin_token')?.value;
 
   const incomingHeaders = new Headers(req.headers);
   const rawCookie = incomingHeaders.get('cookie') || '';
 
   if (!token && rawCookie) {
-    const match = rawCookie.match(/jio_token=([^;]+)/);
+    const match = rawCookie.match(/(?:jio_token|jio_admin_token)=([^;]+)/);
     if (match) token = match[1];
   }
 

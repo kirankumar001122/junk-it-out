@@ -17,7 +17,8 @@ async function getAuthenticatedAdminUser(token: string) {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-        Cookie: `jio_token=${token}`,
+        Cookie: `jio_token=${token}; jio_admin_token=${token}`,
+        Authorization: `Bearer ${token}`,
       },
       cache: 'no-store',
     });
@@ -39,7 +40,7 @@ async function getAuthenticatedAdminUser(token: string) {
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = await cookies();
-  const token = cookieStore.get('jio_token')?.value;
+  const token = cookieStore.get('jio_token')?.value || cookieStore.get('jio_admin_token')?.value;
 
   if (!token) {
     redirect('/login');
@@ -60,4 +61,3 @@ export default async function DashboardLayout({ children }: { children: React.Re
     </div>
   );
 }
-
