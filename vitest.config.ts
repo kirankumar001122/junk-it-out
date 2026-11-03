@@ -55,6 +55,7 @@ export default defineConfig({
       'tests/financial-correctness.test.ts',
       'tests/upload-view-authorization.test.ts',
       'tests/weighing-validation-and-rollback.test.ts',
+      'tests/receipt-pdf-download.test.ts',
     ],
   },
 });

@@ -34,6 +34,10 @@ import {
   parseAgentLocation,
   type AgentLocationSnapshot,
 } from "@/lib/trackingLocation";
+import {
+  isReceiptEligible,
+  downloadReceiptPdf,
+} from "@/lib/receiptPdf";
 
 // If the last location is older than this, show "location unavailable".
 const STALE_AFTER_MS = 30_000;
@@ -186,6 +190,22 @@ export default function OrderTrackingPage() {
 
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentMessage, setPaymentMessage] = useState<string | null>(null);
+  const [downloadingReceipt, setDownloadingReceipt] = useState(false);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
+
+  const handleDownloadReceipt = () => {
+    if (!order) return;
+    try {
+      setDownloadingReceipt(true);
+      setReceiptError(null);
+      downloadReceiptPdf(order);
+    } catch (err: any) {
+      console.error('Receipt download error:', err);
+      setReceiptError(err?.message || 'Failed to download receipt PDF.');
+    } finally {
+      setDownloadingReceipt(false);
+    }
+  };
 
   // Lock body scroll and handle Escape key while active modal is open
   useEffect(() => {
@@ -1580,21 +1600,39 @@ export default function OrderTrackingPage() {
                 </button>
               )}
 
-            {order.invoices && order.invoices.length > 0 && (
-              <a
-                href={`/orders/${order.id}/receipt`}
-                target="_blank"
-                className="btn-glossy-dark rounded-full text-white text-xs font-bold px-5 py-3 border border-slate-700 flex items-center gap-2"
+            {isReceiptEligible(order) && (
+              <button
+                type="button"
+                onClick={handleDownloadReceipt}
+                disabled={downloadingReceipt}
+                className="btn-glossy-dark rounded-full text-white text-xs font-bold px-5 py-3 border border-slate-700 flex items-center gap-2 hover:border-emerald-500 hover:bg-slate-800 disabled:opacity-60 transition"
+                title="Download Receipt as PDF"
               >
-                <FileText className="w-4 h-4 text-emerald-400" />
-                RECEIPT ({order.invoices[0].invoiceNumber})
-              </a>
+                {downloadingReceipt ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin" />
+                    DOWNLOADING RECEIPT...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4 text-emerald-400" />
+                    {order.invoices && order.invoices.length > 0
+                      ? `RECEIPT (${order.invoices[0].invoiceNumber})`
+                      : 'DOWNLOAD RECEIPT (PDF)'}
+                  </>
+                )}
+              </button>
             )}
           </div>
 
           {paymentMessage && (
             <p className="text-xs text-amber-200 sm:text-right">
               {paymentMessage}
+            </p>
+          )}
+          {receiptError && (
+            <p className="text-xs text-rose-400 sm:text-right mt-1">
+              {receiptError}
             </p>
           )}
         </div>

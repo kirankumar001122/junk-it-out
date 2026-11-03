@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { formatPickupAddress } from '@/lib/address';
 import { isPickupCompletedStatus } from '@/lib/orders/lifecycle';
+import { downloadReceiptPdf } from '@/lib/receiptPdf';
 
 export default function ReceiptPage() {
   const params = useParams();
@@ -13,6 +14,7 @@ export default function ReceiptPage() {
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   useEffect(() => {
     const fetchOrder = async () => {
@@ -376,7 +378,24 @@ export default function ReceiptPage() {
         </footer>
 
         {/* Browser Button */}
-        <div className="receipt-actions">
+        <div className="receipt-actions flex items-center justify-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              if (order) {
+                try {
+                  setDownloadingPdf(true);
+                  downloadReceiptPdf(order);
+                } finally {
+                  setDownloadingPdf(false);
+                }
+              }
+            }}
+            disabled={downloadingPdf}
+            className="download-pdf-button"
+          >
+            {downloadingPdf ? 'GENERATING PDF...' : 'DOWNLOAD RECEIPT (PDF)'}
+          </button>
           <button
             type="button"
             onClick={() => window.print()}
@@ -680,6 +699,27 @@ export default function ReceiptPage() {
           padding: 16px 32px;
           border-top: 1px solid #e2e8f0;
           background: white;
+        }
+
+        .download-pdf-button {
+          background: #059669;
+          color: #ffffff;
+          border: none;
+          padding: 10px 20px;
+          border-radius: 8px;
+          font-size: 13px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+
+        .download-pdf-button:hover {
+          background: #047857;
+        }
+
+        .download-pdf-button:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
         }
 
         .print-button {
