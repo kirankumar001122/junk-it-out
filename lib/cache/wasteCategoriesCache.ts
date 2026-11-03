@@ -1,6 +1,6 @@
 let cachedCategories: any[] | null = null;
 let cacheExpiry = 0;
-export const WASTE_CATEGORIES_CACHE_TTL_MS = 60_000;
+export const WASTE_CATEGORIES_CACHE_TTL_MS = 600_000; // 10 minutes cache TTL
 
 export function getCachedWasteCategories(): any[] | null {
   if (cachedCategories && Date.now() < cacheExpiry) {

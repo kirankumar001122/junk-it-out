@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { invalidateServiceAreasCache } from '@/lib/cache/serviceAreasCache';
+import { invalidateServiceAreaCache } from '@/lib/services/serviceAreaService';
 import { invalidateAdminStatsCache } from '@/lib/cache/adminStatsCache';
 
 const DEFAULT_PRICING = {
@@ -125,20 +126,26 @@ export async function PUT(req: NextRequest) {
       },
     });
 
-    // 2. Persist audit trail log
-    await db.auditLog.create({
-      data: {
-        userId: authUser?.userId || null,
-        userName: authUser?.name || 'Admin Operations',
-        action: 'UPDATE_PRICING_RULES',
-        oldValue: JSON.stringify(previousRates),
-        newValue: JSON.stringify(updatedRates),
-      },
-    });
-
-    // 3. Invalidate relevant caches
+    // 2. Invalidate relevant caches immediately after successful DB mutation
+    // so audit logging failures cannot leave stale caches
     invalidateServiceAreasCache();
+    invalidateServiceAreaCache();
     invalidateAdminStatsCache();
+
+    // 3. Persist audit trail log
+    try {
+      await db.auditLog.create({
+        data: {
+          userId: authUser?.userId || null,
+          userName: authUser?.name || 'Admin Operations',
+          action: 'UPDATE_PRICING_RULES',
+          oldValue: JSON.stringify(previousRates),
+          newValue: JSON.stringify(updatedRates),
+        },
+      });
+    } catch (auditErr) {
+      console.warn('[AUDIT_LOG_CREATION_FAILED]', auditErr);
+    }
 
     return successResponse(updatedRates);
   } catch (error: any) {

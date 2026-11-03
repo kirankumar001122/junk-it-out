@@ -19,7 +19,19 @@ export async function validatePayload(
         ? await actualUserFinder(payload.userId)
         : await db.user.findUnique({
             where: { id: payload.userId },
-            select: { tokenVersion: true } as any,
+            select: {
+              id: true,
+              tokenVersion: true,
+              name: true,
+              phone: true,
+              email: true,
+              role: true,
+              customer: true,
+              addresses: {
+                where: { isDefault: true },
+                take: 1,
+              },
+            } as any,
           });
 
       if (!user) return null;
@@ -28,6 +40,7 @@ export async function validatePayload(
       if (tokenVersion !== currentDbVersion) {
         return null;
       }
+      (payload as any).user = user;
     }
 
     // 2. Validate Agent tokenVersion if role is AGENT and agentId is present

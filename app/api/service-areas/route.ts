@@ -5,6 +5,7 @@ import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 
 import { getCachedServiceAreas, setCachedServiceAreas, invalidateServiceAreasCache } from '@/lib/cache/serviceAreasCache';
+import { invalidateServiceAreaCache } from '@/lib/services/serviceAreaService';
 
 export async function GET(req: NextRequest) {
   try {
@@ -83,17 +84,24 @@ export async function PUT(req: NextRequest) {
       },
     });
 
-    await db.auditLog.create({
-      data: {
-        userId: authUser?.userId || null,
-        userName: authUser?.name || 'Admin Operations',
-        action: 'UPDATE_SERVICE_AREA',
-        oldValue: `Area: ${id}, Status: ${existing?.status || 'DEFAULT'}`,
-        newValue: `Area: ${id}, Status: ${status}`,
-      },
-    }).catch(() => null);
-
+    // Invalidate caches immediately after successful DB mutation so audit log failures cannot leave stale caches
     invalidateServiceAreasCache();
+    invalidateServiceAreaCache();
+
+    try {
+      await db.auditLog.create({
+        data: {
+          userId: authUser?.userId || null,
+          userName: authUser?.name || 'Admin Operations',
+          action: 'UPDATE_SERVICE_AREA',
+          oldValue: `Area: ${id}, Status: ${existing?.status || 'DEFAULT'}`,
+          newValue: `Area: ${id}, Status: ${status}`,
+        },
+      });
+    } catch (auditErr) {
+      console.warn('[AUDIT_LOG_CREATION_FAILED]', auditErr);
+    }
+
     return successResponse(updated);
   } catch (err: any) {
     console.error('Update service area error:', err);

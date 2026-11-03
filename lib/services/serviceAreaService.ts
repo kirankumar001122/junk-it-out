@@ -9,6 +9,8 @@ interface CachedServiceArea {
   parsedPolygon: [number, number][];
 }
 
+export const SERVICE_AREAS_CACHE_TTL_MS = 120_000; // 2 minutes cache TTL for zone boundaries
+
 let serviceAreaCache: { areas: CachedServiceArea[]; expiresAt: number } | null = null;
 
 export function invalidateServiceAreaCache(): void {
@@ -53,7 +55,7 @@ export async function checkGeofenceServiceability(
           console.error(`Failed to parse polygon for zone ${area.name}`, err);
         }
       }
-      serviceAreaCache = { areas: cachedAreas, expiresAt: now + 60_000 };
+      serviceAreaCache = { areas: cachedAreas, expiresAt: now + SERVICE_AREAS_CACHE_TTL_MS };
     } catch (err) {
       console.error('Database service area check error:', err);
     }
