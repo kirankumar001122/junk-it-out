@@ -27,6 +27,7 @@ import {
 import CustomerOtpLogin from '@/components/CustomerOtpLogin';
 import { readCustomerPickupsResponse } from '@/lib/customerPickupsResponse';
 import { getApiErrorMessage } from '@/lib/utils/apiErrorMessage';
+import { canCustomerContactAgent } from '@/lib/orders/lifecycle';
 
 const isCustomerCancellable = (status?: string): boolean => {
   return [
@@ -636,13 +637,15 @@ export default function MyPickupsPage() {
                       </div>
                     </div>
 
-                    <a
-                      href={`tel:${o.agent.user?.phone}`}
-                      className="bg-white hover:bg-slate-50 text-emerald-700 border border-emerald-300 px-3 py-1.5 rounded-xl font-bold text-[11px] flex items-center gap-1 shrink-0"
-                    >
-                      <PhoneCall className="w-3.5 h-3.5" />
-                      Call Agent
-                    </a>
+                    {canCustomerContactAgent(o.status) && o.agent.user?.phone && (
+                      <a
+                        href={`tel:${o.agent.user.phone}`}
+                        className="bg-white hover:bg-slate-50 text-emerald-700 border border-emerald-300 px-3 py-1.5 rounded-xl font-bold text-[11px] flex items-center gap-1 shrink-0"
+                      >
+                        <PhoneCall className="w-3.5 h-3.5" />
+                        Call Agent
+                      </a>
+                    )}
                   </div>
                 )}
 

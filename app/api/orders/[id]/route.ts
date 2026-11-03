@@ -9,6 +9,7 @@ import {
   isOrderOpenForAssignment,
 } from '@/lib/orderAccess';
 import { isAgentEligibleForServiceArea } from '@/lib/services/agentService';
+import { shouldHideAgentContact } from '@/lib/orders/lifecycle';
 
 export async function GET(
   req: NextRequest,
@@ -34,7 +35,7 @@ export async function GET(
       ? { OR: [{ id }, { orderNumber: id }, { orderNumber: id.toUpperCase() }] }
       : getOrderIdentifierWhere(id);
 
-    const order = authUser.role === 'AGENT'
+    const order: any = authUser.role === 'AGENT'
       ? await db.order.findFirst({
           where: orderWhere,
           select: {
@@ -176,7 +177,26 @@ export async function GET(
         })
       : [];
 
-    return successResponse({ ...order, locations });
+    const isAdmin = authUser?.role === 'ADMIN' || authUser?.role === 'SUPER_ADMIN';
+    const hideAgentContact = !isAdmin && shouldHideAgentContact(order.status);
+
+    const sanitizedAgent = order.agent
+      ? {
+          ...order.agent,
+          user: order.agent.user
+            ? {
+                ...order.agent.user,
+                phone: hideAgentContact ? null : order.agent.user.phone,
+              }
+            : order.agent.user,
+        }
+      : order.agent;
+
+    return successResponse({
+      ...order,
+      agent: sanitizedAgent,
+      locations,
+    });
   } catch (err: any) {
     console.error('Fetch order detail error:', {
       code: err?.code || 'UNKNOWN',
