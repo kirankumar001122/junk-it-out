@@ -98,7 +98,7 @@ async function handlePost(req: NextRequest) {
         // Fast path: payment was eagerly created inside the order creation transaction (saves separate tx + lock roundtrips)
         if (paymentRecord) {
           if (paymentRecord.status === 'INITIATED' && paymentRecord.gatewayOrderId) {
-            const key = process.env.RAZORPAY_KEY_ID || process.env.PAYMENT_KEY_ID;
+            const key = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.PAYMENT_KEY_ID;
             if (key) {
               if (order.paymentStatus !== 'INITIATED') {
                 await db.order.update({
@@ -251,7 +251,7 @@ async function handlePost(req: NextRequest) {
 
           if (attempt.kind === 'existing') {
             if (attempt.payment.gatewayOrderId) {
-              const key = process.env.RAZORPAY_KEY_ID || process.env.PAYMENT_KEY_ID;
+              const key = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.PAYMENT_KEY_ID;
               if (key) {
                 if (order.paymentStatus !== 'INITIATED') {
                   await db.order.update({

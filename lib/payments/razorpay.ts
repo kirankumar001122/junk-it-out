@@ -37,6 +37,15 @@ export class RazorpayOrderCreationError extends RazorpayApiError {
   }
 }
 
+export function getResolvedRazorpayKeyId(): string | null {
+  return (
+    process.env.RAZORPAY_KEY_ID?.trim() ||
+    process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID?.trim() ||
+    process.env.PAYMENT_KEY_ID?.trim() ||
+    null
+  );
+}
+
 function requireCredentials() {
   // Resolve a key ID and secret from the same naming convention so a stale
   // variable from another deployment cannot silently create a mixed pair.
@@ -44,6 +53,9 @@ function requireCredentials() {
     [process.env.RAZORPAY_KEY_ID, process.env.RAZORPAY_KEY_SECRET],
     [process.env.RAZORPAY_KEY_ID, process.env.RAZORPAY_SECRET],
     [process.env.PAYMENT_KEY_ID, process.env.PAYMENT_KEY_SECRET],
+    [process.env.PAYMENT_KEY_ID, process.env.RAZORPAY_KEY_SECRET],
+    [process.env.PAYMENT_KEY_ID, process.env.RAZORPAY_SECRET],
+    [process.env.RAZORPAY_KEY_ID, process.env.PAYMENT_KEY_SECRET],
     [process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID, process.env.RAZORPAY_KEY_SECRET],
     [process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID, process.env.RAZORPAY_SECRET],
     [process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID, process.env.PAYMENT_KEY_SECRET],

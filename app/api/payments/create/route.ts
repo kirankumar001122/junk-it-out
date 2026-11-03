@@ -264,7 +264,7 @@ async function handlePost(req: NextRequest, context: ApiRequestContext) {
         );
       }
 
-      const key = process.env.RAZORPAY_KEY_ID || process.env.PAYMENT_KEY_ID;
+      const key = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.PAYMENT_KEY_ID;
       if (!key) {
         throw new Error('Razorpay credentials are not configured on the server.');
       }
