@@ -428,8 +428,7 @@ export async function createOrder(
     }
   }
 
-  const basePickupCharge =
-    geofence.zone?.basePickupCharge ?? 50.0;
+  const basePickupCharge = 50.0;
   const urgentSurcharge = (input.pickupType as string) === 'URGENT' ? 29.0 : 0.0;
 
   const calculationItems: CalculationItemInput[] = input.items.map((item) => {
@@ -471,7 +470,7 @@ export async function createOrder(
     : 'CUSTOMER_PAYS';
 
   const estimatedTotal = valuation.totalRecyclableValue;
-  const upfrontCustomerCharge = valuation.totalCustomerCharges;
+  const upfrontCustomerCharge = Math.round((valuation.totalRecyclableValue + valuation.totalCustomerCharges) * 100) / 100;
   const finalAmount = financialDirection === 'CUSTOMER_PAYS'
     ? Math.max(1, Math.round(upfrontCustomerCharge * 100) / 100)
     : valuation.netAmount;

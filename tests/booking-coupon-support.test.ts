@@ -253,7 +253,7 @@ describe('Booking Flow and Pricing Correctness (Coupons Removed)', () => {
 
       assert.equal(order.pickupCharge, 50.0);
       assert.equal(order.discountAmount, 0.0, 'Discounts must be 0.0 with coupons removed');
-      assert.equal(order.finalAmount, 50.0, 'Customer upfront payable must strictly equal base pickup fee ₹50.00');
+      assert.equal(order.finalAmount, 125.0, 'Customer upfront payable equals estimated scrap plus service charge (75 + 50 = 125)');
       assert.equal(order.estimatedTotal, 75.0, 'Scrap buy value is recorded as estimatedTotal');
       assert.equal(order.financialDirection, 'CUSTOMER_PAYS');
     });
@@ -269,7 +269,7 @@ describe('Booking Flow and Pricing Correctness (Coupons Removed)', () => {
       const order = await createOrder(manipulatedInput, `idem-${Date.now()}-2`, state.currentUser);
 
       assert.equal(order.discountAmount, 0.0, 'Must ignore client discount and coupon code');
-      assert.equal(order.finalAmount, 50.0, 'Final amount must remain authoritative base pickup charge');
+      assert.equal(order.finalAmount, 125.0, 'Final amount must remain authoritative scrap plus service charge (125)');
     });
 
     it('correctly adds waste disposal charges to upfront customer charges', async () => {
@@ -335,8 +335,8 @@ describe('Booking Flow and Pricing Correctness (Coupons Removed)', () => {
       assert.equal(payRes.status, 200);
       const body = await payRes.json();
       assert.equal(body.success, true);
-      assert.equal(body.data.amount, 50.0);
-      assert.equal(state.lastRazorpayOrderParams.amountInPaise, 5000);
+      assert.equal(body.data.amount, 125.0);
+      assert.equal(state.lastRazorpayOrderParams.amountInPaise, 12500);
     });
 
     it('preserves authoritative order amount on payment retry', async () => {
@@ -365,7 +365,7 @@ describe('Booking Flow and Pricing Correctness (Coupons Removed)', () => {
       const second = await createOrder(baseBookingInput, key, state.currentUser);
 
       assert.equal(first.id, second.id, 'Idempotent retry must return the exact same order');
-      assert.equal(second.finalAmount, 50.0);
+      assert.equal(second.finalAmount, 125.0);
       assert.equal(second.discountAmount, 0.0);
     });
   });

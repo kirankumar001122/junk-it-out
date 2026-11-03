@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { SOUTH_BENGALURU_ZONES } from '@/lib/geofence';
+import { SOUTH_BENGALURU_ZONES, DEFAULT_SERVICE_CHARGE } from '@/lib/geofence';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 
@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
           status: dbRecord.status as 'ACTIVE' | 'INACTIVE' | 'TEMPORARY_BLOCKED',
           name: dbRecord.name || z.name,
           etaMinutes: dbRecord.etaMinutes ?? z.etaMinutes,
-          basePickupCharge: dbRecord.basePickupCharge ?? z.basePickupCharge,
+          basePickupCharge: DEFAULT_SERVICE_CHARGE,
         };
       }
       return z;
