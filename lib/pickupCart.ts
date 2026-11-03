@@ -54,6 +54,29 @@ export function removeFromPickupCart(categoryId: string) {
   return next;
 }
 
+/**
+ * Replaces the whole Pickup Cart with the given selection so that the cart
+ * drawer always mirrors the materials and weights chosen on the booking page.
+ * Writes (and notifies listeners) only when the contents actually change.
+ */
+export function replacePickupCart(items: PickupCartItem[]) {
+  if (typeof window === 'undefined') return [];
+  const next = items
+    .filter((item) => item?.categoryId)
+    .map((item) => ({
+      categoryId: item.categoryId,
+      quantity: Math.max(1, Math.min(500, Math.round(Number(item.quantity) || 1))),
+    }));
+  const current = readPickupCart();
+  const same =
+    current.length === next.length &&
+    current.every((item, idx) => item.categoryId === next[idx].categoryId && item.quantity === next[idx].quantity);
+  if (same) return current;
+  window.sessionStorage.setItem(CART_KEY, JSON.stringify(next));
+  window.dispatchEvent(new Event(CART_EVENT));
+  return next;
+}
+
 export function clearPickupCart() {
   if (typeof window === 'undefined') return;
   window.sessionStorage.removeItem(CART_KEY);
