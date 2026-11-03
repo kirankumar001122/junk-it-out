@@ -26,7 +26,7 @@ export const BENGALURU_MASTER_POLYGON: [number, number][] = [
   [12.8000, 77.4500],
 ];
 
-export const DEFAULT_SERVICE_CHARGE = 69;
+export const DEFAULT_SERVICE_CHARGE = 50;
 
 // Pre-defined Bengaluru Service Zones (North, South, East, West, Central)
 export const BENGALURU_ZONES: ServiceZone[] = [

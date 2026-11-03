@@ -7,8 +7,8 @@ async function run() {
   // TEST 1: Booking Pricing Calculation
   // 3 items: Household dry waste (1kg @ ₹8), Plastic (1kg @ ₹18), Paper & Cardboard (1kg @ ₹14)
   // Total scrap value: 8 + 18 + 14 = ₹40.00
-  // Pickup service charge: ₹69.00
-  // Customer upfront payable MUST be ₹69.00 (service fee), NOT ₹109.00!
+  // Pickup service charge: ₹50.00
+  // Customer upfront payable MUST be ₹50.00 (service fee), NOT ₹109.00!
   console.log('Test 1: Booking pricing calculation separates scrap earnings from service charge...');
   {
     const items = [
@@ -16,26 +16,26 @@ async function run() {
       { categoryId: 'cat-plastic', categoryName: 'Plastic Waste', type: 'RECYCLABLE_BUY', pricePerKg: 18.0, weightKg: 1 },
       { categoryId: 'cat-paper', categoryName: 'Paper & Cardboard', type: 'RECYCLABLE_BUY', pricePerKg: 14.0, weightKg: 1 },
     ];
-    const basePickupCharge = 69.0;
+    const basePickupCharge = 50.0;
     const valuation = calculateOrderValuation(items, basePickupCharge, 0.0);
 
     assert.equal(valuation.totalRecyclableValue, 40.0, 'Scrap buy value should be ₹40.00');
     assert.equal(valuation.totalWasteCharge, 0.0, 'No disposal charges');
-    assert.equal(valuation.basePickupCharge, 69.0, 'Pickup charge should be ₹69.00');
-    assert.equal(valuation.totalCustomerCharges, 69.0, 'Customer upfront payable should be ₹69.00, NOT ₹109.00');
+    assert.equal(valuation.basePickupCharge, 50.0, 'Pickup charge should be ₹50.00');
+    assert.equal(valuation.totalCustomerCharges, 50.0, 'Customer upfront payable should be ₹50.00, NOT ₹109.00');
   }
 
   // TEST 2: Doorstep Weighing with Captured Booking Payment (Confirmed Reported Example)
-  // Pickup charge: ₹69.00 (captured at booking)
+  // Pickup charge: ₹50.00 (captured at booking)
   // Doorstep actual weight: 3 kg Paper & Cardboard @ ₹14.00/kg = ₹42.00
-  // Result MUST be JUNKITOUT_PAYS ₹42.00 to the customer (NOT CUSTOMER_PAYS ₹27.00)
+  // Result MUST be JUNKITOUT_PAYS ₹42.00 to the customer (NOT CUSTOMER_PAYS ₹8.00)
   console.log('Test 2: Doorstep weighing with already-captured booking fee yields full scrap payout...');
   {
     const items = [
       { categoryId: 'cat-paper', categoryName: 'Paper & Cardboard', type: 'RECYCLABLE_BUY', pricePerKg: 14.0, weightKg: 3 },
     ];
     const order = {
-      pickupCharge: 69.0,
+      pickupCharge: 50.0,
       paymentStatus: 'CAPTURED',
       discountAmount: 0.0,
     };
@@ -76,16 +76,16 @@ async function run() {
   }
 
   // TEST 4: Doorstep Weighing with Unpaid Booking Payment
-  // Pickup charge: ₹69.00 (payment pending / cash on pickup)
+  // Pickup charge: ₹50.00 (payment pending / cash on pickup)
   // Doorstep actual weight: 3 kg Paper & Cardboard @ ₹14.00/kg = ₹42.00
-  // Scrap offsets part of the fee: 42 - 69 = -27 -> CUSTOMER_PAYS ₹27.00
+  // Scrap offsets part of the fee: 42 - 50 = -8 -> CUSTOMER_PAYS ₹27.00
   console.log('Test 4: Doorstep weighing with uncollected booking fee correctly offsets fee against scrap...');
   {
     const items = [
       { categoryId: 'cat-paper', categoryName: 'Paper & Cardboard', type: 'RECYCLABLE_BUY', pricePerKg: 14.0, weightKg: 3 },
     ];
     const order = {
-      pickupCharge: 69.0,
+      pickupCharge: 50.0,
       paymentStatus: 'PENDING',
       discountAmount: 0.0,
     };
@@ -101,7 +101,7 @@ async function run() {
   }
 
   // TEST 5: Doorstep Weighing with Additional Disposal Charges (WASTE_CHARGE)
-  // Pickup charge: ₹69.00 (captured at booking)
+  // Pickup charge: ₹50.00 (captured at booking)
   // Recyclable scrap: 3 kg Paper @ ₹14 = ₹42.00
   // Hazardous / Waste disposal charge: 1 kg @ ₹10 = ₹10.00
   // Net payout: 42 - 10 = ₹32.00
@@ -112,7 +112,7 @@ async function run() {
       { categoryId: 'cat-hazardous', categoryName: 'Hazardous Waste', type: 'WASTE_CHARGE', pricePerKg: 10.0, weightKg: 1 },
     ];
     const order = {
-      pickupCharge: 69.0,
+      pickupCharge: 50.0,
       paymentStatus: 'CAPTURED',
       discountAmount: 0.0,
     };

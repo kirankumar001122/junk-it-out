@@ -703,7 +703,7 @@ export default function LocationSearchModal({
                             {zone.name}
                           </span>
                           <span className="block text-[10px] font-medium text-slate-500 mt-0.5">
-                            ⏱️ ETA {zone.etaMinutes || 20} mins • Base Fee: ₹{zone.basePickupCharge || 69}
+                            ⏱️ ETA {zone.etaMinutes || 20} mins • Base Fee: ₹{zone.basePickupCharge || 50}
                           </span>
                         </div>
                       </div>

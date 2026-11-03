@@ -99,7 +99,7 @@ export function toRupees(paise: number): number {
  */
 export function calculateOrderValuation(
   itemsInput: CalculationItemInput[],
-  basePickupCharge: number = 69.0,
+  basePickupCharge: number = 50.0,
   couponDiscount: number = 0.0,
   urgentSurcharge: number = 0.0
 ): CalculationResult {
