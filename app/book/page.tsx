@@ -368,7 +368,7 @@ export default function BookingPage() {
   const calculateEstimate = () => {
     let totalWasteItemsValue = 0;
     let totalWasteCharge = 0;
-    const baseCharge = geofenceResult?.zone?.basePickupCharge || 69.0;
+    const baseCharge = geofenceResult?.zone?.basePickupCharge || 50.0;
 
     selectedItems.forEach((item) => {
       const cat = categories.find((c) => c.id === item.categoryId);
@@ -1610,22 +1610,29 @@ export default function BookingPage() {
             <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800 pb-2">
               Payment Summary
             </h3>
+            {estimate.totalWasteItemsValue > 0 && (
+              <div className="p-2.5 rounded-lg bg-emerald-950/60 border border-emerald-800/60 mb-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-emerald-300 font-medium">Estimated Scrap Payout:</span>
+                  <span className="text-emerald-400 font-bold">₹{estimate.totalWasteItemsValue.toFixed(2)}</span>
+                </div>
+                <p className="text-[10px] text-emerald-300/80 mt-1">
+                  * Junk It Out pays you this amount at your doorstep after weighing.
+                </p>
+              </div>
+            )}
             <div className="flex items-center justify-between text-xs text-slate-300">
-              <span>Pickup Value:</span>
-              <span className="text-emerald-300 font-semibold">₹{estimate.totalWasteItemsValue.toFixed(2)}</span>
-            </div>
-            <div className="flex items-center justify-between text-xs text-slate-300">
-              <span>Pickup Service Charge:</span>
-              <span>₹{estimate.baseCharge.toFixed(2)}</span>
+              <span>Doorstep Pickup Service Charge:</span>
+              <span className="font-semibold text-white">₹{estimate.baseCharge.toFixed(2)}</span>
             </div>
             {estimate.totalWasteCharge > 0 && (
               <div className="flex items-center justify-between text-xs text-slate-300">
                 <span>Disposal / Bulky Charge:</span>
-                <span>₹{estimate.totalWasteCharge.toFixed(2)}</span>
+                <span className="font-semibold text-white">₹{estimate.totalWasteCharge.toFixed(2)}</span>
               </div>
             )}
             <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between text-sm font-bold">
-              <span>Total Amount Payable:</span>
+              <span>Total Amount Payable Now:</span>
               <span className="text-lg text-emerald-400 font-extrabold">₹{estimate.netAmount.toFixed(2)}</span>
             </div>
           </div>

@@ -5,8 +5,8 @@ import { Save, AlertCircle, ShieldCheck, RefreshCw } from 'lucide-react';
 
 export default function AdminPricingPage() {
   const [rates, setRates] = useState({
-    basePickupCharge: 49,
-    minPickupCharge: 49,
+    basePickupCharge: 50,
+    minPickupCharge: 50,
     urgentSurcharge: 29,
     weekendFee: 19,
     heavyItemHandlingFee: 199,

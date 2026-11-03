@@ -66,7 +66,7 @@ async function run() {
     status: "ACTIVE",
     boundaryPolygon: "[[12,77],[13,77],[13,78],[12,78]]",
     etaMinutes: 30,
-    basePickupCharge: 69,
+    basePickupCharge: 50,
   }];
   (db as any).address.updateMany = async () => ({ count: 0 });
   (db as any).address.create = async () => ({ id: "isolated-address-id" });

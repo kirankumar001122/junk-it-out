@@ -76,7 +76,7 @@ export async function PUT(req: NextRequest) {
         name: defaultZone?.name || id,
         status,
         etaMinutes: defaultZone?.etaMinutes || 25,
-        basePickupCharge: defaultZone?.basePickupCharge || 49,
+        basePickupCharge: defaultZone?.basePickupCharge || 50,
         boundaryPolygon: defaultZone?.boundaryPolygon ? JSON.stringify(defaultZone.boundaryPolygon) : '[]',
         centerLat: defaultZone?.centerLat || 12.9166,
         centerLng: defaultZone?.centerLng || 77.5996,

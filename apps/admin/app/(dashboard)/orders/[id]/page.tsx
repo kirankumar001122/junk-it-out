@@ -159,7 +159,7 @@ export default function AdminOrderDetailPage() {
             <div className="space-y-2 text-xs font-semibold">
               <div className="flex justify-between text-slate-600">
                 <span>Base Service Fee</span>
-                <span>₹{order.basePickupCharge || 69}</span>
+                <span>₹{order.basePickupCharge || 50}</span>
               </div>
               <div className="flex justify-between text-slate-600">
                 <span>Discount / Coupon</span>

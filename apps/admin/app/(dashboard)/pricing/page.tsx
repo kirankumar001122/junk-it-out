@@ -20,10 +20,10 @@ export default function AdminPricingPage() {
           <h2 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider">Base Service Charge</h2>
           <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between">
             <div>
-              <span className="font-bold text-emerald-950 block text-base">₹69 Standard Pickup Fee</span>
+              <span className="font-bold text-emerald-950 block text-base">₹50 Standard Pickup Fee</span>
               <span className="text-xs text-emerald-700">Applies to all South Bengaluru service zones</span>
             </div>
-            <span className="font-mono font-black text-emerald-800 text-lg">₹69.00</span>
+            <span className="font-mono font-black text-emerald-800 text-lg">₹50.00</span>
           </div>
         </div>
 

@@ -429,7 +429,7 @@ export async function createOrder(
   }
 
   const basePickupCharge =
-    geofence.zone?.basePickupCharge ?? 69.0;
+    geofence.zone?.basePickupCharge ?? 50.0;
   const urgentSurcharge = (input.pickupType as string) === 'URGENT' ? 29.0 : 0.0;
 
   const calculationItems: CalculationItemInput[] = input.items.map((item) => {
