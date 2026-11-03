@@ -128,13 +128,17 @@ model WasteCategory {
   id           String        @id @default(uuid())
   name         String        @unique
   description  String
+  category     String        @default("Recyclables")
+  imageUrl     String?
   icon         String        @default("Trash2")
   type         String        @default("RECYCLABLE_BUY")
   pricePerKg   Float         @default(20.0)
   minWeightKg  Float         @default(1.0)
   maxWeightKg  Float         @default(500.0)
+  displayOrder Int           @default(0)
   active       Boolean       @default(true)
   createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @default(now()) @updatedAt
   orderItems   OrderItem[]
   pricingRules PricingRule[]
 }

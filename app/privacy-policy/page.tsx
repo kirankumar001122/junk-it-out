@@ -54,7 +54,7 @@ export default function PrivacyPolicyPage() {
           <ul className="list-disc pl-5 space-y-1.5 text-xs sm:text-sm text-slate-600 font-medium">
             <li>Validating geofence coverage and calculating estimated pickup times.</li>
             <li>Enabling assigned pickup agents to navigate to your doorstep and contact you via phone call.</li>
-            <li>Computing verified scrap valuations and processing payments/payouts.</li>
+            <li>Computing verified material weights and processing pickup payments.</li>
             <li>Sending SMS pickup status updates and OTP verification alerts.</li>
           </ul>
         </section>
@@ -83,7 +83,7 @@ export default function PrivacyPolicyPage() {
                 💳 Razorpay Payment Gateway
               </span>
               <span className="text-slate-600 font-medium block">
-                Processes customer payments and scrap payouts over PCI-DSS compliant secure payment infrastructure.
+                Processes customer pickup payments over PCI-DSS compliant secure payment infrastructure.
               </span>
             </div>
 

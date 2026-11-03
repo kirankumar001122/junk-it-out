@@ -18,11 +18,11 @@ export default function ServicesPage() {
   const servicesList = [
     {
       title: 'Doorstep Recyclable Scrap Collection',
-      tag: 'WE PAY YOU',
+      tag: 'DOORSTEP COLLECTION',
       icon: Recycle,
-      desc: 'Top market rates paid directly for dry plastic bottles, paper, cardboard boxes, newspaper, aluminum cans, and scrap metals.',
+      desc: 'Convenient doorstep collection and eco-friendly recycling for dry plastic bottles, paper, cardboard boxes, newspaper, aluminum cans, and scrap metals.',
       features: [
-        'Instant doorstep cash or UPI payout',
+        'Convenient doorstep collection & recycling',
         'Digital scale weight verification',
         'Transparent per-kg price chart',
       ],

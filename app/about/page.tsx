@@ -18,7 +18,7 @@ export default function AboutPage() {
             <span className="text-emerald-400">Doorstep Recycling in Bengaluru</span>
           </h1>
           <p className="text-slate-300 text-xs sm:text-sm max-w-xl mx-auto font-normal leading-relaxed">
-            We build modern on-demand infrastructure to eliminate urban junk, reduce landfill contamination, and pay citizens fair value for scrap recyclables.
+            We build modern on-demand infrastructure to eliminate urban junk, reduce landfill contamination, and provide convenient doorstep waste collection and recycling with transparent pricing.
           </p>
         </div>
       </section>
@@ -47,7 +47,7 @@ export default function AboutPage() {
               </div>
               <div className="flex items-center gap-2.5">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span className="font-semibold text-slate-800 text-xs sm:text-sm">Transparent Digital Weighing & Upfront Payouts</span>
+                <span className="font-semibold text-slate-800 text-xs sm:text-sm">Transparent Digital Weighing & Clear Material Pricing</span>
               </div>
               <div className="flex items-center gap-2.5">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />

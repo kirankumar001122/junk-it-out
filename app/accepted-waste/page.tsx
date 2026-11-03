@@ -9,7 +9,7 @@ export default function AcceptedWastePage() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="customer-feature-card border-emerald-200 p-6 space-y-3">
           <h2 className="text-base font-bold text-emerald-900 flex items-center gap-2">
-            ✓ Accepted Materials (We Buy / Collect)
+            ✓ Accepted Materials (Doorstep Collection & Recycling)
           </h2>
           <ul className="text-xs text-emerald-800 space-y-2 list-disc pl-4">
             <li>Plastics (PET bottles, hard containers, polythene, packaging)</li>

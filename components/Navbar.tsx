@@ -92,7 +92,7 @@ export default function Navbar() {
       }
       checkAuth(true);
     };
-    checkAuth(true);
+    checkAuth(false);
     window.addEventListener('jio_auth_change', handleAuthChange);
     return () => window.removeEventListener('jio_auth_change', handleAuthChange);
   }, []);

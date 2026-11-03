@@ -35,8 +35,8 @@ export default function Footer() {
 
             <p className="text-xs text-slate-400 leading-relaxed">
               Fast, reliable doorstep waste pickup platform across Bengaluru.
-              We collect, weigh, pay for recyclables, and process scrap
-              responsibly.
+              We collect, weigh, and recycle household materials
+              responsibly with transparent pricing.
             </p>
 
             {/* DPIIT Recognition Badge */}

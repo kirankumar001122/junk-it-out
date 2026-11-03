@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import { put } from '@vercel/blob';
-import { getAuthUser } from '@/lib/auth/middleware';
+import { getAuthUser, isAdminRole } from '@/lib/auth/middleware';
 
 const ALLOWED_MIME_TYPES: Record<string, string> = {
   'image/jpeg': '.jpg',
@@ -38,6 +38,20 @@ export async function POST(req: NextRequest) {
     }
 
     const formData = await req.formData();
+    const purpose = String(
+      req.nextUrl?.searchParams.get('purpose') || formData.get('purpose') || ''
+    )
+      .trim()
+      .toLowerCase();
+    const isMaterialUpload = purpose === 'material';
+
+    if (isMaterialUpload && !isAdminRole(authUser)) {
+      return NextResponse.json(
+        { success: false, message: 'Admin access is required to upload material catalog images.' },
+        { status: 403 }
+      );
+    }
+
     const files = formData.getAll('files') as File[];
 
     if (!files || files.length === 0) {
@@ -51,7 +65,7 @@ export async function POST(req: NextRequest) {
 
     if (files.length > 5) {
       return NextResponse.json(
-        { success: false, message: 'Maximum 5 photos allowed per pickup request.' },
+        { success: false, message: 'Maximum 5 photos allowed per upload request.' },
         { status: 400 }
       );
     }
@@ -91,7 +105,9 @@ export async function POST(req: NextRequest) {
       }
 
       const randomSuffix = Math.random().toString(36).substring(2, 9);
-      const filename = `waste-photo-u_${authUser.userId}-${Date.now()}-${randomSuffix}${safeExtension}`;
+      const filename = isMaterialUpload
+        ? `material-photo-${Date.now()}-${randomSuffix}${safeExtension}`
+        : `waste-photo-u_${authUser.userId}-${Date.now()}-${randomSuffix}${safeExtension}`;
 
       if (useBlob) {
         // Upload to persistent Vercel Blob storage with access: "private"
@@ -109,7 +125,11 @@ export async function POST(req: NextRequest) {
         }
 
         await writeFile(filePath, buffer);
-        uploadedUrls.push(`/uploads/${filename}`);
+        uploadedUrls.push(
+          isMaterialUpload
+            ? `/api/upload/view?url=${encodeURIComponent(`/uploads/${filename}`)}`
+            : `/uploads/${filename}`
+        );
       }
     }
 

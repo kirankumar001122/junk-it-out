@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import {
   calculateOrderValuation,
+  calculatePickupSummary,
   calculateValuationAdjustment,
   calculateBookingTotalPayable,
+  PICKUP_SERVICE_CHARGE,
   toPaise,
   toRupees,
 } from '../lib/pricing';
@@ -217,6 +219,7 @@ describe('Authoritative Pricing Engine', () => {
       assert.equal(adj.settlementAmount, 0);
     });
   });
+
   describe('Total Payable Calculation Invariants (Fixed ₹50 Service Charge)', () => {
     it('₹41 waste -> ₹50 service charge -> ₹91 total payable', () => {
       const total = calculateBookingTotalPayable(41.0, 50.0, 0.0);
@@ -275,6 +278,77 @@ describe('Authoritative Pricing Engine', () => {
       const payable = calculateBookingTotalPayable(41.0, 50.0, 25.0);
       assert.equal(payable, 116.0);
       assert.equal(toPaise(payable), 11600);
+    });
+  });
+
+  describe('calculatePickupSummary (Customer Pickup Summary & Payable Formula)', () => {
+    it('calculates single material exact example: ₹3/kg × 4 kg = ₹12 + ₹50 service charge = ₹62', () => {
+      const summary = calculatePickupSummary([
+        {
+          categoryId: 'mat-1',
+          categoryName: 'E-Waste',
+          pricePerKg: 3,
+          weightKg: 4,
+        },
+      ]);
+
+      assert.equal(summary.materialCount, 1);
+      assert.equal(summary.totalWeightKg, 4);
+      assert.equal(summary.items[0].materialAmount, 12);
+      assert.equal(summary.pickupValue, 12);
+      assert.equal(summary.serviceCharge, 50);
+      assert.equal(summary.totalAmountPayable, 62);
+      assert.equal(summary.totalAmountPayablePaise, 6200);
+    });
+
+    it('calculates multiple materials with different prices and weights dynamically', () => {
+      const summary = calculatePickupSummary([
+        { categoryId: 'ewaste', categoryName: 'E-Waste', pricePerKg: 1, weightKg: 5 },           // ₹5
+        { categoryId: 'household', categoryName: 'Household Dry Waste', pricePerKg: 8, weightKg: 3 }, // ₹24
+        { categoryId: 'paper', categoryName: 'Paper & Cardboard', pricePerKg: 14, weightKg: 2.5 },    // ₹35
+        { categoryId: 'plastic', categoryName: 'Plastic Waste', pricePerKg: 18, weightKg: 4 },        // ₹72
+      ]);
+
+      // Pickup Value = 5 + 24 + 35 + 72 = ₹136
+      // Total Weight = 5 + 3 + 2.5 + 4 = 14.5 kg
+      // Service Charge = ₹50
+      // Total Amount Payable = 136 + 50 = ₹186
+      assert.equal(summary.materialCount, 4);
+      assert.equal(summary.totalWeightKg, 14.5);
+      assert.equal(summary.pickupValue, 136);
+      assert.equal(summary.serviceCharge, PICKUP_SERVICE_CHARGE);
+      assert.equal(summary.totalAmountPayable, 186);
+      assert.equal(summary.totalAmountPayablePaise, 18600);
+    });
+
+    it('updates totals immediately when quantities change', () => {
+      const before = calculatePickupSummary([
+        { categoryId: 'paper', categoryName: 'Paper & Cardboard', pricePerKg: 14, weightKg: 2 }, // ₹28
+      ]);
+      assert.equal(before.pickupValue, 28);
+      assert.equal(before.totalAmountPayable, 78);
+
+      const afterIncrease = calculatePickupSummary([
+        { categoryId: 'paper', categoryName: 'Paper & Cardboard', pricePerKg: 14, weightKg: 6 }, // ₹84
+      ]);
+      assert.equal(afterIncrease.totalWeightKg, 6);
+      assert.equal(afterIncrease.pickupValue, 84);
+      assert.equal(afterIncrease.totalAmountPayable, 134);
+    });
+
+    it('filters out zero, negative, or invalid weights safely', () => {
+      const summary = calculatePickupSummary([
+        { categoryId: 'zero', categoryName: 'Zero', pricePerKg: 10, weightKg: 0 },
+        { categoryId: 'neg', categoryName: 'Negative', pricePerKg: 10, weightKg: -3 },
+        { categoryId: 'nan', categoryName: 'NaN', pricePerKg: 10, weightKg: Number.NaN },
+        { categoryId: 'valid', categoryName: 'Plastic Waste', pricePerKg: 18, weightKg: 2 }, // ₹36
+      ]);
+
+      assert.equal(summary.materialCount, 1);
+      assert.equal(summary.totalWeightKg, 2);
+      assert.equal(summary.pickupValue, 36);
+      assert.equal(summary.serviceCharge, 50);
+      assert.equal(summary.totalAmountPayable, 86);
     });
   });
 });

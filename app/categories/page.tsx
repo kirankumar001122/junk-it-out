@@ -24,7 +24,7 @@ import {
   pickupCartEvent,
   PickupCartItem,
 } from '@/lib/pickupCart';
-import { isCustomerWasteCategory } from '@/lib/customerWasteCategories';
+import { isCustomerWasteCategory, getMaterialImageUrl, subscribeWasteCategoriesChanged } from '@/lib/customerWasteCategories';
 import WeightQuantityInput from '@/components/WeightQuantityInput';
 
 const categoryImages: Record<string, string> = {
@@ -33,6 +33,14 @@ const categoryImages: Record<string, string> = {
   'Paper & Cardboard': '/categories/paper-carboard.jpg',
   'Plastic Waste': '/categories/plastic-waste.jpg?v=2',
 };
+
+function resolveCustomerCardImage(category: any): string {
+  const custom = typeof category?.imageUrl === 'string' ? category.imageUrl.trim() : '';
+  if (custom && !custom.startsWith('/categories/')) {
+    return custom;
+  }
+  return categoryImages[category?.name] || custom || getMaterialImageUrl(category);
+}
 
 const icons = [
   FileText,
@@ -157,19 +165,16 @@ export default function CategoriesPage() {
             >
               {/* IMAGE */}
               <div className="mb-4 h-32 w-full overflow-hidden rounded-xl bg-emerald-50">
-                {categoryImages[category.name] ? (
-                  <img
-                    src={categoryImages[category.name]}
-                    alt={category.name}
-                    loading="lazy"
-                    decoding="async"
-                    className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
-                  />
-                ) : (
-                <div className="flex h-full w-full items-center justify-center">
-                    <IconComp className="h-8 w-8 text-emerald-600" />
-                </div>
-                )}
+                <img
+                  src={resolveCustomerCardImage(category)}
+                  alt={category.name}
+                  loading="lazy"
+                  decoding="async"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = '/categories/household-waste.webp';
+                  }}
+                  className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
+                />
               </div>
 
               {/* CONTENT */}
