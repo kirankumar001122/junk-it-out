@@ -332,7 +332,7 @@ export default function MyPickupsPage() {
                 Your Pickup #{agentNotice.orderNumber} has been accepted!
               </h3>
               <p className="text-xs text-slate-300">
-                Agent <strong className="text-emerald-400">{agentNotice.agentName || 'Partner'}</strong> ({agentNotice.vehicleNumber || 'Auto Loading'}) has been assigned to your pickup request.
+                Agent <strong className="text-emerald-400">{agentNotice.agentName || 'Partner'}</strong> has been assigned to your pickup request.
               </p>
             </div>
           </div>
@@ -632,7 +632,7 @@ export default function MyPickupsPage() {
                       <div>
                         <span className="font-extrabold text-slate-900 block">{o.agent.user?.name}</span>
                         <span className="text-[10px] text-emerald-800 font-semibold">
-                          {o.agent.vehicleType} • {o.agent.vehicleNumber}
+                          {o.agent.vehicleType || 'Verified Vehicle'}
                         </span>
                       </div>
                     </div>

@@ -771,21 +771,22 @@ async function handleGet(req: NextRequest) {
     const total = await db.order.count({ where: whereClause }).catch(() => orders.length);
 
     const isAdmin = authUser.role === 'ADMIN' || authUser.role === 'SUPER_ADMIN';
+    const isStaff = isAdmin || authUser.role === 'AGENT';
     const sanitizedOrders = !isAdmin
       ? orders.map((o: any) => {
-          if (o.agent?.user && shouldHideAgentContact(o.status)) {
-            return {
-              ...o,
-              agent: {
-                ...o.agent,
-                user: {
-                  ...o.agent.user,
-                  phone: null,
-                },
+          if (!o.agent) return o;
+          const hideContact = Boolean(o.agent.user && shouldHideAgentContact(o.status));
+          return {
+            ...o,
+            agent: {
+              ...o.agent,
+              vehicleNumber: isStaff ? o.agent.vehicleNumber : null,
+              user: {
+                ...o.agent.user,
+                phone: hideContact ? null : o.agent.user.phone,
               },
-            };
-          }
-          return o;
+            },
+          };
         })
       : orders;
 

@@ -59,6 +59,7 @@ export default defineConfig({
       'tests/booking-payment-resilience.test.ts',
       'tests/accepted-materials-and-admin-audit.test.ts',
       'tests/agent-contact-privacy.test.ts',
+      'tests/agent-vehicle-privacy.test.ts',
     ],
   },
 });
