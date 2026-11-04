@@ -159,6 +159,11 @@ export default function OrderTrackingPage() {
     ? decodeURIComponent(rawParamId).trim()
     : (Array.isArray(rawParamId) ? decodeURIComponent(rawParamId[0]).trim() : '');
 
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -177,11 +182,6 @@ export default function OrderTrackingPage() {
 
   const [rating, setRating] = useState(5);
   const [reviewComment, setReviewComment] = useState("");
-
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   const [complaintText, setComplaintText] = useState("");
   const [showComplaintModal, setShowComplaintModal] = useState(false);
@@ -1100,21 +1100,23 @@ export default function OrderTrackingPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
           {isCustomerCancellable(order.status) && (
             <button
+              type="button"
               onClick={() => {
                 setCancelError(null);
                 setShowCancelModal(true);
               }}
-              className="btn-glossy-danger rounded-full text-xs font-bold px-4 py-2 shadow-sm flex items-center gap-1.5"
+              className="btn-glossy-danger rounded-full text-xs font-bold px-4 py-2 shadow-sm flex items-center gap-1.5 min-h-[38px] touch-manipulation cursor-pointer shrink-0"
+              aria-label="Cancel Order"
             >
               <XCircle className="w-4 h-4" />
-              Cancel Pickup
+              Cancel Order
             </button>
           )}
 
-          <span className="text-xs font-bold bg-slate-800 border border-slate-700 text-emerald-400 px-3 py-1.5 rounded-xl">
+          <span className="text-xs font-bold bg-slate-800 border border-slate-700 text-emerald-400 px-3 py-1.5 rounded-xl shrink-0">
             ETA:{" "}
             {order.status === "CANCELLED"
               ? "Cancelled"
@@ -1123,22 +1125,12 @@ export default function OrderTrackingPage() {
                 : "20-30 Mins"}
           </span>
 
-          {!["CANCELLED", "PICKUP_COMPLETED", "SETTLEMENT_COMPLETED"].includes(order.status) && (
-            <button
-              onClick={() => {
-                setShowCancelModal(true);
-                setCancelError(null);
-              }}
-              className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-bold text-xs rounded-xl transition-colors"
-            >
-              Cancel Order
-            </button>
-          )}
-
           <button
+            type="button"
             onClick={() => fetchOrderDetails()}
-            className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300"
+            className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 min-h-[38px] min-w-[38px] flex items-center justify-center shrink-0 cursor-pointer"
             title="Refresh order details"
+            aria-label="Refresh order details"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
@@ -1779,7 +1771,13 @@ export default function OrderTrackingPage() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="cancel-dialog-title"
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6 overflow-y-auto pb-[calc(1rem+env(safe-area-inset-bottom,0px))]"
+          className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 overflow-hidden"
+          style={{
+            paddingTop: 'max(0.75rem, env(safe-area-inset-top, 0.75rem))',
+            paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom, 0.75rem))',
+            paddingLeft: 'max(0.75rem, env(safe-area-inset-left, 0.75rem))',
+            paddingRight: 'max(0.75rem, env(safe-area-inset-right, 0.75rem))',
+          }}
         >
           {/* Backdrop overlay: blurs background page content only, dismissible on click */}
           <div
@@ -1789,16 +1787,17 @@ export default function OrderTrackingPage() {
             aria-hidden="true"
           />
 
-          {/* Modal content: completely sharp, isolated from backdrop filter, scrollable on short mobile viewports */}
+          {/* Modal content: responsive layout with pinned header & footer and scrollable body */}
           <div
-            className="relative z-10 bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl border border-slate-100 my-auto max-h-[calc(100dvh-2rem)] overflow-y-auto"
+            className="relative z-10 bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-100 flex flex-col max-h-[min(90dvh,600px)] overflow-hidden my-auto"
             style={{ transform: 'translateZ(0)' }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+            {/* Pinned Header */}
+            <div className="shrink-0 flex items-center justify-between px-5 pt-4 pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2 text-rose-600 font-extrabold text-base">
-                <AlertCircle className="w-5 h-5" />
-                <h3 id="cancel-dialog-title" className="text-slate-900 font-black">
+                <AlertCircle className="w-5 h-5 shrink-0" />
+                <h3 id="cancel-dialog-title" className="text-slate-900 font-black text-base">
                   Cancel Pickup Order
                 </h3>
               </div>
@@ -1806,75 +1805,79 @@ export default function OrderTrackingPage() {
                 type="button"
                 onClick={() => !cancelling && setShowCancelModal(false)}
                 disabled={cancelling}
-                className="p-1 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors touch-manipulation cursor-pointer disabled:opacity-50"
                 aria-label="Close dialog"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Are you sure you want to cancel pickup order{" "}
-              <strong className="text-slate-900 font-mono">#{order.orderNumber}</strong>?
-            </p>
+            {/* Scrollable Content Body */}
+            <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 space-y-4 text-left">
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Are you sure you want to cancel pickup order{" "}
+                <strong className="text-slate-900 font-mono">#{order.orderNumber}</strong>?
+              </p>
 
-            {order.paymentStatus === "CAPTURED" && (
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-xs text-amber-900">
-                <span className="font-bold block">Prepaid Order Refund</span>
-                Your paid amount of ₹{(order.finalAmount || order.estimatedTotal || 0).toFixed(2)} will be automatically queued for a 100% refund to your original payment method.
+              {order.paymentStatus === "CAPTURED" && (
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-xs text-amber-900">
+                  <span className="font-bold block">Prepaid Order Refund</span>
+                  Your paid amount of ₹{(order.finalAmount || order.estimatedTotal || 0).toFixed(2)} will be automatically queued for a 100% refund to your original payment method.
+                </div>
+              )}
+
+              {cancelError && (
+                <div role="alert" className="bg-rose-50 border border-rose-200 rounded-2xl p-3 text-xs text-rose-800 font-semibold flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <span>{cancelError}</span>
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <label htmlFor="cancel-reason-select" className="text-xs font-bold text-slate-700 block">
+                  Reason for cancellation:
+                </label>
+                <select
+                  id="cancel-reason-select"
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  disabled={cancelling}
+                  className="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-rose-500 touch-manipulation"
+                >
+                  <option value="Need to reschedule for another time">Need to reschedule for another time</option>
+                  <option value="Scrap/junk items are no longer available">Scrap/junk items are no longer available</option>
+                  <option value="Placed order by mistake / testing">Placed order by mistake / testing</option>
+                  <option value="Assigned agent is delayed or taking too long">Assigned agent is delayed or taking too long</option>
+                  <option value="Found alternative disposal method">Found alternative disposal method</option>
+                  <option value="Other">Other</option>
+                </select>
               </div>
-            )}
 
-            {cancelError && (
-              <div role="alert" className="bg-rose-50 border border-rose-200 rounded-2xl p-3 text-xs text-rose-800 font-semibold flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                <span>{cancelError}</span>
-              </div>
-            )}
-
-            <div className="space-y-1.5">
-              <label htmlFor="cancel-reason-select" className="text-xs font-bold text-slate-700 block">
-                Reason for cancellation:
-              </label>
-              <select
-                id="cancel-reason-select"
-                value={cancelReason}
-                onChange={(e) => setCancelReason(e.target.value)}
-                disabled={cancelling}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-rose-500"
-              >
-                <option value="Need to reschedule for another time">Need to reschedule for another time</option>
-                <option value="Scrap/junk items are no longer available">Scrap/junk items are no longer available</option>
-                <option value="Placed order by mistake / testing">Placed order by mistake / testing</option>
-                <option value="Assigned agent is delayed or taking too long">Assigned agent is delayed or taking too long</option>
-                <option value="Found alternative disposal method">Found alternative disposal method</option>
-                <option value="Other">Other</option>
-              </select>
+              {cancelReason === "Other" && (
+                <div className="space-y-1.5">
+                  <label htmlFor="custom-cancel-reason" className="text-xs font-bold text-slate-700 block">
+                    Please specify:
+                  </label>
+                  <textarea
+                    id="custom-cancel-reason"
+                    value={customCancelReason}
+                    onChange={(e) => setCustomCancelReason(e.target.value)}
+                    placeholder="Tell us why you are cancelling this pickup..."
+                    rows={3}
+                    disabled={cancelling}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-800 focus:ring-2 focus:ring-rose-500 touch-manipulation"
+                  />
+                </div>
+              )}
             </div>
 
-            {cancelReason === "Other" && (
-              <div className="space-y-1.5">
-                <label htmlFor="custom-cancel-reason" className="text-xs font-bold text-slate-700 block">
-                  Please specify:
-                </label>
-                <textarea
-                  id="custom-cancel-reason"
-                  value={customCancelReason}
-                  onChange={(e) => setCustomCancelReason(e.target.value)}
-                  placeholder="Tell us why you are cancelling this pickup..."
-                  rows={3}
-                  disabled={cancelling}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-800 focus:ring-2 focus:ring-rose-500"
-                />
-              </div>
-            )}
-
-            <div className="flex gap-2 pt-2">
+            {/* Pinned Footer Actions */}
+            <div className="shrink-0 px-5 pt-3 pb-4 border-t border-slate-100 flex gap-2.5 bg-slate-50/50">
               <button
                 type="button"
                 onClick={() => setShowCancelModal(false)}
                 disabled={cancelling}
-                className="w-1/2 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 font-bold text-xs py-3 rounded-xl transition-colors"
+                className="w-1/2 min-h-[44px] bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 font-bold text-xs py-2.5 px-3 rounded-xl transition-colors flex items-center justify-center touch-manipulation cursor-pointer"
               >
                 Keep Pickup
               </button>
@@ -1883,12 +1886,12 @@ export default function OrderTrackingPage() {
                 type="button"
                 onClick={handleCancelOrder}
                 disabled={cancelling}
-                className="w-1/2 bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white font-bold text-xs py-3 rounded-xl shadow-md transition-colors flex items-center justify-center gap-1.5"
+                className="w-1/2 min-h-[44px] bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white font-bold text-xs py-2.5 px-3 rounded-xl shadow-md transition-colors flex items-center justify-center gap-1.5 touch-manipulation cursor-pointer"
               >
                 {cancelling ? (
                   <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    Cancelling...
+                    <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+                    <span>Cancelling...</span>
                   </>
                 ) : (
                   "Confirm Cancellation"
