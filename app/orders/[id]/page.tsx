@@ -1251,9 +1251,6 @@ export default function OrderTrackingPage() {
                   </p>
 
                   <div className="flex items-center gap-2 mt-1">
-                    <span className="text-[11px] bg-slate-100 font-mono px-2 py-0.5 rounded text-slate-700 font-bold">
-                      {order.agent.vehicleNumber}
-                    </span>
 
                     <span className="text-xs font-bold text-amber-600 flex items-center gap-0.5">
                       <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
@@ -1358,7 +1355,6 @@ export default function OrderTrackingPage() {
                       title: order.agent
                         ? order.agent.user.name
                         : "Pickup Agent",
-                      vehicleNumber: order.agent?.vehicleNumber,
                       type: "AGENT" as const,
                       status: order.agent?.status,
                     },
