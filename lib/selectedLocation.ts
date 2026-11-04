@@ -1,3 +1,5 @@
+import { validateServiceArea } from './validations/serviceArea';
+
 export type SelectedLocationData = {
   address: string;
   area: string;
@@ -27,14 +29,42 @@ export function getSelectedLocation(): SelectedLocationData | null {
 
     const lat = Number(parsed.lat);
     const lng = Number(parsed.lng);
+    const hasValidCoords =
+      !isNaN(lat) &&
+      !isNaN(lng) &&
+      Number.isFinite(lat) &&
+      Number.isFinite(lng) &&
+      (lat !== 0 || lng !== 0);
+
+    const check = validateServiceArea({
+      lat: hasValidCoords ? lat : null,
+      lng: hasValidCoords ? lng : null,
+      area: areaName.trim(),
+      address: parsed.address,
+      street: parsed.street,
+      pincode: parsed.pincode,
+    });
 
     return {
       ...parsed,
       address: parsed.address || areaName,
       area: areaName.trim(),
-      lat: !isNaN(lat) ? lat : 12.9716,
-      lng: !isNaN(lng) ? lng : 77.5946,
-      serviceable: parsed.serviceable ?? true,
+      lat: hasValidCoords
+        ? lat
+        : check.zone
+          ? check.zone.id === 'btm-layout'
+            ? 12.9166
+            : 12.9077
+          : 0,
+      lng: hasValidCoords
+        ? lng
+        : check.zone
+          ? check.zone.id === 'btm-layout'
+            ? 77.6101
+            : 77.5854
+          : 0,
+      serviceable: Boolean(check.serviceable && parsed.serviceable !== false),
+      zoneName: check.zone?.name || parsed.zoneName,
     };
   } catch {
     return null;

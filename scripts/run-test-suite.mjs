@@ -54,6 +54,7 @@ const standaloneTests = [
   'tests/booking-payload-idempotency.test.ts',
   'tests/customer-addresses-security.test.ts',
   'tests/backend-order-dispatch-hardening.test.ts',
+  'tests/service-area-restriction.test.ts',
 ];
 const standaloneOnly = process.argv.includes('--standalone-only');
 

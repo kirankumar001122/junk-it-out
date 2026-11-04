@@ -12,6 +12,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { BENGALURU_ZONES } from '@/lib/geofence';
+import { SERVICE_AREA_UNAVAILABLE_MESSAGE } from '@/lib/validations/serviceArea';
 import { loadGoogleMaps } from '@/components/InteractiveMap';
 import { setSelectedLocation } from '@/lib/selectedLocation';
 
@@ -41,7 +42,7 @@ export default function LocationSearchModal({
 }: Props) {
   const [query, setQuery] = useState('');
   const [predictions, setPredictions] = useState<any[]>([]);
-  const [serviceZones, setServiceZones] = useState<any[]>(BENGALURU_ZONES);
+  const [serviceZones, setServiceZones] = useState<any[]>(BENGALURU_ZONES.filter((z) => z.status === 'ACTIVE'));
   const [loadingZoneId, setLoadingZoneId] = useState<string | null>(null);
   const [loadingGeolocate, setLoadingGeolocate] = useState(false);
   const [loadingPlaceSelect, setLoadingPlaceSelect] = useState(false);
@@ -83,7 +84,8 @@ export default function LocationSearchModal({
       .then((res) => res.json())
       .then((data) => {
         if (data.success && Array.isArray(data.data) && data.data.length > 0) {
-          setServiceZones(data.data);
+          const activeOnly = data.data.filter((z: any) => z.status === 'ACTIVE');
+          setServiceZones(activeOnly);
         }
       })
       .catch((err) => {
@@ -184,7 +186,7 @@ export default function LocationSearchModal({
           message:
             data.data?.message ||
             data.message ||
-            "We're not serving this location yet. Please select a location within Bengaluru.",
+            SERVICE_AREA_UNAVAILABLE_MESSAGE,
         };
       }
     } catch {
@@ -295,7 +297,7 @@ export default function LocationSearchModal({
               } else {
                 setServiceError(
                   check.message ||
-                    "We're not serving this location yet. Please select a location within Bengaluru."
+                    SERVICE_AREA_UNAVAILABLE_MESSAGE
                 );
               }
             } else {
@@ -339,7 +341,7 @@ export default function LocationSearchModal({
         onClose();
       } else {
         setServiceError(
-          check.message || "We're not serving this location yet. Please select a location within Bengaluru."
+          check.message || SERVICE_AREA_UNAVAILABLE_MESSAGE
         );
       }
     } catch (err) {
@@ -400,7 +402,7 @@ export default function LocationSearchModal({
                       onClose();
                     } else {
                       setServiceError(
-                        "We're not serving this location yet. Please select a location within Bengaluru."
+                        check.message || SERVICE_AREA_UNAVAILABLE_MESSAGE
                       );
                     }
                   } else {
@@ -467,7 +469,7 @@ export default function LocationSearchModal({
           const areaName = valueFor('sublocality_level_1') || valueFor('locality') || 'Bengaluru';
           const check = await checkServiceability(targetLat, targetLng);
           if (!check.serviceable) {
-            setServiceError(check.message || 'This address is outside our current service area.');
+            setServiceError(check.message || SERVICE_AREA_UNAVAILABLE_MESSAGE);
             return;
           }
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Plus, Trash2, Home, Briefcase, Lock, X } from 'lucide-react';
 import CustomerOtpLogin from '@/components/CustomerOtpLogin';
+import { SERVICE_AREA_UNAVAILABLE_MESSAGE } from '@/lib/validations/serviceArea';
 
 export default function CustomerAddressesPage() {
   const [addresses, setAddresses] = useState<any[]>([]);
@@ -18,6 +19,8 @@ export default function CustomerAddressesPage() {
   const [newStreet, setNewStreet] = useState('');
   const [newArea, setNewArea] = useState('JP Nagar');
   const [newPincode, setNewPincode] = useState('560078');
+  const [newLat, setNewLat] = useState(12.9077);
+  const [newLng, setNewLng] = useState(77.5854);
   const savingRef = useRef(false);
   const deletingRef = useRef<string | null>(null);
 
@@ -86,6 +89,8 @@ export default function CustomerAddressesPage() {
           street: newStreet.trim(),
           area: newArea.trim(),
           pincode: newPincode.trim(),
+          lat: newLat,
+          lng: newLng,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -266,6 +271,37 @@ export default function CustomerAddressesPage() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Service Area:</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { label: 'JP Nagar', pincode: '560078', lat: 12.9077, lng: 77.5854 },
+                    { label: 'BTM Layout', pincode: '560068', lat: 12.9166, lng: 77.6101 },
+                  ].map((a) => (
+                    <button
+                      key={a.label}
+                      type="button"
+                      onClick={() => {
+                        setNewArea(a.label);
+                        setNewPincode(a.pincode);
+                        setNewLat(a.lat);
+                        setNewLng(a.lng);
+                      }}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors border ${
+                        newArea === a.label
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1 font-medium">
+                  {SERVICE_AREA_UNAVAILABLE_MESSAGE}
+                </p>
               </div>
 
               <div>

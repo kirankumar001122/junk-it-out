@@ -21,17 +21,25 @@ export async function GET(req: NextRequest) {
     const dbAreaMap = new Map(dbAreas.map((a) => [a.id, a]));
 
     const mergedZones = SOUTH_BENGALURU_ZONES.map((z) => {
+      const isApprovedZone = z.id === 'btm-layout' || z.id === 'jp-nagar';
       const dbRecord = dbAreaMap.get(z.id);
+
+      let effectiveStatus: 'ACTIVE' | 'INACTIVE' | 'TEMPORARY_BLOCKED' = isApprovedZone ? 'ACTIVE' : 'INACTIVE';
       if (dbRecord) {
-        return {
-          ...z,
-          status: dbRecord.status as 'ACTIVE' | 'INACTIVE' | 'TEMPORARY_BLOCKED',
-          name: dbRecord.name || z.name,
-          etaMinutes: dbRecord.etaMinutes ?? z.etaMinutes,
-          basePickupCharge: DEFAULT_SERVICE_CHARGE,
-        };
+        if (!isApprovedZone) {
+          effectiveStatus = 'INACTIVE';
+        } else if (dbRecord.status === 'INACTIVE' || dbRecord.status === 'TEMPORARY_BLOCKED') {
+          effectiveStatus = dbRecord.status as any;
+        }
       }
-      return z;
+
+      return {
+        ...z,
+        status: effectiveStatus,
+        name: dbRecord?.name || z.name,
+        etaMinutes: dbRecord?.etaMinutes ?? z.etaMinutes,
+        basePickupCharge: DEFAULT_SERVICE_CHARGE,
+      };
     });
 
     setCachedServiceAreas(mergedZones);

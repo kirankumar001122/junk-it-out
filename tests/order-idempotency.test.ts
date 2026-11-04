@@ -12,10 +12,10 @@ const input = {
   address: {
     houseNo: "1",
     street: "Test Street",
-    area: "Test Area",
-    pincode: "560001",
-    lat: 12.5,
-    lng: 77.5,
+    area: "JP Nagar",
+    pincode: "560078",
+    lat: 12.9077,
+    lng: 77.5854,
   },
   items: [{ categoryId: "test-category", estimatedWeight: 5 }],
 };
@@ -61,11 +61,11 @@ async function run() {
   (db as any).user.findUnique = async ({ where }: any) =>
     where.id === otherUser.id ? otherUser : user;
   (db as any).serviceArea.findMany = async () => [{
-    id: "isolated-service-area",
-    name: "Test Area",
+    id: "jp-nagar",
+    name: "JP Nagar (Phases 1 to 9)",
     status: "ACTIVE",
-    boundaryPolygon: "[[12,77],[13,77],[13,78],[12,78]]",
-    etaMinutes: 30,
+    boundaryPolygon: "[[12.88,77.57],[12.92,77.57],[12.92,77.60],[12.88,77.60]]",
+    etaMinutes: 20,
     basePickupCharge: 50,
   }];
   (db as any).address.updateMany = async () => ({ count: 0 });

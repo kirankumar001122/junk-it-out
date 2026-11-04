@@ -13,7 +13,13 @@ import {
   InvalidWasteCategoryError,
   InvalidBookingWeightError,
   InvalidIdempotencyKeyError,
+  ServiceAreaUnavailableError,
 } from '@/lib/services/orderService';
+import {
+  validateServiceArea,
+  SERVICE_AREA_UNAVAILABLE_CODE,
+  SERVICE_AREA_UNAVAILABLE_MESSAGE,
+} from '@/lib/validations/serviceArea';
 import { validateCreateOrderInput } from '@/lib/validations/schemas';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { db } from '@/lib/db';
@@ -78,6 +84,22 @@ async function handlePost(req: NextRequest) {
       return errorResponse(
         'INVALID_IDEMPOTENCY_KEY',
         'Idempotency-Key must be 10-128 characters using letters, numbers, "_" or "-".',
+        400,
+      );
+    }
+
+    const serviceAreaCheck = validateServiceArea({
+      lat: body.address?.lat,
+      lng: body.address?.lng,
+      area: body.address?.area,
+      street: body.address?.street,
+      pincode: body.address?.pincode,
+      formattedAddress: body.address?.formattedAddress,
+    });
+    if (!serviceAreaCheck.serviceable) {
+      return errorResponse(
+        'SERVICE_AREA_UNAVAILABLE',
+        serviceAreaCheck.message || SERVICE_AREA_UNAVAILABLE_MESSAGE,
         400,
       );
     }
@@ -419,6 +441,18 @@ async function handlePost(req: NextRequest) {
       err?.name === 'InvalidIdempotencyKeyError'
     ) {
       return errorResponse('INVALID_IDEMPOTENCY_KEY', err.message, 400);
+    }
+
+    if (
+      err instanceof ServiceAreaUnavailableError ||
+      err?.name === 'ServiceAreaUnavailableError' ||
+      err?.code === 'SERVICE_AREA_UNAVAILABLE'
+    ) {
+      return errorResponse(
+        'SERVICE_AREA_UNAVAILABLE',
+        err.message || SERVICE_AREA_UNAVAILABLE_MESSAGE,
+        400,
+      );
     }
 
     return errorResponse(

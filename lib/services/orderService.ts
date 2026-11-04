@@ -4,6 +4,11 @@ import {
   saveCustomerAddress,
 } from './customerService';
 import { checkGeofenceServiceability } from './serviceAreaService';
+import {
+  ServiceAreaUnavailableError,
+  SERVICE_AREA_UNAVAILABLE_MESSAGE,
+} from '../validations/serviceArea';
+export { ServiceAreaUnavailableError };
 import { calculateTotalBookingWeight } from '../validations/schemas';
 import {
   getCachedWasteCategories,
@@ -319,9 +324,8 @@ export async function createOrder(
 
   timer?.recordPhase('parallel_lookups');
   if (!geofence.serviceable) {
-    throw new Error(
-      geofence.message ||
-        "Sorry, we don't currently serve this location."
+    throw new ServiceAreaUnavailableError(
+      geofence.message || SERVICE_AREA_UNAVAILABLE_MESSAGE
     );
   }
 
