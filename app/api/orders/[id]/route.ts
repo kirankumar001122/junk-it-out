@@ -178,11 +178,13 @@ export async function GET(
       : [];
 
     const isAdmin = authUser?.role === 'ADMIN' || authUser?.role === 'SUPER_ADMIN';
+    const isStaff = isAdmin || authUser?.role === 'AGENT';
     const hideAgentContact = !isAdmin && shouldHideAgentContact(order.status);
 
     const sanitizedAgent = order.agent
       ? {
           ...order.agent,
+          vehicleNumber: isStaff ? order.agent.vehicleNumber : null,
           user: order.agent.user
             ? {
                 ...order.agent.user,

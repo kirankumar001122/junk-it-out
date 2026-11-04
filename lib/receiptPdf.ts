@@ -164,7 +164,7 @@ export function generateReceiptPdfBytes(order: any): Uint8Array {
   const pickupSlot = order.scheduledSlot || (order.pickupType === 'ASAP' ? '20-30 Mins ASAP' : (order.scheduledDate ? `${order.scheduledDate} ${order.timeSlot || ''}` : 'Standard Doorstep'));
   const orderStatus = isPickupCompletedStatus(order.status) ? 'Pickup Completed' : (order.status ? String(order.status).replace(/_/g, ' ') : 'Completed');
   const agentName = order.agent?.user?.name
-    ? `${order.agent.user.name} (${order.agent.vehicleNumber || 'Agent'})`
+    ? `${order.agent.user.name}${order.agent.vehicleType ? ` (${order.agent.vehicleType})` : ''}`
     : 'Junk It Out Field Team';
 
   stream.push('0.39 0.45 0.55 rg');
