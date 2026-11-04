@@ -180,6 +180,8 @@ export default function OrderTrackingPage() {
   const [complaintText, setComplaintText] = useState("");
   const [showComplaintModal, setShowComplaintModal] = useState(false);
   const [complaintSubmitting, setComplaintSubmitting] = useState(false);
+  const [complaintError, setComplaintError] = useState<string | null>(null);
+  const [complaintSuccess, setComplaintSuccess] = useState(false);
   const complaintInFlightRef = useRef(false);
 
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -987,6 +989,7 @@ export default function OrderTrackingPage() {
     if (!complaintText.trim() || complaintInFlightRef.current || complaintSubmitting) return;
     complaintInFlightRef.current = true;
     setComplaintSubmitting(true);
+    setComplaintError(null);
 
     try {
       const res = await fetch("/api/complaints", {
@@ -1006,15 +1009,21 @@ export default function OrderTrackingPage() {
       if (res.ok && data.success) {
         setShowComplaintModal(false);
         setComplaintText("");
+        setComplaintError(null);
+        setComplaintSuccess(true);
         alert(
           "Issue reported to Junk It Out support desk. We will investigate immediately.",
         );
       } else {
-        alert(data.message || "Failed to report issue. Please try again.");
+        const errorMsg = data.message || "Failed to report issue. Please try again.";
+        setComplaintError(errorMsg);
+        alert(errorMsg);
       }
     } catch (e: any) {
       console.error(e);
-      alert("Failed to report issue. Please try again.");
+      const errorMsg = "Failed to report issue. Please try again.";
+      setComplaintError(errorMsg);
+      alert(errorMsg);
     } finally {
       complaintInFlightRef.current = false;
       setComplaintSubmitting(false);
@@ -1401,7 +1410,7 @@ export default function OrderTrackingPage() {
 
       {/* WEIGHT VERIFICATION & ITEM SUMMARY */}
       <div className="customer-surface rounded-[1.75rem] p-6 space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
           <div>
             <h3 className="text-base font-bold text-slate-900">
               Waste Items & Weight Breakdown
@@ -1413,12 +1422,35 @@ export default function OrderTrackingPage() {
           </div>
 
           <button
-            onClick={() => setShowComplaintModal(true)}
-            className="text-xs text-rose-600 font-bold hover:underline"
+            type="button"
+            onClick={() => {
+              setComplaintError(null);
+              setShowComplaintModal(true);
+            }}
+            className="self-start sm:self-auto text-xs text-rose-600 font-bold hover:text-rose-700 hover:underline flex items-center gap-1.5 py-1 sm:py-0 focus:outline-none focus:ring-2 focus:ring-rose-500 rounded-lg transition-colors"
+            aria-haspopup="dialog"
           >
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
             Dispute Weight / Report Issue
           </button>
         </div>
+
+        {complaintSuccess && (
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold p-3 rounded-2xl flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>Issue reported to Junk It Out support desk. We will investigate immediately.</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setComplaintSuccess(false)}
+              className="text-emerald-700 hover:text-emerald-900 p-1"
+              aria-label="Dismiss message"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* ITEMIZED TABLE */}
         <div className="divide-y divide-slate-100 text-xs">
@@ -1645,21 +1677,69 @@ export default function OrderTrackingPage() {
 
       {/* COMPLAINT MODAL */}
       {showComplaintModal && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
-            <h3 className="text-lg font-bold text-slate-900">
-              Report an Issue / Dispute Weight
-            </h3>
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="dispute-dialog-title"
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6 overflow-y-auto pb-[calc(1rem+env(safe-area-inset-bottom,0px))]"
+        >
+          {/* Backdrop overlay: blurs background page content only, dismissible on click */}
+          <div
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm transition-opacity"
+            style={{ WebkitBackdropFilter: 'blur(4px)' }}
+            onClick={() => !complaintSubmitting && setShowComplaintModal(false)}
+            aria-hidden="true"
+          />
 
-            <textarea
-              value={complaintText}
-              onChange={(e) => setComplaintText(e.target.value)}
-              placeholder="Describe your issue (e.g. wrong weight entered, agent behavior, delay)"
-              rows={4}
-              className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3 text-xs"
-            />
+          {/* Modal content: completely sharp, isolated from backdrop filter, scrollable on short mobile viewports */}
+          <div
+            className="relative z-10 bg-white rounded-3xl p-5 sm:p-6 max-w-md w-full space-y-4 shadow-2xl border border-slate-100 my-auto max-h-[calc(100dvh-2rem)] overflow-y-auto"
+            style={{ transform: 'translateZ(0)' }}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-2 text-rose-600 font-extrabold text-base">
+                <AlertCircle className="w-5 h-5 shrink-0" />
+                <h3 id="dispute-dialog-title" className="text-slate-900 font-black text-base sm:text-lg">
+                  Report an Issue / Dispute Weight
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !complaintSubmitting && setShowComplaintModal(false)}
+                disabled={complaintSubmitting}
+                className="p-1 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                aria-label="Close dialog"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-            <div className="flex gap-2.5">
+            {complaintError && (
+              <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold p-3 rounded-xl flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-500" />
+                <span>{complaintError}</span>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label htmlFor="dispute-reason-textarea" className="text-xs font-bold text-slate-700 block">
+                Describe your issue:
+              </label>
+              <textarea
+                id="dispute-reason-textarea"
+                value={complaintText}
+                onChange={(e) => {
+                  setComplaintText(e.target.value);
+                  if (complaintError) setComplaintError(null);
+                }}
+                placeholder="Describe your issue (e.g. wrong weight entered, agent behavior, delay)"
+                rows={4}
+                disabled={complaintSubmitting}
+                className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500 disabled:opacity-60 transition-colors"
+              />
+            </div>
+
+            <div className="flex gap-2.5 pt-1">
               <button
                 type="button"
                 onClick={() => setShowComplaintModal(false)}
