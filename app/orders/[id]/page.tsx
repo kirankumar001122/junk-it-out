@@ -1003,6 +1003,7 @@ export default function OrderTrackingPage() {
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "same-origin",
         body: JSON.stringify({
           orderId: order.id,
           category: "WEIGHT_DISPUTE",
@@ -1010,26 +1011,21 @@ export default function OrderTrackingPage() {
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
 
-      if (res.ok && data.success) {
+      if (res.ok && data?.success) {
         setShowComplaintModal(false);
         setComplaintText("");
         setComplaintError(null);
         setComplaintSuccess(true);
-        alert(
-          "Issue reported to Junk It Out support desk. We will investigate immediately.",
-        );
       } else {
-        const errorMsg = data.message || "Failed to report issue. Please try again.";
+        const errorMsg = data?.message || "Failed to report issue. Please try again.";
         setComplaintError(errorMsg);
-        alert(errorMsg);
       }
     } catch (e: any) {
       console.error(e);
       const errorMsg = "Failed to report issue. Please try again.";
       setComplaintError(errorMsg);
-      alert(errorMsg);
     } finally {
       complaintInFlightRef.current = false;
       setComplaintSubmitting(false);
@@ -1674,7 +1670,7 @@ export default function OrderTrackingPage() {
       </div>
 
       {/* COMPLAINT MODAL */}
-      {showComplaintModal && (
+      {mounted && showComplaintModal && typeof document !== 'undefined' && createPortal(
         <div
           role="dialog"
           aria-modal="true"
@@ -1693,6 +1689,7 @@ export default function OrderTrackingPage() {
           <div
             className="relative z-10 bg-white rounded-3xl p-5 sm:p-6 max-w-md w-full space-y-4 shadow-2xl border border-slate-100 my-auto max-h-[calc(100dvh-2rem)] overflow-y-auto"
             style={{ transform: 'translateZ(0)' }}
+            onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <div className="flex items-center gap-2 text-rose-600 font-extrabold text-base">
@@ -1764,11 +1761,12 @@ export default function OrderTrackingPage() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* CANCELLATION MODAL */}
-      {showCancelModal && mounted && createPortal(
+      {mounted && showCancelModal && typeof document !== 'undefined' && createPortal(
         <div
           role="dialog"
           aria-modal="true"
