@@ -11,7 +11,7 @@
 export type FinancialDirection = 'JUNKITOUT_PAYS' | 'CUSTOMER_PAYS' | 'ZERO_BALANCE';
 
 export const ORIGINAL_PICKUP_SERVICE_CHARGE = 50.0;
-export const PICKUP_SERVICE_CHARGE = 0.0;
+export const PICKUP_SERVICE_CHARGE = 50.0;
 
 export const SPECIAL_MATERIAL_THRESHOLD_KG = 7;
 export const SPECIAL_MATERIAL_OFFER_PRICE = 99.0;
@@ -19,7 +19,6 @@ export const SPECIAL_MATERIAL_OFFER_PRICE = 99.0;
 export interface MaterialCalculationResult {
   materialAmount: number;
   materialAmountPaise: number;
-  isOfferApplied?: boolean;
   isOfferApplied: boolean;
   standardAmount: number;
   standardAmountPaise: number;
