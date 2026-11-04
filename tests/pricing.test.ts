@@ -224,7 +224,16 @@ describe('Authoritative Pricing Engine', () => {
     });
   });
 
-  describe('Total Payable Calculation Invariants (Fixed ₹50 Service Charge)', () => {
+  describe('Total Payable Calculation Invariants', () => {
+    it('waives the standard ₹50 service charge by default', () => {
+      assert.equal(PICKUP_SERVICE_CHARGE, 0.0);
+      assert.equal(ORIGINAL_PICKUP_SERVICE_CHARGE, 50.0);
+
+      const total = calculateBookingTotalPayable(41.0);
+      assert.equal(total, 41.0);
+      assert.equal(toPaise(total), 4100);
+    });
+
     it('₹41 waste -> ₹50 service charge -> ₹91 total payable', () => {
       const total = calculateBookingTotalPayable(41.0, 50.0, 0.0);
       assert.equal(total, 91.0);

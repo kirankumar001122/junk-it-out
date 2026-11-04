@@ -19,7 +19,6 @@ export const SPECIAL_MATERIAL_OFFER_PRICE = 99.0;
 export interface MaterialCalculationResult {
   materialAmount: number;
   materialAmountPaise: number;
-  isOfferApplied?: boolean;
   isOfferApplied: boolean;
   standardAmount: number;
   standardAmountPaise: number;
@@ -196,13 +195,14 @@ export function toRupees(paise: number): number {
 
 /**
  * Calculate the upfront customer booking total payable.
- * Business Rule: Total Payable = Total Waste Value + Fixed Service Charge (₹50) + Applicable Disposal Charges
+ * Business Rule: Total Payable = Total Waste Value + Applicable Disposal Charges.
+ * The standard ₹50 pickup service charge is currently waived.
  *
- * The service charge must ALWAYS remain exactly ₹50 for every eligible delivery,
+ * The waived service charge must remain ₹0 for every eligible delivery,
  * regardless of the quantity, weight, category or value of waste.
  *
  * @param totalWasteValue Sum of recyclable waste scrap values (₹)
- * @param basePickupCharge Fixed doorstep pickup service fee (strictly ₹50.00)
+ * @param basePickupCharge Doorstep pickup service fee (₹0 while the standard fee is waived)
  * @param disposalCharges Separate bulky or non-recyclable disposal charges (₹)
  */
 export function calculateBookingTotalPayable(
@@ -222,8 +222,8 @@ export function calculateBookingTotalPayable(
  * Formula:
  * - Material Amount = Price Per KG × Selected Weight
  * - Pickup Value = Sum of all Material Amounts
- * - Service Charge = ₹50
- * - Total Amount Payable = Pickup Value + ₹50
+ * - Service Charge = ₹0 (the standard ₹50 fee is waived)
+ * - Total Amount Payable = Pickup Value
  */
 export function calculatePickupSummary(
   itemsInput: PickupSummaryItemInput[],
@@ -297,7 +297,7 @@ export function calculatePickupSummary(
  * Single authoritative order valuation calculation.
  *
  * @param itemsInput List of items with weights, category types, and rates per kg.
- * @param basePickupCharge Base doorstep collection charge (default: 50.0).
+ * @param basePickupCharge Base doorstep collection charge (default: waived).
  * @param couponDiscount Verified coupon discount applied against customer charges (default: 0.0).
  * @param urgentSurcharge Surcharge for immediate or off-hour pickup (default: 0.0).
  */
