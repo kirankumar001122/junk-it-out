@@ -99,7 +99,20 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Authenticated user requests
-    let customerId: string | null = authUser.customerId || null;
+    let customerId: string | null =
+      authUser.customerId ||
+      (authUser as any).user?.customer?.id ||
+      null;
+
+    if (!customerId && authUser.userId) {
+      const customerRecord = await db.customer.findFirst({
+        where: { userId: authUser.userId },
+        select: { id: true },
+      });
+      if (customerRecord) {
+        customerId = customerRecord.id;
+      }
+    }
 
     let targetOrderId: string | null = null;
     if (orderId) {
