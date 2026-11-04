@@ -5,7 +5,7 @@ import { CANCELLABLE_ORDER_STATUSES } from '@/lib/orders/cancellation';
 import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
 import { refundAttemptId, refundEventId } from '@/lib/payments/refundWorkflow';
-import { createRefundRequestForCapturedPayment } from '@/lib/payments/refundRequests';
+import { createRefundRequestForCapturedPayment, isTableMissingError } from '@/lib/payments/refundRequests';
 import { getOrderIdentifierWhere, isCustomerOrderOwner } from '@/lib/orderAccess';
 
 class CancellationConflictError extends Error {}
@@ -125,7 +125,8 @@ export async function POST(
     }
 
     const isPaid = order.paymentStatus === 'CAPTURED';
-    const cancelledOrder = await db.$transaction(async (tx) => {
+
+    async function executeCancellation(tx: any, includeRefundRequest: boolean) {
       const claimed = await tx.order.updateMany({
         where: {
           id: order.id,
@@ -146,17 +147,19 @@ export async function POST(
       }
 
       if (isPaid) {
-        const refundRequestModel = (
-          tx as unknown as {
-            refundRequest?: typeof tx.refundRequest;
+        if (includeRefundRequest) {
+          const refundRequestModel = (
+            tx as unknown as {
+              refundRequest?: typeof tx.refundRequest;
+            }
+          ).refundRequest;
+          if (refundRequestModel) {
+            await createRefundRequestForCapturedPayment(
+              tx,
+              order.id,
+              authUser.userId,
+            );
           }
-        ).refundRequest;
-        if (refundRequestModel) {
-          await createRefundRequestForCapturedPayment(
-            tx,
-            order.id,
-            authUser.userId,
-          );
         }
 
         const payment = await tx.payment.findFirst({
@@ -276,7 +279,34 @@ export async function POST(
         where: { id: order.id },
         include: { customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } } },
       });
-    });
+    }
+
+    let cancelledOrder: any;
+    try {
+      // Primary attempt: executes transaction including RefundRequest record creation
+      cancelledOrder = await db.$transaction(async (tx) => {
+        return executeCancellation(tx, true);
+      });
+    } catch (primaryErr: any) {
+      if (primaryErr instanceof CancellationConflictError) {
+        throw primaryErr;
+      }
+
+      // If the primary transaction failed because public.RefundRequest does not exist (P2021),
+      // the primary transaction has rolled back completely.
+      // We execute a clean fallback transaction without RefundRequest so that the customer order
+      // is cancelled and captured payment flagged as REFUND_PENDING without PostgreSQL 25P02 aborted-transaction errors.
+      if (isTableMissingError(primaryErr)) {
+        console.warn(
+          `[CANCELLATION P2021 FALLBACK] Primary transaction rolled back because RefundRequest table is missing in DB. Executing clean fallback transaction.`,
+        );
+        cancelledOrder = await db.$transaction(async (fallbackTx) => {
+          return executeCancellation(fallbackTx, false);
+        });
+      } else {
+        throw primaryErr;
+      }
+    }
 
     if (!cancelledOrder) {
       return NextResponse.json(
@@ -286,6 +316,15 @@ export async function POST(
     }
 
     broadcaster.broadcast('ORDER_UPDATED', cancelledOrder);
+    if (order.agentId) {
+      broadcaster.broadcast('ORDER_CANCELLED', {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        agentId: order.agentId,
+        status: 'CANCELLED',
+        reason,
+      });
+    }
     return NextResponse.json({
       success: true,
       message: isPaid

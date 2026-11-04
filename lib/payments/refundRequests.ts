@@ -17,6 +17,13 @@ export const REFUND_REQUEST_STATUSES = [
 
 export type RefundRequestStatus = (typeof REFUND_REQUEST_STATUSES)[number];
 
+export function isTableMissingError(error: unknown): boolean {
+  if (!error) return false;
+  if ((error as any).code === 'P2021') return true;
+  const msg = (error as any).message || String(error);
+  return /table .* does not exist|relation .* does not exist/i.test(msg);
+}
+
 export async function createRefundRequestForCapturedPayment(
   tx: Prisma.TransactionClient,
   orderId: string,
@@ -38,7 +45,7 @@ export async function createRefundRequestForCapturedPayment(
   });
   if (!payment || !payment.paymentId) return null;
 
-  return tx.refundRequest.create({
+  return await tx.refundRequest.create({
     data: {
       orderId,
       paymentId: payment.id,

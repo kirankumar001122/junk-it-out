@@ -48,6 +48,10 @@ export async function POST(
       return errorResponse('FORBIDDEN', 'Order is assigned to another agent.', 403);
     }
 
+    if (order.status === 'CANCELLED') {
+      return errorResponse('ORDER_CANCELLED', 'Order has been cancelled by customer.', 409);
+    }
+
     if (['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED'].includes(order.status) && order.weightRecords.length > 0) {
       return successResponse(order, 200, { message: 'Order was already completed.' });
     }

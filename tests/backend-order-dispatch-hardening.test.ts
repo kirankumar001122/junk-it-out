@@ -325,7 +325,7 @@ async function runHardeningTests() {
       },
       items: [{ categoryId: 'cat-1', estimatedWeight: 10 }],
       pickupType: 'SCHEDULED',
-      scheduledSlot: 'Tomorrow (2026-11-03), 10:00 AM - 12:00 PM',
+      scheduledSlot: `Tomorrow (${new Date(Date.now() + 86400000 * 2).toISOString().slice(0, 10)}), 10:00 AM - 12:00 PM`,
     });
     assert.equal(validFuture.valid, true);
 
