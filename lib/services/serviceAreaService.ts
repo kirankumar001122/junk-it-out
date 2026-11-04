@@ -1,4 +1,14 @@
 import { db } from '../db';
+import {
+  validateServiceArea,
+  SERVICE_AREA_UNAVAILABLE_MESSAGE,
+  APPROVED_SERVICE_ZONES,
+} from '../validations/serviceArea';
+import {
+  BENGALURU_ZONES,
+  DEFAULT_SERVICE_CHARGE,
+  isPointInPolygon,
+} from '../geofence';
 
 interface CachedServiceArea {
   id: string;
@@ -17,8 +27,6 @@ export function invalidateServiceAreaCache(): void {
   serviceAreaCache = null;
 }
 
-import { BENGALURU_ZONES, BENGALURU_MASTER_POLYGON, DEFAULT_SERVICE_CHARGE, isPointInPolygon, calculateDistanceKm } from '../geofence';
-
 export async function checkGeofenceServiceability(
   lat: number,
   lng: number,
@@ -30,7 +38,7 @@ export async function checkGeofenceServiceability(
 }> {
   const point: [number, number] = [lat, lng];
 
-  // 1. Check database service area boundary polygons (cached in-memory for 60s)
+  // 1. Check database service area boundary polygons (cached in-memory)
   const now = Date.now();
   let cachedAreas = serviceAreaCache && serviceAreaCache.expiresAt > now ? serviceAreaCache.areas : null;
   if (!cachedAreas) {
@@ -61,6 +69,7 @@ export async function checkGeofenceServiceability(
     }
   }
 
+  // 2. Check for explicit disabled / inactive / blocked status in database
   if (areaName && cachedAreas && cachedAreas.length > 0) {
     const normArea = areaName.trim().toLowerCase();
     const namedDbArea = cachedAreas.find(
@@ -77,18 +86,7 @@ export async function checkGeofenceServiceability(
   if (cachedAreas && cachedAreas.length > 0) {
     for (const area of cachedAreas) {
       if (isPointInPolygon(point, area.parsedPolygon)) {
-        if (area.status === 'ACTIVE') {
-          return {
-            serviceable: true,
-            message: `Location is inside active Junk It Out service zone: ${area.name}`,
-            zone: {
-              id: area.id,
-              name: area.name,
-              etaMinutes: area.etaMinutes,
-              basePickupCharge: DEFAULT_SERVICE_CHARGE,
-            },
-          };
-        } else {
+        if (area.status !== 'ACTIVE') {
           return {
             serviceable: false,
             message: `Service is currently disabled/inactive in ${area.name}.`,
@@ -98,78 +96,39 @@ export async function checkGeofenceServiceability(
     }
   }
 
-  if (areaName) {
-    const normArea = areaName.trim().toLowerCase();
-    const presetNamedZone = BENGALURU_ZONES.find(
-      (z) => z.name.toLowerCase() === normArea || z.id.toLowerCase() === normArea || normArea.includes(z.name.toLowerCase())
-    );
-    if (presetNamedZone && presetNamedZone.status !== 'ACTIVE') {
-      return {
-        serviceable: false,
-        message: `Service is currently disabled/inactive in ${presetNamedZone.name}.`,
-      };
-    }
-  }
+  // 3. Centralized serviceability validation: STRICTLY BTM Layout & JP Nagar only
+  const validation = validateServiceArea({
+    lat,
+    lng,
+    area: areaName,
+  });
 
-  // 2. Check preset Bengaluru zone polygons
-  const presetZone = BENGALURU_ZONES.find((z) => isPointInPolygon(point, z.boundaryPolygon));
-  if (presetZone) {
-    if (presetZone.status !== 'ACTIVE') {
-      return {
-        serviceable: false,
-        message: `Service is currently disabled/inactive in ${presetZone.name}.`,
-      };
-    }
+  if (!validation.serviceable || !validation.zone) {
     return {
-      serviceable: true,
-      message: `Location is inside active Bengaluru service zone: ${presetZone.name}`,
-      zone: {
-        id: presetZone.id,
-        name: presetZone.name,
-        etaMinutes: presetZone.etaMinutes,
-        basePickupCharge: presetZone.basePickupCharge,
-      },
+      serviceable: false,
+      message: validation.message || SERVICE_AREA_UNAVAILABLE_MESSAGE,
     };
   }
 
-  // 3. Distance check from closest zone center if point lies within Greater Bengaluru bounding box
-  const isInsideBengaluruBox = isPointInPolygon(point, BENGALURU_MASTER_POLYGON);
-
-  if (isInsideBengaluruBox) {
-    let closestZone = BENGALURU_ZONES[0];
-    let minDistance = Infinity;
-
-    for (const zone of BENGALURU_ZONES) {
-      const dist = calculateDistanceKm(lat, lng, zone.centerLat, zone.centerLng);
-      if (dist < minDistance) {
-        minDistance = dist;
-        closestZone = zone;
-      }
-    }
-
-    if (minDistance <= 10.0) {
-      if (closestZone.status !== 'ACTIVE') {
-        return {
-          serviceable: false,
-          message: `Service is currently disabled/inactive in ${closestZone.name}.`,
-        };
-      }
+  // 4. Verify whether the matched zone has an explicit inactive status in DB
+  const matchedZoneId = validation.zone.id;
+  if (cachedAreas && cachedAreas.length > 0) {
+    const dbOverride = cachedAreas.find(
+      (a) =>
+        a.id.toLowerCase() === matchedZoneId ||
+        a.name.toLowerCase().includes(matchedZoneId === 'btm-layout' ? 'btm' : 'jp nagar')
+    );
+    if (dbOverride && dbOverride.status !== 'ACTIVE') {
       return {
-        serviceable: true,
-        message: `Location is inside active Bengaluru service zone: ${closestZone.name}`,
-        zone: {
-          id: closestZone.id,
-          name: closestZone.name,
-          etaMinutes: closestZone.etaMinutes,
-          basePickupCharge: closestZone.basePickupCharge,
-        },
+        serviceable: false,
+        message: `Service is currently disabled/inactive in ${dbOverride.name}.`,
       };
     }
   }
 
-  // 4. Locations outside Bengaluru bounds are strictly NOT SERVICEABLE
   return {
-    serviceable: false,
-    message: "Sorry, we don't currently serve this location.",
+    serviceable: true,
+    message: `Location is inside active Junk It Out service zone: ${validation.zone.name}`,
+    zone: validation.zone,
   };
 }

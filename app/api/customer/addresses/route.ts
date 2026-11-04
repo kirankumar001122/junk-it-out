@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
+import {
+  validateServiceArea,
+  SERVICE_AREA_UNAVAILABLE_CODE,
+  SERVICE_AREA_UNAVAILABLE_MESSAGE,
+} from '@/lib/validations/serviceArea';
 
 export async function GET(req: NextRequest) {
   try {
@@ -53,6 +58,25 @@ export async function POST(req: NextRequest) {
     if (!cleanPincode || !/^[1-9][0-9]{5}$/.test(cleanPincode)) {
       return NextResponse.json(
         { success: false, message: 'A valid 6-digit Indian pincode is required.' },
+        { status: 400 }
+      );
+    }
+
+    const serviceAreaCheck = validateServiceArea({
+      lat,
+      lng,
+      area,
+      street,
+      pincode: cleanPincode,
+    });
+    if (!serviceAreaCheck.serviceable) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: SERVICE_AREA_UNAVAILABLE_CODE,
+          code: SERVICE_AREA_UNAVAILABLE_CODE,
+          message: serviceAreaCheck.message || SERVICE_AREA_UNAVAILABLE_MESSAGE,
+        },
         { status: 400 }
       );
     }

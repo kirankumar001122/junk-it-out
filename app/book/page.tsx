@@ -29,6 +29,9 @@ import LocationSearchModal from '@/components/LocationSearchModal';
 import InteractiveMap, { loadGoogleMaps } from '@/components/InteractiveMap';
 import { clearPickupCart, pickupCartEvent, readPickupCart, replacePickupCart } from '@/lib/pickupCart';
 import { getSelectedLocation, setSelectedLocation, LOCATION_CHANGE_EVENT } from '@/lib/selectedLocation';
+import {
+  SERVICE_AREA_UNAVAILABLE_MESSAGE,
+} from '@/lib/validations/serviceArea';
 import { loadRazorpayScript } from '@/lib/razorpayClient';
 import { isCustomerWasteCategory, getMaterialImageUrl, subscribeWasteCategoriesChanged } from '@/lib/customerWasteCategories';
 import { calculateBookingTotalPayable, calculatePickupSummary, PICKUP_SERVICE_CHARGE } from '@/lib/pricing';
@@ -65,7 +68,14 @@ const checkoutFlowIdPattern =
 
 export default function BookingPage() {
   const router = useRouter();
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const s = new URLSearchParams(window.location.search).get('step');
+      if (s === '2') return 2;
+      if (s === '3') return 3;
+    }
+    return 1;
+  });
 
   // Form & User State
   const [phone, setPhone] = useState('');
@@ -165,7 +175,7 @@ export default function BookingPage() {
         serviceable: stored.serviceable,
         zone: stored.zoneName ? { name: stored.zoneName } : undefined,
       });
-      await runGeofenceCheck(stored.lat, stored.lng);
+      await runGeofenceCheck(stored.lat, stored.lng, stored.area);
       return;
     }
 
@@ -184,7 +194,7 @@ export default function BookingPage() {
         if (addr.pincode) setPincode(addr.pincode);
 
         // Verify serviceability of saved address
-        await runGeofenceCheck(addr.lat, addr.lng);
+        await runGeofenceCheck(addr.lat, addr.lng, addr.area);
       }
     } catch {}
   };
@@ -306,12 +316,12 @@ export default function BookingPage() {
     };
   }, []);
 
-  const runGeofenceCheck = async (targetLat: number, targetLng: number) => {
+  const runGeofenceCheck = async (targetLat: number, targetLng: number, areaName?: string) => {
     try {
       const res = await fetch('/api/service-areas/check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lat: targetLat, lng: targetLng }),
+        body: JSON.stringify({ lat: targetLat, lng: targetLng, areaName: areaName || area }),
       });
       const data = await res.json();
       if (data.success && data.data?.serviceable) {
@@ -323,7 +333,7 @@ export default function BookingPage() {
       } else {
         const result = {
           serviceable: false,
-          message: data.data?.message || data.message || "We don't currently serve this location. Please select a location in Bengaluru.",
+          message: data.data?.message || data.message || SERVICE_AREA_UNAVAILABLE_MESSAGE,
         };
         setGeofenceResult(result);
         return result;
@@ -732,7 +742,7 @@ export default function BookingPage() {
     }
 
     if (!area || !geofenceResult?.serviceable) {
-      setErrorMsg(geofenceResult?.message || "Please select a valid pickup location in Bengaluru before confirming.");
+      setErrorMsg(geofenceResult?.message || SERVICE_AREA_UNAVAILABLE_MESSAGE);
       return;
     }
 
@@ -1384,6 +1394,28 @@ export default function BookingPage() {
                   <span>Verified Service Zone in Bengaluru</span>
                 </div>
               </div>
+            ) : area && geofenceResult && !geofenceResult.serviceable ? (
+              <div className="bg-rose-50 border border-rose-200 p-4 rounded-xl space-y-2.5">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <h3 className="text-xs font-extrabold text-rose-900">Service Unavailable at this Location</h3>
+                    <p className="text-xs font-medium text-rose-800 leading-relaxed">
+                      {geofenceResult.message || SERVICE_AREA_UNAVAILABLE_MESSAGE}
+                    </p>
+                  </div>
+                </div>
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setLocationSearchModalOpen(true)}
+                    className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold px-3.5 py-2 rounded-lg shadow-xs cursor-pointer transition-all inline-flex items-center gap-1.5"
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                    Change to Supported Location
+                  </button>
+                </div>
+              </div>
             ) : (
               <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl text-center space-y-3">
                 <div className="flex justify-center text-amber-600">
@@ -1434,7 +1466,7 @@ export default function BookingPage() {
               onLocationSelect={async (newLat, newLng) => {
                 setLat(newLat);
                 setLng(newLng);
-                const check = await runGeofenceCheck(newLat, newLng);
+                const check = await runGeofenceCheck(newLat, newLng, area);
                 const locData = {
                   address: fullAddress || `${area}, Bengaluru`,
                   area: check?.zone?.name || area || 'Bengaluru',

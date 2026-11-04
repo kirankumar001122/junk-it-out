@@ -1,5 +1,10 @@
 /**
- * Geofencing & Service Area Validation for Junk It Out (Bengaluru-Wide)
+ * Geofencing & Service Area Validation for Junk It Out
+ *
+ * Strict Business Rule:
+ * Pickup service is provided in ONLY:
+ * 1. BTM Layout, Bengaluru
+ * 2. JP Nagar, Bengaluru
  */
 
 export interface Point {
@@ -28,9 +33,13 @@ export const BENGALURU_MASTER_POLYGON: [number, number][] = [
 
 export const DEFAULT_SERVICE_CHARGE = 50;
 
-// Pre-defined Bengaluru Service Zones (North, South, East, West, Central)
+export const SERVICE_AREA_UNAVAILABLE_MESSAGE =
+  "Sorry! Our pickup service is currently available only in BTM Layout and JP Nagar, Bengaluru. We don't serve your location yet.";
+
+// Pre-defined Bengaluru Service Zones
+// ONLY JP Nagar and BTM Layout are ACTIVE. All other zones are INACTIVE.
 export const BENGALURU_ZONES: ServiceZone[] = [
-  // SOUTH BENGALURU
+  // SOUTH BENGALURU - APPROVED ACTIVE SERVICE ZONES
   {
     id: 'jp-nagar',
     name: 'JP Nagar (Phases 1 to 9)',
@@ -42,58 +51,6 @@ export const BENGALURU_ZONES: ServiceZone[] = [
     boundaryPolygon: [
       [12.9200, 77.5750], [12.9200, 77.6000],
       [12.8850, 77.6000], [12.8850, 77.5750]
-    ],
-  },
-  {
-    id: 'jayanagar',
-    name: 'Jayanagar (Blocks 1 to 9)',
-    etaMinutes: 20,
-    basePickupCharge: DEFAULT_SERVICE_CHARGE,
-    status: 'ACTIVE',
-    centerLat: 12.9250,
-    centerLng: 77.5938,
-    boundaryPolygon: [
-      [12.9400, 77.5780], [12.9400, 77.6050],
-      [12.9150, 77.6050], [12.9150, 77.5780]
-    ],
-  },
-  {
-    id: 'electronic-city',
-    name: 'Electronic City (Phase 1 & 2)',
-    etaMinutes: 25,
-    basePickupCharge: DEFAULT_SERVICE_CHARGE,
-    status: 'ACTIVE',
-    centerLat: 12.8452,
-    centerLng: 77.6602,
-    boundaryPolygon: [
-      [12.8650, 77.6400], [12.8650, 77.6850],
-      [12.8200, 77.6850], [12.8200, 77.6400]
-    ],
-  },
-  {
-    id: 'koramangala',
-    name: 'Koramangala (Blocks 1 to 8)',
-    etaMinutes: 25,
-    basePickupCharge: DEFAULT_SERVICE_CHARGE,
-    status: 'ACTIVE',
-    centerLat: 12.9352,
-    centerLng: 77.6245,
-    boundaryPolygon: [
-      [12.9550, 77.6100], [12.9550, 77.6450],
-      [12.9200, 77.6450], [12.9200, 77.6100]
-    ],
-  },
-  {
-    id: 'hsr-layout',
-    name: 'HSR Layout (Sectors 1 to 7)',
-    etaMinutes: 25,
-    basePickupCharge: DEFAULT_SERVICE_CHARGE,
-    status: 'ACTIVE',
-    centerLat: 12.9121,
-    centerLng: 77.6446,
-    boundaryPolygon: [
-      [12.9300, 77.6300], [12.9300, 77.6650],
-      [12.8950, 77.6650], [12.8950, 77.6300]
     ],
   },
   {
@@ -110,13 +67,67 @@ export const BENGALURU_ZONES: ServiceZone[] = [
     ],
   },
 
+  // INACTIVE / UNSUPPORTED ZONES
+  {
+    id: 'jayanagar',
+    name: 'Jayanagar (Blocks 1 to 9)',
+    etaMinutes: 20,
+    basePickupCharge: DEFAULT_SERVICE_CHARGE,
+    status: 'INACTIVE',
+    centerLat: 12.9250,
+    centerLng: 77.5938,
+    boundaryPolygon: [
+      [12.9400, 77.5780], [12.9400, 77.6050],
+      [12.9150, 77.6050], [12.9150, 77.5780]
+    ],
+  },
+  {
+    id: 'electronic-city',
+    name: 'Electronic City (Phase 1 & 2)',
+    etaMinutes: 25,
+    basePickupCharge: DEFAULT_SERVICE_CHARGE,
+    status: 'INACTIVE',
+    centerLat: 12.8452,
+    centerLng: 77.6602,
+    boundaryPolygon: [
+      [12.8650, 77.6400], [12.8650, 77.6850],
+      [12.8200, 77.6850], [12.8200, 77.6400]
+    ],
+  },
+  {
+    id: 'koramangala',
+    name: 'Koramangala (Blocks 1 to 8)',
+    etaMinutes: 25,
+    basePickupCharge: DEFAULT_SERVICE_CHARGE,
+    status: 'INACTIVE',
+    centerLat: 12.9352,
+    centerLng: 77.6245,
+    boundaryPolygon: [
+      [12.9550, 77.6100], [12.9550, 77.6450],
+      [12.9200, 77.6450], [12.9200, 77.6100]
+    ],
+  },
+  {
+    id: 'hsr-layout',
+    name: 'HSR Layout (Sectors 1 to 7)',
+    etaMinutes: 25,
+    basePickupCharge: DEFAULT_SERVICE_CHARGE,
+    status: 'INACTIVE',
+    centerLat: 12.9121,
+    centerLng: 77.6446,
+    boundaryPolygon: [
+      [12.9300, 77.6300], [12.9300, 77.6650],
+      [12.8950, 77.6650], [12.8950, 77.6300]
+    ],
+  },
+
   // NORTH BENGALURU
   {
     id: 'yelahanka',
     name: 'Yelahanka & Kogilu',
     etaMinutes: 25,
     basePickupCharge: DEFAULT_SERVICE_CHARGE,
-    status: 'ACTIVE',
+    status: 'INACTIVE',
     centerLat: 13.1007,
     centerLng: 77.5963,
     boundaryPolygon: [
@@ -129,7 +140,7 @@ export const BENGALURU_ZONES: ServiceZone[] = [
     name: 'Hebbal, RT Nagar & Manyata',
     etaMinutes: 20,
     basePickupCharge: DEFAULT_SERVICE_CHARGE,
-    status: 'ACTIVE',
+    status: 'INACTIVE',
     centerLat: 13.0358,
     centerLng: 77.5970,
     boundaryPolygon: [
@@ -144,7 +155,7 @@ export const BENGALURU_ZONES: ServiceZone[] = [
     name: 'Whitefield, ITPL & Kadugodi',
     etaMinutes: 25,
     basePickupCharge: DEFAULT_SERVICE_CHARGE,
-    status: 'ACTIVE',
+    status: 'INACTIVE',
     centerLat: 12.9698,
     centerLng: 77.7500,
     boundaryPolygon: [
@@ -157,7 +168,7 @@ export const BENGALURU_ZONES: ServiceZone[] = [
     name: 'Indiranagar, Domlur & Marathahalli',
     etaMinutes: 20,
     basePickupCharge: DEFAULT_SERVICE_CHARGE,
-    status: 'ACTIVE',
+    status: 'INACTIVE',
     centerLat: 12.9784,
     centerLng: 77.6408,
     boundaryPolygon: [
@@ -172,7 +183,7 @@ export const BENGALURU_ZONES: ServiceZone[] = [
     name: 'Rajajinagar & Malleshwaram',
     etaMinutes: 20,
     basePickupCharge: DEFAULT_SERVICE_CHARGE,
-    status: 'ACTIVE',
+    status: 'INACTIVE',
     centerLat: 12.9982,
     centerLng: 77.5530,
     boundaryPolygon: [
@@ -185,7 +196,7 @@ export const BENGALURU_ZONES: ServiceZone[] = [
     name: 'Vijayanagar, Nagarbhavi & Kengeri',
     etaMinutes: 25,
     basePickupCharge: DEFAULT_SERVICE_CHARGE,
-    status: 'ACTIVE',
+    status: 'INACTIVE',
     centerLat: 12.9719,
     centerLng: 77.5300,
     boundaryPolygon: [
@@ -200,7 +211,7 @@ export const BENGALURU_ZONES: ServiceZone[] = [
     name: 'MG Road, Shivajinagar & Richmond Town',
     etaMinutes: 20,
     basePickupCharge: DEFAULT_SERVICE_CHARGE,
-    status: 'ACTIVE',
+    status: 'INACTIVE',
     centerLat: 12.9756,
     centerLng: 77.6066,
     boundaryPolygon: [
@@ -248,17 +259,18 @@ export function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lo
 }
 
 /**
- * Validates whether a location is within Junk It Out's supported Bengaluru service zones
+ * Validates whether a location is within Junk It Out's supported Bengaluru service zones.
+ * STRICT RULE: Only BTM Layout and JP Nagar are serviceable.
  */
 export function checkServiceArea(lat: number, lng: number, areaNameOrPincode?: string) {
   const point = { lat, lng };
 
-  // 1. Check against master Bengaluru metropolitan bounding polygon
-  const isInsideMaster = isPointInPolygon(point, BENGALURU_MASTER_POLYGON);
+  // Only check ACTIVE zones (JP Nagar and BTM Layout)
+  const activeZones = BENGALURU_ZONES.filter((z) => z.status === 'ACTIVE');
 
-  // 2. Ray-casting polygon check against specific Bengaluru zones
-  for (const zone of BENGALURU_ZONES) {
-    if (zone.status === 'ACTIVE' && isPointInPolygon(point, zone.boundaryPolygon)) {
+  // 1. Ray-casting polygon check against active zones
+  for (const zone of activeZones) {
+    if (isPointInPolygon(point, zone.boundaryPolygon)) {
       return {
         serviceable: true,
         zone,
@@ -267,42 +279,47 @@ export function checkServiceArea(lat: number, lng: number, areaNameOrPincode?: s
     }
   }
 
-  // 3. Distance check from zone centers (up to 8.0 km radius if inside master Bengaluru polygon)
-  let closestZone: ServiceZone | null = null;
-  let minDistance = Infinity;
-
-  for (const zone of BENGALURU_ZONES) {
+  // 2. Tight distance check (within 1.8km of BTM center or 2.0km of JP Nagar center)
+  for (const zone of activeZones) {
     const dist = calculateDistanceKm(lat, lng, zone.centerLat, zone.centerLng);
-    if (dist < minDistance) {
-      minDistance = dist;
-      closestZone = zone;
-    }
-  }
-
-  if (isInsideMaster && closestZone && minDistance <= 8.0 && closestZone.status === 'ACTIVE') {
-    return {
-      serviceable: true,
-      zone: closestZone,
-      message: `Junk It Out is ACTIVE in ${closestZone.name}! Pickup available in ${closestZone.etaMinutes + 5} mins.`,
-    };
-  }
-
-  // 4. Area name matching fallback ONLY if inside Bengaluru bounding box
-  if (isInsideMaster && areaNameOrPincode) {
-    const query = areaNameOrPincode.toLowerCase();
-    if (query.includes('bengaluru') || query.includes('bangalore')) {
-      const fallbackZone = closestZone || BENGALURU_ZONES[0];
+    const maxRadius = zone.id === 'btm-layout' ? 1.8 : 2.0;
+    if (dist <= maxRadius) {
       return {
         serviceable: true,
-        zone: fallbackZone,
-        message: `Junk It Out is ACTIVE in ${fallbackZone.name}! Pickup available in ${fallbackZone.etaMinutes} mins.`,
+        zone,
+        message: `Junk It Out is ACTIVE in ${zone.name}! Pickup available in ${zone.etaMinutes} mins.`,
       };
     }
   }
 
+  // 3. Strict area name matching for BTM Layout or JP Nagar only
+  if (areaNameOrPincode) {
+    const query = areaNameOrPincode.toLowerCase();
+    const isBtm = /\bbtm\b/i.test(query) && !/\b(?:whitefield|koramangala|hsr|electronic|marathahalli)\b/i.test(query);
+    const isJp = /\bjp\s*nagar\b|\bj\.p\.\s*nagar\b/i.test(query) && !/\b(?:whitefield|koramangala|hsr|electronic|marathahalli)\b/i.test(query);
+
+    if (isBtm) {
+      const btmZone = activeZones.find((z) => z.id === 'btm-layout') || activeZones[0];
+      return {
+        serviceable: true,
+        zone: btmZone,
+        message: `Junk It Out is ACTIVE in ${btmZone.name}! Pickup available in ${btmZone.etaMinutes} mins.`,
+      };
+    }
+    if (isJp) {
+      const jpZone = activeZones.find((z) => z.id === 'jp-nagar') || activeZones[0];
+      return {
+        serviceable: true,
+        zone: jpZone,
+        message: `Junk It Out is ACTIVE in ${jpZone.name}! Pickup available in ${jpZone.etaMinutes} mins.`,
+      };
+    }
+  }
+
+  // All other areas are strictly NOT serviceable
   return {
     serviceable: false,
     zone: null,
-    message: "Sorry, we don't currently serve this location.",
+    message: SERVICE_AREA_UNAVAILABLE_MESSAGE,
   };
 }
