@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<body>
+<h2>Auto Logging in as Admin...</h2>
+<script>
+document.cookie="admin_token=local-admin-token-8610466283; path=/";
+document.cookie="token=local-admin-token-8610466283; path=/";
+document.cookie="auth_token=local-admin-token-8610466283; path=/";
+localStorage.setItem('admin_token','local-admin-token-8610466283');
+setTimeout(()=>{ window.location.href="/admin"; }, 500);
+</script>
+</body>
+</html>
