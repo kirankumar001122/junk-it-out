@@ -60,6 +60,7 @@ export default defineConfig({
       'tests/accepted-materials-and-admin-audit.test.ts',
       'tests/agent-contact-privacy.test.ts',
       'tests/agent-vehicle-privacy.test.ts',
+      'tests/order-dispute-mobile-resilience.test.ts',
     ],
   },
 });
