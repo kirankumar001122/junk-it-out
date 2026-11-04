@@ -469,7 +469,8 @@ export async function createOrder(
     calculationItems,
     basePickupCharge,
     0.0,
-    urgentSurcharge
+    urgentSurcharge,
+    { applySpecialPricing: true }
   );
 
   const orderItemsData = pickupSummary.items.map((vi) => ({

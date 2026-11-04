@@ -10,7 +10,76 @@
 
 export type FinancialDirection = 'JUNKITOUT_PAYS' | 'CUSTOMER_PAYS' | 'ZERO_BALANCE';
 
-export const PICKUP_SERVICE_CHARGE = 50.0;
+export const ORIGINAL_PICKUP_SERVICE_CHARGE = 50.0;
+export const PICKUP_SERVICE_CHARGE = 0.0;
+
+export const SPECIAL_MATERIAL_THRESHOLD_KG = 7;
+export const SPECIAL_MATERIAL_OFFER_PRICE = 99.0;
+
+export interface MaterialCalculationResult {
+  materialAmount: number;
+  materialAmountPaise: number;
+  isOfferApplied?: boolean;
+  isOfferApplied: boolean;
+  standardAmount: number;
+  standardAmountPaise: number;
+}
+
+/**
+ * Calculate the price for an individual accepted material.
+ *
+ * Configurable rule:
+ * - If the quantity of an individual material exceeds 7 kg (weight > 7),
+ *   apply the ₹99 offer price for that material.
+ * - Otherwise, standard pricing (rate × weight) applies.
+ */
+export function calculateMaterialItemAmount(
+  weightKg: number,
+  pricePerKg: number,
+  thresholdKg: number = SPECIAL_MATERIAL_THRESHOLD_KG,
+  offerPrice: number = SPECIAL_MATERIAL_OFFER_PRICE
+): MaterialCalculationResult {
+  const safeWeight =
+    typeof weightKg === 'number' && Number.isFinite(weightKg) && weightKg > 0
+      ? weightKg
+      : 0;
+  const safeRate =
+    typeof pricePerKg === 'number' && Number.isFinite(pricePerKg) && pricePerKg >= 0
+      ? pricePerKg
+      : 0;
+
+  if (safeWeight <= 0) {
+    return {
+      materialAmount: 0,
+      materialAmountPaise: 0,
+      isOfferApplied: false,
+      standardAmount: 0,
+      standardAmountPaise: 0,
+    };
+  }
+
+  const standardPaise = Math.round((safeWeight * safeRate + Number.EPSILON) * 100);
+  const isOfferApplied = safeWeight > thresholdKg;
+
+  if (isOfferApplied) {
+    const offerPaise = toPaise(offerPrice);
+    return {
+      materialAmount: toRupees(offerPaise),
+      materialAmountPaise: offerPaise,
+      isOfferApplied: true,
+      standardAmount: toRupees(standardPaise),
+      standardAmountPaise: standardPaise,
+    };
+  }
+
+  return {
+    materialAmount: toRupees(standardPaise),
+    materialAmountPaise: standardPaise,
+    isOfferApplied: false,
+    standardAmount: toRupees(standardPaise),
+    standardAmountPaise: standardPaise,
+  };
+}
 
 export interface PickupSummaryItemInput {
   categoryId: string;
@@ -28,6 +97,7 @@ export interface PickupSummaryItemResult {
   weightKg: number;
   materialAmount: number;
   materialAmountPaise: number;
+  isOfferApplied?: boolean;
 }
 
 export interface PickupSummaryResult {
@@ -36,8 +106,11 @@ export interface PickupSummaryResult {
   totalWeightKg: number;
   pickupValue: number;
   pickupValuePaise: number;
+  originalServiceCharge: number;
+  originalServiceChargePaise: number;
   serviceCharge: number;
   serviceChargePaise: number;
+  isServiceChargeWaived: boolean;
   totalAmountPayable: number;
   totalAmountPayablePaise: number;
 }
@@ -134,7 +207,7 @@ export function toRupees(paise: number): number {
  */
 export function calculateBookingTotalPayable(
   totalWasteValue: number,
-  basePickupCharge: number = 50.0,
+  basePickupCharge: number = PICKUP_SERVICE_CHARGE,
   disposalCharges: number = 0.0
 ): number {
   const wastePaise = toPaise(Math.max(0, totalWasteValue));
@@ -176,7 +249,10 @@ export function calculatePickupSummary(
         continue;
       }
 
-      const materialAmountPaise = Math.round((weight * rate + Number.EPSILON) * 100);
+      const { materialAmount, materialAmountPaise, isOfferApplied } = calculateMaterialItemAmount(
+        weight,
+        rate
+      );
       pickupValuePaise += materialAmountPaise;
       totalWeightMilliKg += Math.round((weight + Number.EPSILON) * 1000);
 
@@ -186,12 +262,14 @@ export function calculatePickupSummary(
         type: String(item.type || 'RECYCLABLE_BUY'),
         pricePerKg: rate,
         weightKg: Math.round((weight + Number.EPSILON) * 1000) / 1000,
-        materialAmount: toRupees(materialAmountPaise),
+        materialAmount,
+        isOfferApplied,
         materialAmountPaise,
       });
     }
   }
 
+  const originalServiceChargePaise = toPaise(ORIGINAL_PICKUP_SERVICE_CHARGE);
   const serviceChargePaise = toPaise(
     typeof serviceChargeInput === 'number' && Number.isFinite(serviceChargeInput) && serviceChargeInput >= 0
       ? serviceChargeInput
@@ -205,8 +283,11 @@ export function calculatePickupSummary(
     totalWeightKg: Math.round(totalWeightMilliKg) / 1000,
     pickupValue: toRupees(pickupValuePaise),
     pickupValuePaise,
+    originalServiceCharge: toRupees(originalServiceChargePaise),
+    originalServiceChargePaise,
     serviceCharge: toRupees(serviceChargePaise),
     serviceChargePaise,
+    isServiceChargeWaived: serviceChargePaise === 0,
     totalAmountPayable: toRupees(totalAmountPayablePaise),
     totalAmountPayablePaise,
   };
@@ -222,9 +303,10 @@ export function calculatePickupSummary(
  */
 export function calculateOrderValuation(
   itemsInput: CalculationItemInput[],
-  basePickupCharge: number = 50.0,
+  basePickupCharge: number = PICKUP_SERVICE_CHARGE,
   couponDiscount: number = 0.0,
-  urgentSurcharge: number = 0.0
+  urgentSurcharge: number = 0.0,
+  options?: { applySpecialPricing?: boolean }
 ): CalculationResult {
   let totalRecyclableValuePaise = 0;
   let totalWasteChargePaise = 0;
@@ -236,7 +318,9 @@ export function calculateOrderValuation(
     const rate = typeof item.pricePerKg === 'number' && Number.isFinite(item.pricePerKg) && item.pricePerKg >= 0
       ? item.pricePerKg
       : 0;
-    const subtotalPaise = Math.round((weight * rate + Number.EPSILON) * 100);
+    const subtotalPaise = options?.applySpecialPricing
+      ? calculateMaterialItemAmount(weight, rate).materialAmountPaise
+      : Math.round((weight * rate + Number.EPSILON) * 100);
 
     const isWasteCharge = item.type === 'WASTE_CHARGE';
     if (isWasteCharge) {

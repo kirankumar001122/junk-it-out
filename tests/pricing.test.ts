@@ -3,9 +3,13 @@ import { describe, it } from 'vitest';
 import {
   calculateOrderValuation,
   calculatePickupSummary,
+  calculateMaterialItemAmount,
   calculateValuationAdjustment,
   calculateBookingTotalPayable,
+  ORIGINAL_PICKUP_SERVICE_CHARGE,
   PICKUP_SERVICE_CHARGE,
+  SPECIAL_MATERIAL_THRESHOLD_KG,
+  SPECIAL_MATERIAL_OFFER_PRICE,
   toPaise,
   toRupees,
 } from '../lib/pricing';
@@ -281,8 +285,72 @@ describe('Authoritative Pricing Engine', () => {
     });
   });
 
-  describe('calculatePickupSummary (Customer Pickup Summary & Payable Formula)', () => {
-    it('calculates single material exact example: ₹3/kg × 4 kg = ₹12 + ₹50 service charge = ₹62', () => {
+  describe('calculateMaterialItemAmount (Special Pricing Rule for Individual Materials)', () => {
+    it('applies standard per-kg pricing when quantity is below or equal to 7 kg', () => {
+      // 4 kg at ₹3/kg = ₹12
+      const res4 = calculateMaterialItemAmount(4, 3);
+      assert.equal(res4.materialAmount, 12);
+      assert.equal(res4.materialAmountPaise, 1200);
+      assert.equal(res4.isOfferApplied, false);
+
+      // Exactly 7 kg at ₹14/kg = ₹98
+      const res7 = calculateMaterialItemAmount(7, 14);
+      assert.equal(res7.materialAmount, 98);
+      assert.equal(res7.materialAmountPaise, 9800);
+      assert.equal(res7.isOfferApplied, false);
+
+      // 1 kg at ₹20/kg = ₹20
+      const res1 = calculateMaterialItemAmount(1, 20);
+      assert.equal(res1.materialAmount, 20);
+      assert.equal(res1.isOfferApplied, false);
+    });
+
+    it('applies ₹99 special offer price individually when quantity exceeds 7 kg', () => {
+      // 7.1 kg at ₹14/kg -> ₹99
+      const res71 = calculateMaterialItemAmount(7.1, 14);
+      assert.equal(res71.materialAmount, 99);
+      assert.equal(res71.materialAmountPaise, 9900);
+      assert.equal(res71.isOfferApplied, true);
+
+      // 8 kg at ₹14/kg -> ₹99
+      const res8 = calculateMaterialItemAmount(8, 14);
+      assert.equal(res8.materialAmount, 99);
+      assert.equal(res8.materialAmountPaise, 9900);
+      assert.equal(res8.isOfferApplied, true);
+
+      // 10 kg at ₹18/kg -> ₹99
+      const res10 = calculateMaterialItemAmount(10, 18);
+      assert.equal(res10.materialAmount, 99);
+      assert.equal(res10.materialAmountPaise, 9900);
+      assert.equal(res10.isOfferApplied, true);
+
+      // 25 kg at ₹50/kg -> ₹99
+      const res25 = calculateMaterialItemAmount(25, 50);
+      assert.equal(res25.materialAmount, 99);
+      assert.equal(res25.materialAmountPaise, 9900);
+      assert.equal(res25.isOfferApplied, true);
+    });
+
+    it('supports configurable threshold and offer price', () => {
+      // Custom threshold of 5 kg and offer price of ₹79
+      const belowCustom = calculateMaterialItemAmount(4, 20, 5, 79);
+      assert.equal(belowCustom.materialAmount, 80);
+      assert.equal(belowCustom.isOfferApplied, false);
+
+      const aboveCustom = calculateMaterialItemAmount(6, 20, 5, 79);
+      assert.equal(aboveCustom.materialAmount, 79);
+      assert.equal(aboveCustom.isOfferApplied, true);
+    });
+
+    it('handles zero, negative, or invalid weight gracefully', () => {
+      assert.equal(calculateMaterialItemAmount(0, 10).materialAmount, 0);
+      assert.equal(calculateMaterialItemAmount(-5, 10).materialAmount, 0);
+      assert.equal(calculateMaterialItemAmount(NaN, 10).materialAmount, 0);
+    });
+  });
+
+  describe('calculatePickupSummary (Customer Pickup Summary, Waived Service Charge & Special Pricing)', () => {
+    it('calculates single material under 7 kg with waived service charge: ₹3/kg × 4 kg = ₹12 + ₹0 service charge = ₹12', () => {
       const summary = calculatePickupSummary([
         {
           categoryId: 'mat-1',
@@ -295,45 +363,93 @@ describe('Authoritative Pricing Engine', () => {
       assert.equal(summary.materialCount, 1);
       assert.equal(summary.totalWeightKg, 4);
       assert.equal(summary.items[0].materialAmount, 12);
+      assert.equal(summary.items[0].isOfferApplied, false);
       assert.equal(summary.pickupValue, 12);
-      assert.equal(summary.serviceCharge, 50);
-      assert.equal(summary.totalAmountPayable, 62);
-      assert.equal(summary.totalAmountPayablePaise, 6200);
+      assert.equal(summary.originalServiceCharge, 50);
+      assert.equal(summary.serviceCharge, 0);
+      assert.equal(summary.isServiceChargeWaived, true);
+      assert.equal(summary.totalAmountPayable, 12);
+      assert.equal(summary.totalAmountPayablePaise, 1200);
     });
 
-    it('calculates multiple materials with different prices and weights dynamically', () => {
+    it('applies ₹99 offer price for material exceeding 7 kg in pickup summary with waived service charge', () => {
       const summary = calculatePickupSummary([
-        { categoryId: 'ewaste', categoryName: 'E-Waste', pricePerKg: 1, weightKg: 5 },           // ₹5
-        { categoryId: 'household', categoryName: 'Household Dry Waste', pricePerKg: 8, weightKg: 3 }, // ₹24
-        { categoryId: 'paper', categoryName: 'Paper & Cardboard', pricePerKg: 14, weightKg: 2.5 },    // ₹35
-        { categoryId: 'plastic', categoryName: 'Plastic Waste', pricePerKg: 18, weightKg: 4 },        // ₹72
+        {
+          categoryId: 'paper',
+          categoryName: 'Paper & Cardboard',
+          pricePerKg: 14,
+          weightKg: 8,
+        },
       ]);
 
-      // Pickup Value = 5 + 24 + 35 + 72 = ₹136
-      // Total Weight = 5 + 3 + 2.5 + 4 = 14.5 kg
-      // Service Charge = ₹50
-      // Total Amount Payable = 136 + 50 = ₹186
-      assert.equal(summary.materialCount, 4);
-      assert.equal(summary.totalWeightKg, 14.5);
-      assert.equal(summary.pickupValue, 136);
-      assert.equal(summary.serviceCharge, PICKUP_SERVICE_CHARGE);
-      assert.equal(summary.totalAmountPayable, 186);
-      assert.equal(summary.totalAmountPayablePaise, 18600);
+      assert.equal(summary.materialCount, 1);
+      assert.equal(summary.totalWeightKg, 8);
+      assert.equal(summary.items[0].materialAmount, 99);
+      assert.equal(summary.items[0].isOfferApplied, true);
+      assert.equal(summary.pickupValue, 99);
+      assert.equal(summary.serviceCharge, 0);
+      assert.equal(summary.isServiceChargeWaived, true);
+      assert.equal(summary.totalAmountPayable, 99);
+      assert.equal(summary.totalAmountPayablePaise, 9900);
     });
 
-    it('updates totals immediately when quantities change', () => {
-      const before = calculatePickupSummary([
-        { categoryId: 'paper', categoryName: 'Paper & Cardboard', pricePerKg: 14, weightKg: 2 }, // ₹28
+    it('calculates multiple materials where some exceed 7 kg and others do not', () => {
+      const summary = calculatePickupSummary([
+        { categoryId: 'ewaste', categoryName: 'E-Waste', pricePerKg: 1, weightKg: 5 },           // ₹5 (<= 7 kg)
+        { categoryId: 'household', categoryName: 'Household Dry Waste', pricePerKg: 8, weightKg: 3 }, // ₹24 (<= 7 kg)
+        { categoryId: 'paper', categoryName: 'Paper & Cardboard', pricePerKg: 14, weightKg: 8 },      // ₹99 (> 7 kg offer)
+        { categoryId: 'plastic', categoryName: 'Plastic Waste', pricePerKg: 18, weightKg: 10 },       // ₹99 (> 7 kg offer)
       ]);
-      assert.equal(before.pickupValue, 28);
-      assert.equal(before.totalAmountPayable, 78);
 
-      const afterIncrease = calculatePickupSummary([
-        { categoryId: 'paper', categoryName: 'Paper & Cardboard', pricePerKg: 14, weightKg: 6 }, // ₹84
+      // Pickup Value = 5 + 24 + 99 + 99 = ₹227
+      // Total Weight = 5 + 3 + 8 + 10 = 26 kg
+      // Service Charge = ₹0 (waived)
+      // Total Amount Payable = 227 + 0 = ₹227
+      assert.equal(summary.materialCount, 4);
+      assert.equal(summary.totalWeightKg, 26);
+      assert.equal(summary.pickupValue, 227);
+      assert.equal(summary.originalServiceCharge, ORIGINAL_PICKUP_SERVICE_CHARGE);
+      assert.equal(summary.serviceCharge, PICKUP_SERVICE_CHARGE);
+      assert.equal(summary.isServiceChargeWaived, true);
+      assert.equal(summary.totalAmountPayable, 227);
+      assert.equal(summary.totalAmountPayablePaise, 22700);
+
+      // Verify individual items
+      assert.equal(summary.items[0].materialAmount, 5);
+      assert.equal(summary.items[0].isOfferApplied, false);
+      assert.equal(summary.items[1].materialAmount, 24);
+      assert.equal(summary.items[1].isOfferApplied, false);
+      assert.equal(summary.items[2].materialAmount, 99);
+      assert.equal(summary.items[2].isOfferApplied, true);
+      assert.equal(summary.items[3].materialAmount, 99);
+      assert.equal(summary.items[3].isOfferApplied, true);
+    });
+
+    it('updates totals immediately when quantities cross the 7 kg threshold', () => {
+      // 6 kg at ₹14/kg = ₹84
+      const at6kg = calculatePickupSummary([
+        { categoryId: 'paper', categoryName: 'Paper & Cardboard', pricePerKg: 14, weightKg: 6 },
       ]);
-      assert.equal(afterIncrease.totalWeightKg, 6);
-      assert.equal(afterIncrease.pickupValue, 84);
-      assert.equal(afterIncrease.totalAmountPayable, 134);
+      assert.equal(at6kg.pickupValue, 84);
+      assert.equal(at6kg.totalAmountPayable, 84);
+      assert.equal(at6kg.items[0].isOfferApplied, false);
+
+      // 7 kg at ₹14/kg = ₹98
+      const at7kg = calculatePickupSummary([
+        { categoryId: 'paper', categoryName: 'Paper & Cardboard', pricePerKg: 14, weightKg: 7 },
+      ]);
+      assert.equal(at7kg.pickupValue, 98);
+      assert.equal(at7kg.totalAmountPayable, 98);
+      assert.equal(at7kg.items[0].isOfferApplied, false);
+
+      // 8 kg at ₹14/kg -> ₹99 offer price applied
+      const at8kg = calculatePickupSummary([
+        { categoryId: 'paper', categoryName: 'Paper & Cardboard', pricePerKg: 14, weightKg: 8 },
+      ]);
+      assert.equal(at8kg.totalWeightKg, 8);
+      assert.equal(at8kg.pickupValue, 99);
+      assert.equal(at8kg.totalAmountPayable, 99);
+      assert.equal(at8kg.items[0].isOfferApplied, true);
     });
 
     it('filters out zero, negative, or invalid weights safely', () => {
@@ -347,8 +463,19 @@ describe('Authoritative Pricing Engine', () => {
       assert.equal(summary.materialCount, 1);
       assert.equal(summary.totalWeightKg, 2);
       assert.equal(summary.pickupValue, 36);
-      assert.equal(summary.serviceCharge, 50);
-      assert.equal(summary.totalAmountPayable, 86);
+      assert.equal(summary.serviceCharge, 0);
+      assert.equal(summary.isServiceChargeWaived, true);
+      assert.equal(summary.totalAmountPayable, 36);
+    });
+
+    it('honors explicitly passed non-zero service charge if requested', () => {
+      const summary = calculatePickupSummary(
+        [{ categoryId: 'plastic', categoryName: 'Plastic', pricePerKg: 18, weightKg: 2 }],
+        50.0
+      );
+      assert.equal(summary.serviceCharge, 50.0);
+      assert.equal(summary.isServiceChargeWaived, false);
+      assert.equal(summary.totalAmountPayable, 86.0);
     });
   });
 });

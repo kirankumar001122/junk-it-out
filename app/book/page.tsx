@@ -34,7 +34,7 @@ import {
 } from '@/lib/validations/serviceArea';
 import { loadRazorpayScript } from '@/lib/razorpayClient';
 import { isCustomerWasteCategory, getMaterialImageUrl, subscribeWasteCategoriesChanged } from '@/lib/customerWasteCategories';
-import { calculateBookingTotalPayable, calculatePickupSummary, PICKUP_SERVICE_CHARGE } from '@/lib/pricing';
+import { calculateBookingTotalPayable, calculatePickupSummary, calculateMaterialItemAmount, SPECIAL_MATERIAL_THRESHOLD_KG, PICKUP_SERVICE_CHARGE } from '@/lib/pricing';
 
 // Small category images used in the booking cards.
 const CATEGORY_IMAGES: Record<string, string> = {
@@ -1677,13 +1677,18 @@ export default function BookingPage() {
               <div className="space-y-1.5 text-xs">
                 {selectedItems.map((item) => {
                   const cat = categories.find((c) => c.id === item.categoryId);
-                  const itemAmount = Math.round(((Number(cat?.pricePerKg || 0) * Number(item.estimatedWeight || 0)) + Number.EPSILON) * 100) / 100;
+                  const itemAmount = calculateMaterialItemAmount(
+                    Number(item.estimatedWeight || 0),
+                    Number(cat?.pricePerKg || 0)
+                  ).materialAmount;
                   return (
                     <div key={item.categoryId} className="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-200/80">
                       <div>
                         <span className="font-bold text-slate-900 text-xs block">{cat?.name}</span>
                         <span className="text-[10px] text-slate-500 font-medium">
-                          ₹{cat?.pricePerKg}/kg × {item.estimatedWeight} kg
+                          {item.estimatedWeight > SPECIAL_MATERIAL_THRESHOLD_KG
+                            ? `₹99.00 (${item.estimatedWeight} kg)`
+                            : `₹${cat?.pricePerKg}/kg × ${item.estimatedWeight} kg`}
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
@@ -1720,7 +1725,10 @@ export default function BookingPage() {
             </div>
             <div className="flex items-center justify-between text-xs text-slate-300">
               <span>Service Charge:</span>
-              <span className="font-semibold text-white">₹{estimate.baseCharge.toFixed(2)}</span>
+              <div className="flex items-center gap-2">
+                <span className="line-through text-slate-500 font-medium">₹50.00</span>
+                <span className="font-bold text-emerald-400">FREE</span>
+              </div>
             </div>
             <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between text-sm font-bold">
               <span>Total Amount Payable:</span>
