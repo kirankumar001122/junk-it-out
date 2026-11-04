@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import {
   Package,
@@ -40,6 +41,11 @@ const isCustomerCancellable = (status?: string): boolean => {
 };
 
 export default function MyPickupsPage() {
+  const [hasMounted, setHasMounted] = useState(false);
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
+
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'ALL' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED'>('ALL');
@@ -690,10 +696,11 @@ export default function MyPickupsPage() {
                           setCancelError(null);
                           setCancellingOrder(o);
                         }}
-                        className="btn-glossy-danger rounded-full text-xs font-bold px-4 py-2 shadow-xs flex items-center gap-1"
+                        className="btn-glossy-danger rounded-full text-xs font-bold px-4 py-2 shadow-xs flex items-center gap-1.5 min-h-[38px] touch-manipulation cursor-pointer"
+                        aria-label="Cancel Order"
                       >
                         <XCircle className="w-3.5 h-3.5" />
-                        Cancel
+                        Cancel Order
                       </button>
                     )}
 
@@ -713,12 +720,18 @@ export default function MyPickupsPage() {
       )}
 
       {/* CANCELLATION MODAL */}
-      {cancellingOrder && (
+      {cancellingOrder && hasMounted && createPortal(
         <div
           role="dialog"
           aria-modal="true"
           aria-labelledby="cancel-pickup-dialog-title"
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6 overflow-y-auto pb-[calc(1rem+env(safe-area-inset-bottom,0px))]"
+          className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 overflow-hidden"
+          style={{
+            paddingTop: 'max(0.75rem, env(safe-area-inset-top, 0.75rem))',
+            paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom, 0.75rem))',
+            paddingLeft: 'max(0.75rem, env(safe-area-inset-left, 0.75rem))',
+            paddingRight: 'max(0.75rem, env(safe-area-inset-right, 0.75rem))',
+          }}
         >
           {/* Backdrop overlay: blurs background page content only, dismissible on click */}
           <div
@@ -728,15 +741,17 @@ export default function MyPickupsPage() {
             aria-hidden="true"
           />
 
-          {/* Modal content: completely sharp, isolated from backdrop filter, scrollable on short mobile viewports */}
+          {/* Modal content: responsive layout with pinned header & footer and scrollable body */}
           <div
-            className="relative z-10 bg-white rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl border border-slate-100 my-auto max-h-[calc(100dvh-2rem)] overflow-y-auto"
+            className="relative z-10 bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-100 flex flex-col max-h-[min(90dvh,600px)] overflow-hidden my-auto"
             style={{ transform: 'translateZ(0)' }}
+            onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+            {/* Pinned Header */}
+            <div className="shrink-0 flex items-center justify-between px-5 pt-4 pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2 text-rose-600 font-extrabold text-base">
-                <AlertTriangle className="w-5 h-5" />
-                <h3 id="cancel-pickup-dialog-title" className="text-slate-900 font-black">
+                <AlertTriangle className="w-5 h-5 shrink-0" />
+                <h3 id="cancel-pickup-dialog-title" className="text-slate-900 font-black text-base">
                   Cancel Pickup Order
                 </h3>
               </div>
@@ -744,75 +759,79 @@ export default function MyPickupsPage() {
                 type="button"
                 onClick={() => !cancelLoading && setCancellingOrder(null)}
                 disabled={cancelLoading}
-                className="p-1 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors touch-manipulation cursor-pointer disabled:opacity-50"
                 aria-label="Close dialog"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Are you sure you want to cancel pickup order{" "}
-              <strong className="text-slate-900 font-mono">#{cancellingOrder.orderNumber}</strong>?
-            </p>
+            {/* Scrollable Content Body */}
+            <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 space-y-4 text-left">
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Are you sure you want to cancel pickup order{" "}
+                <strong className="text-slate-900 font-mono">#{cancellingOrder.orderNumber}</strong>?
+              </p>
 
-            {cancellingOrder.paymentStatus === 'CAPTURED' && (
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-xs text-amber-900">
-                <span className="font-bold block">Prepaid Order Refund</span>
-                Your paid amount of ₹{(cancellingOrder.finalAmount || cancellingOrder.estimatedTotal || 0).toFixed(2)} will be automatically queued for a 100% refund to your original payment method.
+              {cancellingOrder.paymentStatus === 'CAPTURED' && (
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-xs text-amber-900">
+                  <span className="font-bold block">Prepaid Order Refund</span>
+                  Your paid amount of ₹{(cancellingOrder.finalAmount || cancellingOrder.estimatedTotal || 0).toFixed(2)} will be automatically queued for a 100% refund to your original payment method.
+                </div>
+              )}
+
+              {cancelError && (
+                <div role="alert" className="bg-rose-50 border border-rose-200 rounded-2xl p-3 text-xs text-rose-800 font-semibold flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <span>{cancelError}</span>
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <label htmlFor="modal-cancel-reason-select" className="text-xs font-bold text-slate-700 block">
+                  Reason for cancellation:
+                </label>
+                <select
+                  id="modal-cancel-reason-select"
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  disabled={cancelLoading}
+                  className="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-rose-500 touch-manipulation"
+                >
+                  <option value="Need to reschedule for another time">Need to reschedule for another time</option>
+                  <option value="Scrap/junk items are no longer available">Scrap/junk items are no longer available</option>
+                  <option value="Placed order by mistake / testing">Placed order by mistake / testing</option>
+                  <option value="Assigned agent is delayed or taking too long">Assigned agent is delayed or taking too long</option>
+                  <option value="Found alternative disposal method">Found alternative disposal method</option>
+                  <option value="Other">Other</option>
+                </select>
               </div>
-            )}
 
-            {cancelError && (
-              <div role="alert" className="bg-rose-50 border border-rose-200 rounded-2xl p-3 text-xs text-rose-800 font-semibold flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                <span>{cancelError}</span>
-              </div>
-            )}
-
-            <div className="space-y-1.5">
-              <label htmlFor="modal-cancel-reason-select" className="text-xs font-bold text-slate-700 block">
-                Reason for cancellation:
-              </label>
-              <select
-                id="modal-cancel-reason-select"
-                value={cancelReason}
-                onChange={(e) => setCancelReason(e.target.value)}
-                disabled={cancelLoading}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-rose-500"
-              >
-                <option value="Need to reschedule for another time">Need to reschedule for another time</option>
-                <option value="Scrap/junk items are no longer available">Scrap/junk items are no longer available</option>
-                <option value="Placed order by mistake / testing">Placed order by mistake / testing</option>
-                <option value="Assigned agent is delayed or taking too long">Assigned agent is delayed or taking too long</option>
-                <option value="Found alternative disposal method">Found alternative disposal method</option>
-                <option value="Other">Other</option>
-              </select>
+              {cancelReason === 'Other' && (
+                <div className="space-y-1.5">
+                  <label htmlFor="modal-custom-cancel-reason" className="text-xs font-bold text-slate-700 block">
+                    Please specify:
+                  </label>
+                  <textarea
+                    id="modal-custom-cancel-reason"
+                    value={customCancelReason}
+                    onChange={(e) => setCustomCancelReason(e.target.value)}
+                    placeholder="Tell us why you are cancelling this pickup..."
+                    rows={3}
+                    disabled={cancelLoading}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-800 focus:ring-2 focus:ring-rose-500 touch-manipulation"
+                  />
+                </div>
+              )}
             </div>
 
-            {cancelReason === 'Other' && (
-              <div className="space-y-1.5">
-                <label htmlFor="modal-custom-cancel-reason" className="text-xs font-bold text-slate-700 block">
-                  Please specify:
-                </label>
-                <textarea
-                  id="modal-custom-cancel-reason"
-                  value={customCancelReason}
-                  onChange={(e) => setCustomCancelReason(e.target.value)}
-                  placeholder="Tell us why you are cancelling this pickup..."
-                  rows={3}
-                  disabled={cancelLoading}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-800 focus:ring-2 focus:ring-rose-500"
-                />
-              </div>
-            )}
-
-            <div className="flex gap-2.5 pt-2">
+            {/* Pinned Footer Actions */}
+            <div className="shrink-0 px-5 pt-3 pb-4 border-t border-slate-100 flex gap-2.5 bg-slate-50/50">
               <button
                 type="button"
                 onClick={() => setCancellingOrder(null)}
                 disabled={cancelLoading}
-                className="w-1/2 btn-glossy-secondary rounded-full font-bold text-xs py-3 shadow-xs"
+                className="w-1/2 min-h-[44px] btn-glossy-secondary rounded-full font-bold text-xs py-2.5 px-3 shadow-xs flex items-center justify-center touch-manipulation cursor-pointer"
               >
                 Keep Pickup
               </button>
@@ -821,12 +840,12 @@ export default function MyPickupsPage() {
                 type="button"
                 onClick={handleCancelOrder}
                 disabled={cancelLoading}
-                className="w-1/2 btn-glossy-danger rounded-full font-bold text-xs py-3 shadow-md flex items-center justify-center gap-1.5"
+                className="w-1/2 min-h-[44px] btn-glossy-danger rounded-full font-bold text-xs py-2.5 px-3 shadow-md flex items-center justify-center gap-1.5 touch-manipulation cursor-pointer"
               >
                 {cancelLoading ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
-                    Cancelling...
+                    <span>Cancelling...</span>
                   </>
                 ) : (
                   'Confirm Cancellation'
@@ -834,7 +853,8 @@ export default function MyPickupsPage() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       <CustomerOtpLogin
