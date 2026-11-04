@@ -31,7 +31,9 @@ import { clearPickupCart, pickupCartEvent, readPickupCart, replacePickupCart } f
 import { getSelectedLocation, setSelectedLocation, LOCATION_CHANGE_EVENT } from '@/lib/selectedLocation';
 import {
   SERVICE_AREA_UNAVAILABLE_MESSAGE,
+  validateServiceArea,
 } from '@/lib/validations/serviceArea';
+import { getCachedClientJson } from '@/lib/clientRequestCache';
 import { loadRazorpayScript } from '@/lib/razorpayClient';
 import { isCustomerWasteCategory, getMaterialImageUrl, subscribeWasteCategoriesChanged } from '@/lib/customerWasteCategories';
 import { calculateBookingTotalPayable, calculatePickupSummary, PICKUP_SERVICE_CHARGE } from '@/lib/pricing';
@@ -199,12 +201,16 @@ export default function BookingPage() {
     } catch {}
   };
 
-  const checkAuth = async () => {
+  const checkAuth = async (force = false) => {
     setCheckingAuth(true);
     try {
-      const res = await fetch('/api/auth/me');
-      const data = await res.json();
-      if (res.ok && data?.success && data?.data?.user?.role === 'CUSTOMER') {
+      const data = await getCachedClientJson<any>(
+        'authenticated-user',
+        '/api/auth/me',
+        10_000,
+        { cache: 'no-store', force }
+      );
+      if (data?.success && data?.data?.user?.role === 'CUSTOMER') {
         setIsCustomer(true);
         setPhone(data.data.user.phone || '');
         setName(getDisplayName(data.data.user));
@@ -212,13 +218,11 @@ export default function BookingPage() {
         setIsCustomer(false);
         setPhone('');
         setName('');
-        setLoginOpen(true);
       }
     } catch {
       setIsCustomer(false);
       setPhone('');
       setName('');
-      setLoginOpen(true);
     } finally {
       setCheckingAuth(false);
     }
@@ -229,8 +233,12 @@ export default function BookingPage() {
     checkAuth();
     loadLocationFromStore();
 
-    fetch('/api/waste-categories?customer=true', { cache: 'no-store' })
-      .then((res) => res.json())
+    getCachedClientJson<any>(
+      'public-customer-waste-categories',
+      '/api/waste-categories?customer=true',
+      15_000,
+      { cache: 'no-store' }
+    )
       .then((data) => {
         if (data.success && Array.isArray(data.data)) {
           const availableCategories = data.data.filter(isCustomerWasteCategory);
@@ -296,7 +304,8 @@ export default function BookingPage() {
       loadLocationFromStore();
     };
 
-    window.addEventListener('jio_auth_change', checkAuth);
+    const handleAuthChange = () => { void checkAuth(true); };
+    window.addEventListener('jio_auth_change', handleAuthChange);
     window.addEventListener(LOCATION_CHANGE_EVENT, handleLocUpdate);
     const unsubscribeWasteCategories = subscribeWasteCategoriesChanged(() => {
       fetch('/api/waste-categories?customer=true', { cache: 'no-store' })
@@ -310,13 +319,34 @@ export default function BookingPage() {
     });
 
     return () => {
-      window.removeEventListener('jio_auth_change', checkAuth);
+      window.removeEventListener('jio_auth_change', handleAuthChange);
       window.removeEventListener(LOCATION_CHANGE_EVENT, handleLocUpdate);
       unsubscribeWasteCategories();
     };
   }, []);
 
   const runGeofenceCheck = async (targetLat: number, targetLng: number, areaName?: string) => {
+    // 1. Instant synchronous validation
+    const syncCheck = validateServiceArea({
+      lat: targetLat,
+      lng: targetLng,
+      area: areaName || area,
+    });
+
+    if (syncCheck.serviceable && syncCheck.zone) {
+      const instantResult = {
+        serviceable: true,
+        zone: syncCheck.zone,
+        message: syncCheck.message,
+      };
+      setGeofenceResult(instantResult);
+      if (syncCheck.zone.name) {
+        setArea(syncCheck.zone.name);
+      }
+      return instantResult;
+    }
+
+    // 2. If synchronous check rejects, query server for dynamic confirmation
     try {
       const res = await fetch('/api/service-areas/check', {
         method: 'POST',
@@ -341,7 +371,7 @@ export default function BookingPage() {
     } catch (e) {
       const result = {
         serviceable: false,
-        message: 'Unable to verify service area. Please check network connection.',
+        message: syncCheck.message || SERVICE_AREA_UNAVAILABLE_MESSAGE,
       };
       setGeofenceResult(result);
       return result;
@@ -1338,7 +1368,7 @@ export default function BookingPage() {
                 setErrorMsg('');
                 setStep(2);
               }}
-              className="btn-glossy-primary rounded-full w-full sm:w-auto text-xs font-bold px-7 py-3.5 shadow-md flex items-center justify-center gap-2 cursor-pointer"
+              className="btn-glossy-primary rounded-full w-full sm:w-auto text-xs font-bold px-7 py-3.5 shadow-md flex items-center justify-center gap-2 cursor-pointer touch-manipulation select-none active:scale-95 transition-transform"
             >
               Continue to Location & Time
               <ArrowRight className="w-4 h-4 text-emerald-200" />
@@ -1612,7 +1642,7 @@ export default function BookingPage() {
                 setErrorMsg('');
                 setStep(3);
               }}
-              className="bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white font-bold text-xs px-6 py-3 rounded-xl shadow-sm flex items-center gap-2 cursor-pointer transition-all active:scale-95"
+              className="btn-glossy-dark rounded-xl text-white font-bold text-xs px-6 py-3 shadow-sm flex items-center gap-2 cursor-pointer transition-transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation select-none"
             >
               View Summary & Pay
               <ArrowRight className="w-4 h-4 text-emerald-400" />

@@ -76,7 +76,8 @@ export const GlossyButton = forwardRef<HTMLButtonElement, GlossyButtonProps>(
       <button
         ref={ref}
         disabled={disabled || loading}
-        className={`${baseClass} ${variantClass} ${shapeClass} ${sizeClass} ${className}`.trim()}
+        aria-busy={loading ? 'true' : undefined}
+        className={`${baseClass} ${variantClass} ${shapeClass} ${sizeClass} touch-manipulation select-none cursor-pointer ${loading ? 'opacity-80 cursor-wait' : ''} ${className}`.trim()}
         {...props}
       >
         {loading ? (

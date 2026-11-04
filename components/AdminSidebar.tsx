@@ -124,8 +124,9 @@ export default function AdminSidebar() {
             <Link
               key={item.href}
               href={item.href}
+              prefetch={true}
               onClick={() => setMobileOpen(false)}
-              className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-all ${
+              className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl touch-manipulation select-none active:scale-95 transition-transform ${
                 isActive
                   ? 'bg-emerald-600 text-white font-bold shadow-md shadow-emerald-600/20'
                   : 'hover:bg-slate-800/80 text-slate-400 hover:text-slate-200'

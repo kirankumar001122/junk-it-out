@@ -126,10 +126,10 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
       getCachedClientJson<any>(
         'public-customer-waste-categories',
         '/api/waste-categories?customer=true',
-        5_000,
+        15_000,
         { cache: 'no-store' }
       ),
-      checkAuth(true),
+      checkAuth(false),
     ])
       .then(([categoryData]) => {
         setCategories(
