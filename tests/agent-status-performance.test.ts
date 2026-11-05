@@ -1,53 +1,67 @@
 import assert from 'node:assert/strict';
-import { NextRequest } from 'next/server';
-import { PATCH as updateStatus } from '../app/api/agent/status/route';
-import { reconcileUndispatchedPaidOrders } from '../lib/payments/dispatchRecovery';
-import { db } from '../lib/db';
-import { signToken } from '../lib/auth/jwt';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const Module = require('node:module');
+const originalResolve = Module._resolveFilename;
+Module._resolveFilename = function (request: string, parent: any, isMain: boolean, options: any) {
+  if (request === 'server-only') {
+    return require.resolve('../package.json');
+  }
+  return originalResolve.call(this, request, parent, isMain, options);
+};
 
 process.env.JWT_SECRET = 'test-agent-status-secret-key-2026';
 
-const database = db as any;
-
-function createAgentToken(agentId: string = 'agent-stat-1', userId: string = 'user-stat-1') {
-  return signToken({
-    userId,
-    phone: '+919876543210',
-    name: 'Status Test Agent',
-    role: 'AGENT',
-    customerId: null,
-    agentId,
-    adminId: null,
-    tokenVersion: 1,
-  });
-}
-
-function makeStatusRequest(status: string, token: string = createAgentToken()) {
-  return new NextRequest('http://localhost:3000/api/agent/status', {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ status }),
-  });
-}
-
 async function runTests() {
+  const { NextRequest } = await import('next/server');
+  const { PATCH: updateStatus } = await import('../app/api/agent/status/route');
+  const { reconcileUndispatchedPaidOrders } = await import('../lib/payments/dispatchRecovery');
+  const { db } = await import('../lib/db');
+  const { signToken } = await import('../lib/auth/jwt');
+
+  const database = db as any;
+
+  function createAgentToken(agentId: string = 'agent-stat-1', userId: string = 'user-stat-1') {
+    return signToken({
+      userId,
+      phone: '+919876543210',
+      name: 'Status Test Agent',
+      role: 'AGENT',
+      customerId: null,
+      agentId,
+      adminId: null,
+      tokenVersion: 1,
+    });
+  }
+
+  function makeStatusRequest(status: string, token: string = createAgentToken()) {
+    return new NextRequest('http://localhost:3000/api/agent/status', {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ status }),
+    });
+  }
+
   console.log('--- STARTING AGENT STATUS & DISPATCH RECOVERY TESTS ---');
 
   const origAgentFindUnique = database.agent.findUnique;
   const origAgentUpdate = database.agent.update;
+  const origUserFindUnique = database.user?.findUnique;
   const origOrderFindFirst = database.order.findFirst;
   const origOrderFindMany = database.order.findMany;
   const origOrderFindUnique = database.order.findUnique;
   const origRefundFindFirst = database.refundAttempt.findFirst;
   const origTransaction = database.$transaction;
 
-  // Mock agent tokenVersion check for middleware
+  // Mock agent & user tokenVersion check for middleware
   database.agent.findUnique = async ({ where }: any) => {
     return { id: where.id, tokenVersion: 1 };
   };
+  database.user = { ...database.user, findUnique: async () => ({ tokenVersion: 1 }) };
 
   try {
     // -------------------------------------------------------------
@@ -202,6 +216,9 @@ async function runTests() {
       const body = await res.json();
       assert.equal(body.data?.status, 'AVAILABLE');
 
+      // Wait a tick for non-blocking background dispatch task to execute
+      await new Promise((r) => setTimeout(r, 50));
+
       // CRITICAL ASSERTION: exactly 1 findMany call was made, NOT 3 sequential calls!
       assert.equal(findManyCallCount, 1, 'Must execute exactly 1 batched query across all service areas');
       assert.deepEqual(searchedAreas, { in: ['JP Nagar', 'Jayanagar', 'Koramangala'] });
@@ -237,12 +254,16 @@ async function runTests() {
       const req = makeStatusRequest('AVAILABLE');
       const res = await updateStatus(req);
       assert.equal(res.status, 200);
+      // Wait a tick for non-blocking background dispatch task to execute
+      await new Promise((r) => setTimeout(r, 50));
       assert.equal(searchedWhere.address?.area, undefined, 'Must not restrict area when agent serves all');
     }
 
     console.log('ALL AGENT STATUS & DISPATCH RECOVERY TESTS PASSED CLEANLY.');
   } finally {
     database.agent.findUnique = origAgentFindUnique;
+    if (database.user && origUserFindUnique) database.user.findUnique = origUserFindUnique;
+    if (database.user) database.user.findUnique = origUserFindUnique;
     database.agent.update = origAgentUpdate;
     database.order.findFirst = origOrderFindFirst;
     database.order.findMany = origOrderFindMany;

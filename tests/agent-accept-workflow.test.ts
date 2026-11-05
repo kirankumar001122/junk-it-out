@@ -466,7 +466,131 @@ async function runTests() {
       assert.equal(fetchOrderDetailsCalls, 1, 'Only falls back to fetch when neither response nor cache has items');
     }
 
-    console.log('--- ALL AGENT ACCEPT PICKUP REGRESSION TESTS PASSED! ---');
+    // 11. Transaction Rollback on Status History Failure
+    console.log('Test 11: Transaction rolls back order and agent changes if status history creation fails...');
+    {
+      let orderRolledBack = false;
+      let agentUpdatedInTx = false;
+      let simulatedAgent = { id: 'agent-123', status: 'AVAILABLE' };
+
+      let simulatedOrder = {
+        id: 'order-rollback-1',
+        orderNumber: 'ORD-RB-1',
+        agentId: null as string | null,
+        status: 'BOOKING_RECEIVED',
+        address: { area: 'Indiranagar' },
+      };
+
+      database.order.findFirst = async () => simulatedOrder;
+      database.order.findUnique = async () => simulatedOrder;
+
+      database.$transaction = async (fn: any) => {
+        const snapshotOrder = { ...simulatedOrder };
+        const snapshotAgent = { ...simulatedAgent };
+        try {
+          return await fn({
+            order: {
+              findFirst: async () => null,
+              updateMany: async ({ data }: any) => {
+                simulatedOrder = { ...simulatedOrder, ...data };
+                return { count: 1 };
+              },
+            },
+            orderStatusHistory: {
+              create: async () => {
+                throw new Error('Simulated database disk failure during history creation');
+              },
+            },
+            agent: {
+              findUnique: async () => simulatedAgent,
+              update: async ({ data }: any) => {
+                simulatedAgent = { ...simulatedAgent, ...data };
+                agentUpdatedInTx = true;
+                return simulatedAgent;
+              },
+            },
+          });
+        } catch (txErr) {
+          simulatedOrder = snapshotOrder;
+          simulatedAgent = snapshotAgent;
+          agentUpdatedInTx = false;
+          orderRolledBack = true;
+          throw txErr;
+        }
+      };
+
+      const req = makeRequest('http://localhost:3000/api/orders/order-rollback-1/accept', {
+        token: createAgentToken('agent-123'),
+      });
+      const res = await acceptOrder(req, { params: Promise.resolve({ id: 'order-rollback-1' }) });
+      assert.equal(res.status, 500, 'Must return 500 when transaction fails');
+      assert.equal(orderRolledBack, true, 'Transaction must catch and trigger rollback');
+      assert.equal(simulatedOrder.status, 'BOOKING_RECEIVED', 'Order status must remain BOOKING_RECEIVED (rolled back)');
+      assert.equal(simulatedOrder.agentId, null, 'Order agentId must remain null (rolled back)');
+      assert.equal(agentUpdatedInTx, false, 'Agent status update must be rolled back if history fails');
+      assert.equal(simulatedAgent.status, 'AVAILABLE', 'Agent status must remain AVAILABLE (rolled back)');
+    }
+
+    // 12. Transaction Rollback on Agent Update Failure
+    console.log('Test 12: Transaction rolls back order and history if agent update fails...');
+    {
+      let orderRolledBack = false;
+      let historyCreatedInTx = false;
+      let simulatedOrder = {
+        id: 'order-rollback-2',
+        orderNumber: 'ORD-RB-2',
+        agentId: null as string | null,
+        status: 'BOOKING_RECEIVED',
+        address: { area: 'Indiranagar' },
+      };
+
+      database.order.findFirst = async () => simulatedOrder;
+      database.order.findUnique = async () => simulatedOrder;
+
+      database.$transaction = async (fn: any) => {
+        const snapshotOrder = { ...simulatedOrder };
+        try {
+          return await fn({
+            order: {
+            findFirst: async () => null,
+            updateMany: async ({ data }: any) => {
+                simulatedOrder = { ...simulatedOrder, ...data };
+                return { count: 1 };
+              },
+            },
+            orderStatusHistory: {
+              create: async () => {
+                historyCreatedInTx = true;
+                return { id: 'hist-temp' };
+              },
+            },
+            agent: {
+            findUnique: async () => ({ id: 'agent-123', status: 'AVAILABLE' }),
+            update: async () => {
+                throw new Error('Simulated database deadlock during agent status update');
+              },
+            },
+          });
+        } catch (txErr) {
+          simulatedOrder = snapshotOrder;
+          historyCreatedInTx = false;
+          orderRolledBack = true;
+          throw txErr;
+        }
+      };
+
+      const req = makeRequest('http://localhost:3000/api/orders/order-rollback-2/accept', {
+        token: createAgentToken('agent-123'),
+      });
+      const res = await acceptOrder(req, { params: Promise.resolve({ id: 'order-rollback-2' }) });
+      assert.equal(res.status, 500, 'Must return 500 when agent update fails in transaction');
+      assert.equal(orderRolledBack, true, 'Transaction must trigger rollback');
+      assert.equal(simulatedOrder.status, 'BOOKING_RECEIVED', 'Order status must remain BOOKING_RECEIVED (rolled back)');
+      assert.equal(simulatedOrder.agentId, null, 'Order agentId must remain null (rolled back)');
+      assert.equal(historyCreatedInTx, false, 'History must not be committed if agent update fails');
+    }
+
+        console.log('--- ALL AGENT ACCEPT PICKUP REGRESSION TESTS PASSED! ---');
   } finally {
     database.agent.findUnique = origAgentFindUnique;
     database.agent.update = origAgentUpdate;

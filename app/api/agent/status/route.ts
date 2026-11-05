@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { reconcileUndispatchedPaidOrders } from '@/lib/payments/dispatchRecovery';
+import { runBackgroundTask } from '@/lib/utils/backgroundTask';
 
 const ALLOWED_STATUSES = ['AVAILABLE', 'OFFLINE', 'ASSIGNED'];
 
@@ -73,19 +74,21 @@ export async function PATCH(req: NextRequest) {
     logTiming('agent update complete');
 
     if (targetStatus === 'AVAILABLE') {
-      try {
-        const areas = (updatedAgent.serviceAreas || '')
-          .split(',')
-          .map((s: string) => s.trim())
-          .filter(Boolean);
-        const servesAllAreas = areas.some((a) => a.toLowerCase() === 'all');
-        await reconcileUndispatchedPaidOrders({
-          serviceAreas: servesAllAreas ? undefined : areas.length > 0 ? areas : undefined,
-          limit: 5,
-        });
-      } catch (err) {
-        console.warn('[AGENT_STATUS] Opportunistic dispatch recovery encountered error:', err);
-      }
+      runBackgroundTask(async () => {
+        try {
+          const areas = (updatedAgent.serviceAreas || '')
+            .split(',')
+            .map((s: string) => s.trim())
+            .filter(Boolean);
+          const servesAllAreas = areas.some((a) => a.toLowerCase() === 'all');
+          await reconcileUndispatchedPaidOrders({
+            serviceAreas: servesAllAreas ? undefined : areas.length > 0 ? areas : undefined,
+            limit: 5,
+          });
+        } catch (err) {
+          console.warn('[AGENT_STATUS] Opportunistic dispatch recovery encountered error:', err);
+        }
+      }, 'AgentStatusDispatchRecovery');
     }
 
     return successResponse({
