@@ -1139,7 +1139,8 @@ export default function AgentDashboardPage() {
   }
 
   const todayPickups = orders.length;
-  const completedCount = orders.filter((o) => ['SETTLEMENT_COMPLETED', 'PICKUP_COMPLETED'].includes(o.status)).length;
+  const completedPickups = orders.filter((o) => ['SETTLEMENT_COMPLETED', 'PICKUP_COMPLETED'].includes(o.status));
+  const completedCount = completedPickups.length;
   const pendingCount = todayPickups - completedCount;
 
   return (
@@ -1460,6 +1461,58 @@ export default function AgentDashboardPage() {
           <Truck className="w-12 h-12 text-slate-600 mx-auto" />
           <h3 className="font-bold text-white text-base">No Active Pickup Assigned</h3>
           <p className="text-xs text-slate-400">You are on duty in Bengaluru. New orders will appear here automatically.</p>
+        </div>
+      )}
+
+      {/* RECENT COMPLETED PICKUPS & SETTLEMENTS */}
+      {completedPickups.length > 0 && (
+        <div className="mx-4 mt-6 space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-xs font-bold text-slate-400 uppercase">
+              Completed Pickups ({completedPickups.length})
+            </span>
+            <span className="text-[11px] text-emerald-400 font-semibold">
+              Today's Completed
+            </span>
+          </div>
+
+          <div className="space-y-2.5">
+            {completedPickups.slice(0, 5).map((co: any) => {
+              const totalKg = (co.items || []).reduce(
+                (sum: number, it: any) => sum + (Number(it.actualWeight || it.estimatedWeight) || 0),
+                0
+              );
+              return (
+                <div
+                  key={co.id}
+                  className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-3.5 space-y-1.5 shadow-sm"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-bold text-white">
+                      #{co.orderNumber || (co.id ? co.id.slice(-8) : '')}
+                    </span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/80">
+                      {co.status === 'SETTLEMENT_COMPLETED' ? 'SETTLED' : 'COMPLETED'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-slate-400">
+                    <span>📍 {co.address?.area || 'Bengaluru'}</span>
+                    <span className="text-slate-300 font-semibold">
+                      {totalKg > 0 ? `${totalKg.toFixed(1)} kg` : 'Weighed'}
+                    </span>
+                  </div>
+                  {typeof co.finalAmount === 'number' && co.finalAmount > 0 && (
+                    <div className="pt-1.5 border-t border-slate-700/50 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400">Settlement Amount:</span>
+                      <span className="font-bold text-emerald-400 font-mono">
+                        ₹{Number(co.finalAmount).toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
