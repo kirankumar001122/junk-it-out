@@ -339,10 +339,9 @@ export default function HomePage() {
                     >
 
                       <Link
-                        href={`/book?category=${encodeURIComponent(
-                          category.id
-                        )}`}
-                        className="flex flex-col"
+                        href={`/book?category=${encodeURIComponent(category.id)}`}
+                        prefetch={true}
+                        className="flex flex-col touch-manipulation"
                       >
 
                         {category.name === 'Household Dry Waste' ? (
@@ -432,7 +431,7 @@ export default function HomePage() {
 
                           <button
                             onClick={() => addCategory(category)}
-                            className="btn-glossy-dark rounded-full h-10 w-full text-xs font-bold uppercase tracking-wider shadow-sm"
+                            className="btn-glossy-dark rounded-full h-10 w-full text-xs font-bold uppercase tracking-wider shadow-sm touch-manipulation select-none active:scale-95 transition-transform"
                           >
                             <Plus className="h-4 w-4" />
                             ADD
@@ -459,7 +458,7 @@ export default function HomePage() {
                               }
 
                             }}
-                            className="btn-glossy-secondary rounded-full h-7 w-7 text-slate-700 p-0 grid place-items-center shadow-xs"
+                            className="btn-glossy-secondary rounded-full h-7 w-7 text-slate-700 p-0 grid place-items-center shadow-xs touch-manipulation select-none active:scale-90 transition-transform"
                             aria-label="Decrease quantity"
                           >
                             <Minus className="h-3.5 w-3.5" />
@@ -479,7 +478,7 @@ export default function HomePage() {
                                 quantity + 1
                               )
                             }
-                            className="btn-glossy-primary rounded-full h-7 w-7 text-white p-0 grid place-items-center shadow-xs"
+                            className="btn-glossy-primary rounded-full h-7 w-7 text-white p-0 grid place-items-center shadow-xs touch-manipulation select-none active:scale-90 transition-transform"
                             aria-label="Increase quantity"
                           >
                             <Plus className="h-3.5 w-3.5" />

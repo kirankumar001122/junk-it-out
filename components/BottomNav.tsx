@@ -32,7 +32,8 @@ export default function BottomNav() {
               <Link
                 key={link.href}
                 href={link.href}
-                className="flex flex-col items-center justify-center -mt-4 group"
+                prefetch={true}
+                className="flex flex-col items-center justify-center -mt-4 group touch-manipulation select-none"
               >
                 <div className="w-11 h-11 rounded-xl bg-slate-900 text-white flex items-center justify-center shadow-md shadow-slate-900/20 border-2 border-white group-active:scale-95 transition-transform">
                   <Icon className="w-5 h-5 text-emerald-400" />
@@ -46,7 +47,8 @@ export default function BottomNav() {
             <Link
               key={link.href}
               href={link.href}
-              className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all ${
+              prefetch={true}
+              className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl touch-manipulation select-none active:scale-95 transition-transform ${
                 isActive ? 'text-emerald-700 font-bold bg-emerald-50/60' : 'text-slate-500 font-medium hover:text-slate-900'
               }`}
             >

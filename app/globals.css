@@ -27,8 +27,10 @@ button,
 a,
 input,
 select,
-textarea {
+textarea,
+[role="button"] {
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 :focus-visible {
@@ -633,6 +635,7 @@ textarea {
   text-decoration: none;
   cursor: pointer;
   user-select: none;
+  touch-action: manipulation;
   border-radius: 9999px; /* Pill curved default */
   overflow: hidden;
   transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
@@ -756,6 +759,16 @@ textarea {
               0 6px 20px -2px rgba(16, 185, 129, 0.52);
   transform: translateY(-1.5px);
 }
+.btn-glossy:active,
+.btn-glossy-primary:active,
+.btn-glossy-dark:active,
+.btn-glossy-secondary:active,
+.btn-glossy-danger:active,
+.btn-glossy-amber:active,
+.btn-glossy-blue:active {
+  transform: translateY(1.5px) scale(0.975);
+}
+
 .btn-glossy-primary:active {
   box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.35),
               0 2px 6px -1px rgba(16, 185, 129, 0.35);

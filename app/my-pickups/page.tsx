@@ -154,8 +154,20 @@ export default function MyPickupsPage() {
       const data = await res.json().catch(() => ({}));
 
       if (res.ok && data.success) {
+        const cancelledId = cancellingOrder.id;
         setCancellingOrder(null);
         setCustomCancelReason('');
+        setOrders((prev) =>
+          prev.map((o) =>
+            o.id === cancelledId
+              ? {
+                  ...o,
+                  status: 'CANCELLED',
+                  paymentStatus: o.paymentStatus === 'CAPTURED' ? 'REFUND_PENDING' : o.paymentStatus,
+                }
+              : o
+          )
+        );
         try {
           if (typeof window !== 'undefined') {
             const raw = sessionStorage.getItem('jio_pending_order');
@@ -168,7 +180,7 @@ export default function MyPickupsPage() {
             }
           }
         } catch {}
-        await fetchOrders();
+        void fetchOrders();
       } else {
         setCancelError(
           getApiErrorMessage(
