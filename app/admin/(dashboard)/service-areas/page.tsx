@@ -67,7 +67,7 @@ export default function AdminServiceAreasPage() {
         setAreas(areas.map((a) => (a.id === pendingArea.id ? { ...a, status: pendingArea.nextStatus } : a)));
         setPendingArea(null);
       } else {
-        alert(data?.message || 'Failed to update service area status.');
+        alert(data?.error?.message || data?.message || 'Failed to update service area status.');
       }
     } catch (e: any) {
       alert(e.message || 'Error updating service area status.');

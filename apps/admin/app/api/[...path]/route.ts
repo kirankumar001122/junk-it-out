@@ -35,10 +35,17 @@ async function handleProxy(req: NextRequest, props: Props) {
   const accept = incomingHeaders.get('accept');
   if (accept) headers.set('accept', accept);
 
-  if (rawCookie) {
-    headers.set('cookie', rawCookie);
-  } else if (token) {
-    headers.set('cookie', `jio_token=${token}`);
+  let cookieHeader = rawCookie;
+  if (token) {
+    if (!cookieHeader.includes('jio_token=')) {
+      cookieHeader = cookieHeader ? `${cookieHeader}; jio_token=${token}` : `jio_token=${token}`;
+    }
+    if (!cookieHeader.includes('jio_admin_token=')) {
+      cookieHeader = cookieHeader ? `${cookieHeader}; jio_admin_token=${token}` : `jio_admin_token=${token}`;
+    }
+  }
+  if (cookieHeader) {
+    headers.set('cookie', cookieHeader);
   }
 
   const rawAuth = incomingHeaders.get('authorization');
