@@ -449,15 +449,16 @@ database.user = { ...database.user, findUnique: async () => ({ tokenVersion: 1 }
 
       // Simulate API rejection
       const data = { success: false, error: { message: 'Order is assigned to another agent.' } };
-      const action = 'arrive';
-
-      if (action === 'accept' || action === 'start' || action === 'arrive') {
-        activeOrder = previousActiveOrder;
-        orders = previousOrders;
-        if (action === 'arrive') {
-          showWeighModal = false;
+      const handleRollback = (action: 'accept' | 'start' | 'arrive') => {
+        if (action === 'accept' || action === 'start' || action === 'arrive') {
+          activeOrder = previousActiveOrder;
+          orders = previousOrders;
+          if (action === 'arrive') {
+            showWeighModal = false;
+          }
         }
-      }
+      };
+      handleRollback('arrive');
       statusNotice = data.error?.message || 'Failed to perform arrive action.';
       actionLoading = null;
       actionRequestRef = false;
@@ -486,15 +487,16 @@ database.user = { ...database.user, findUnique: async () => ({ tokenVersion: 1 }
       orders = [activeOrder];
 
       const err = new DOMException('The operation was aborted.', 'AbortError');
-      const action = 'arrive';
-
-      if (action === 'accept' || action === 'start' || action === 'arrive') {
-        activeOrder = previousActiveOrder;
-        orders = previousOrders;
-        if (action === 'arrive') {
-          showWeighModal = false;
+      const handleRollback = (action: 'accept' | 'start' | 'arrive') => {
+        if (action === 'accept' || action === 'start' || action === 'arrive') {
+          activeOrder = previousActiveOrder;
+          orders = previousOrders;
+          if (action === 'arrive') {
+            showWeighModal = false;
+          }
         }
-      }
+      };
+      handleRollback('arrive');
       statusNotice = err instanceof DOMException && err.name === 'AbortError'
         ? 'The action timed out. Please check the order status and try again.'
         : 'Network error while processing action. Please try again.';

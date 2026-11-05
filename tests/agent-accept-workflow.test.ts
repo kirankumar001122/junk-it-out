@@ -486,11 +486,12 @@ async function runTests() {
 
       database.$transaction = async (fn: any) => {
         const snapshotOrder = { ...simulatedOrder };
+        const snapshotAgent = { ...simulatedAgent };
         try {
           return await fn({
             order: {
-            findFirst: async () => null,
-            updateMany: async ({ data }: any) => {
+              findFirst: async () => null,
+              updateMany: async ({ data }: any) => {
                 simulatedOrder = { ...simulatedOrder, ...data };
                 return { count: 1 };
               },
@@ -501,15 +502,18 @@ async function runTests() {
               },
             },
             agent: {
-            findUnique: async () => ({ id: 'agent-123', status: 'AVAILABLE' }),
-            update: async () => {
-                agentUpdateCalled = true;
-                return {};
+              findUnique: async () => simulatedAgent,
+              update: async ({ data }: any) => {
+                simulatedAgent = { ...simulatedAgent, ...data };
+                agentUpdatedInTx = true;
+                return simulatedAgent;
               },
             },
           });
         } catch (txErr) {
           simulatedOrder = snapshotOrder;
+          simulatedAgent = snapshotAgent;
+          agentUpdatedInTx = false;
           orderRolledBack = true;
           throw txErr;
         }

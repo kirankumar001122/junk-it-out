@@ -721,10 +721,282 @@ async function runTests() {
       assert.equal(invoiceCreated, true);
     }
 
+    // TEST 11: Rejects non-existent order with 404
+    console.log('Test 11: Rejects non-existent order with 404 ORDER_NOT_FOUND...');
+    {
+      database.order.findUnique = async () => null;
+
+      const req = makeRequest('http://localhost:3000/api/orders/order-missing-999/complete', {
+        token: createAgentToken('agent-123'),
+        body: { actualWeights: [{ itemId: 'item-1', categoryId: 'cat-1', actualWeight: 5 }] },
+      });
+      const res = await completeOrder(req, { params: Promise.resolve({ id: 'order-missing-999' }) });
+      assert.equal(res.status, 404, 'Must return 404 for missing order');
+      const body = await res.json();
+      assert.equal(body.error?.code, 'ORDER_NOT_FOUND');
+    }
+
+    // TEST 12: Rejects invalid status transition (e.g. from BOOKING_RECEIVED or AGENT_ASSIGNED)
+    console.log('Test 12: Rejects invalid status transition (e.g., AGENT_ASSIGNED) with 400...');
+    {
+      database.order.findUnique = async () => ({
+        id: 'order-invalid-1',
+        agentId: 'agent-123',
+        status: 'AGENT_ASSIGNED',
+        weightRecords: [],
+        invoices: [],
+        items: [{ id: 'item-1', categoryId: 'cat-1', ratePerKg: 10, category: { type: 'RECYCLABLE' } }],
+      });
+
+      const req = makeRequest('http://localhost:3000/api/orders/order-invalid-1/complete', {
+        token: createAgentToken('agent-123'),
+        body: { actualWeights: [{ itemId: 'item-1', categoryId: 'cat-1', actualWeight: 5 }] },
+      });
+      const res = await completeOrder(req, { params: Promise.resolve({ id: 'order-invalid-1' }) });
+      assert.equal(res.status, 400, 'Must reject completion from AGENT_ASSIGNED');
+      const body = await res.json();
+      assert.equal(body.error?.code, 'INVALID_STATUS_TRANSITION');
+    }
+
+    // TEST 13: Atomic weighing and completion with CUSTOMER_PAYS (waste charge exceeds recyclable scrap)
+    console.log('Test 13: Atomic weighing and completion with CUSTOMER_PAYS...');
+    {
+      let transactionExecuted = false;
+      let settlementCreated = false;
+      let invoiceCreated = false;
+
+      database.order.findUnique = async () => ({
+        id: 'order-cust-pays-1',
+        orderNumber: 'JIO-CUSTPAYS-01',
+        agentId: 'agent-123',
+        customerId: 'cust-123',
+        status: 'AGENT_ARRIVED',
+        pickupCharge: 100,
+        discountAmount: 0,
+        actualTotal: 0,
+        finalAmount: 0,
+        financialDirection: 'CUSTOMER_PAYS',
+        paymentStatus: 'PENDING',
+        weightRecords: [],
+        invoices: [],
+        items: [
+          { id: 'item-waste', categoryId: 'cat-waste', ratePerKg: 50, estimatedWeight: 2, category: { type: 'WASTE_CHARGE' } },
+        ],
+        customer: { user: { name: 'Customer C', phone: '9999999992' } },
+        agent: { userId: 'user-agent-123', user: { name: 'Agent X' } },
+        address: { houseNo: '14', street: 'Church St', area: 'Bengaluru' },
+      });
+
+      database.$transaction = async (callback: any) => {
+        transactionExecuted = true;
+        const tx = {
+          $queryRaw: async () => [{ id: 'order-cust-pays-1' }],
+          orderItem: {
+            update: async ({ where, data }: any) => ({ id: where.id, ...data }),
+          },
+          weightRecord: {
+            create: async ({ data }: any) => ({ id: 'w-rec-2', ...data }),
+          },
+          settlement: {
+            upsert: async () => {
+              settlementCreated = true;
+              return { id: 'settle-2' };
+            },
+          },
+          order: {
+            findUnique: async () => ({
+              id: 'order-cust-pays-1',
+              status: 'AGENT_ARRIVED',
+              agentId: 'agent-123',
+              items: [{ id: 'item-waste', actualWeight: null }],
+            }),
+            update: async ({ data }: any) => {
+              if (data.invoices?.create) invoiceCreated = true;
+              return {
+                id: 'order-cust-pays-1',
+                status: data.status,
+                financialDirection: data.financialDirection,
+                finalAmount: data.finalAmount,
+              };
+            },
+          },
+          agent: {
+            update: async ({ data }: any) => ({ id: 'agent-123', status: data.status }),
+          },
+        };
+        return callback(tx);
+      };
+
+      const req = makeRequest('http://localhost:3000/api/orders/order-cust-pays-1/complete', {
+        token: createAgentToken('agent-123'),
+        body: {
+          actualWeights: [{ itemId: 'item-waste', categoryId: 'cat-waste', actualWeight: 2 }],
+        },
+      });
+
+      const res = await completeOrder(req, { params: Promise.resolve({ id: 'order-cust-pays-1' }) });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.data.financialDirection, 'CUSTOMER_PAYS');
+      // 2kg * 50 = 100 waste charge + 100 pickup charge = 200 finalAmount
+      assert.equal(body.data.finalAmount, 200);
+      assert.equal(settlementCreated, false, 'No payout settlement should be created when customer pays');
+      assert.equal(invoiceCreated, true);
+    }
+
+    // TEST 14: Transaction rollback when settlement creation fails inside transaction
+    console.log('Test 14: Transaction rollback when settlement creation fails inside transaction...');
+    {
+      database.order.findUnique = async () => ({
+        id: 'order-rollback-settle',
+        agentId: 'agent-123',
+        customerId: 'cust-123',
+        status: 'AGENT_ARRIVED',
+        pickupCharge: 0,
+        discountAmount: 0,
+        actualTotal: 0,
+        finalAmount: 0,
+        financialDirection: 'CUSTOMER_PAYS',
+        paymentStatus: 'PENDING',
+        weightRecords: [],
+        invoices: [],
+        items: [
+          { id: 'item-1', categoryId: 'cat-1', ratePerKg: 20, category: { type: 'RECYCLABLE' } },
+        ],
+        customer: { user: { name: 'Customer A' } },
+        agent: { userId: 'user-agent-123' },
+      });
+
+      database.$transaction = async (callback: any) => {
+        const tx = {
+          $queryRaw: async () => [{ id: 'order-rollback-settle' }],
+          orderItem: { update: async () => ({}) },
+          weightRecord: { create: async () => ({}) },
+          settlement: {
+            upsert: async () => {
+              throw new Error('Simulated database disk failure during settlement creation');
+            },
+          },
+          order: {
+            findUnique: async () => ({
+              id: 'order-rollback-settle',
+              status: 'AGENT_ARRIVED',
+              agentId: 'agent-123',
+              items: [{ id: 'item-1', actualWeight: null }],
+            }),
+            update: async () => ({}),
+          },
+          agent: { update: async () => ({}) },
+        };
+        return callback(tx);
+      };
+
+      const req = makeRequest('http://localhost:3000/api/orders/order-rollback-settle/complete', {
+        token: createAgentToken('agent-123'),
+        body: {
+          actualWeights: [{ itemId: 'item-1', categoryId: 'cat-1', actualWeight: 10 }],
+        },
+      });
+
+      const res = await completeOrder(req, { params: Promise.resolve({ id: 'order-rollback-settle' }) });
+      assert.equal(res.status, 500, 'Must return 500 when transaction rolls back');
+      const body = await res.json();
+      assert.equal(body.error?.code, 'INTERNAL_SERVER_ERROR');
+    }
+
+    // TEST 15: Transaction rollback when agent status update fails inside transaction
+    console.log('Test 15: Transaction rollback when agent status update fails inside transaction...');
+    {
+      database.order.findUnique = async () => ({
+        id: 'order-rollback-agent',
+        agentId: 'agent-123',
+        customerId: 'cust-123',
+        status: 'AGENT_ARRIVED',
+        pickupCharge: 0,
+        discountAmount: 0,
+        actualTotal: 0,
+        finalAmount: 0,
+        financialDirection: 'CUSTOMER_PAYS',
+        paymentStatus: 'PENDING',
+        weightRecords: [],
+        invoices: [],
+        items: [
+          { id: 'item-1', categoryId: 'cat-1', ratePerKg: 20, category: { type: 'RECYCLABLE' } },
+        ],
+        customer: { user: { name: 'Customer A' } },
+        agent: { userId: 'user-agent-123' },
+      });
+
+      database.$transaction = async (callback: any) => {
+        const tx = {
+          $queryRaw: async () => [{ id: 'order-rollback-agent' }],
+          orderItem: { update: async () => ({}) },
+          weightRecord: { create: async () => ({}) },
+          settlement: { upsert: async () => ({}) },
+          order: {
+            findUnique: async () => ({
+              id: 'order-rollback-agent',
+              status: 'AGENT_ARRIVED',
+              agentId: 'agent-123',
+              items: [{ id: 'item-1', actualWeight: null }],
+            }),
+            update: async () => ({}),
+          },
+          agent: {
+            update: async () => {
+              throw new Error('Simulated database deadlock during agent status update');
+            },
+          },
+        };
+        return callback(tx);
+      };
+
+      const req = makeRequest('http://localhost:3000/api/orders/order-rollback-agent/complete', {
+        token: createAgentToken('agent-123'),
+        body: {
+          actualWeights: [{ itemId: 'item-1', categoryId: 'cat-1', actualWeight: 10 }],
+        },
+      });
+
+      const res = await completeOrder(req, { params: Promise.resolve({ id: 'order-rollback-agent' }) });
+      assert.equal(res.status, 500, 'Must return 500 on transaction error');
+      const body = await res.json();
+      assert.equal(body.error?.code, 'INTERNAL_SERVER_ERROR');
+    }
+
+    // TEST 16: Idempotent repeat includes hydrated address without running write transaction
+    console.log('Test 16: Idempotent repeat includes hydrated address without running write transaction...');
+    {
+      let txCalled = false;
+      database.order.findUnique = async () => ({
+        id: 'order-idempotent-2',
+        orderNumber: 'JIO-IDEMPOTENT-02',
+        agentId: 'agent-123',
+        status: 'PICKUP_COMPLETED',
+        address: { houseNo: '100', street: 'Brigade Rd', area: 'Bengaluru' },
+        weightRecords: [{ id: 'w-1' }],
+        invoices: [{ id: 'inv-1' }],
+        items: [],
+      });
+      database.$transaction = async () => {
+        txCalled = true;
+      };
+
+      const req = makeRequest('http://localhost:3000/api/orders/order-idempotent-2/complete', {
+        token: createAgentToken('agent-123'),
+      });
+      const res = await completeOrder(req, { params: Promise.resolve({ id: 'order-idempotent-2' }) });
+      assert.equal(res.status, 200);
+      assert.equal(txCalled, false, 'Must not execute write transaction on idempotent retry');
+      const body = await res.json();
+      assert.equal(body.data.address?.area, 'Bengaluru');
+      assert.equal(body.meta?.message, 'Order was already completed.');
+    }
+
     // -------------------------------------------------------------------------
     // SECTION: FRONTEND OPTIMISTIC UI & RESILIENT ROLLBACK
     // -------------------------------------------------------------------------
-    console.log('Test 11: Frontend optimistic complete transitions order to PICKUP_COMPLETED immediately (0 ms)...');
+    console.log('Test 17: Frontend optimistic complete transitions order to PICKUP_COMPLETED immediately (0 ms)...');
     {
       let activeOrder: any = {
         id: 'order-opt-1',
@@ -792,7 +1064,7 @@ async function runTests() {
       assert.equal(submittingWeigh, true);
     }
 
-    console.log('Test 12: Frontend rollback on API rejection (400, 403, 500) reverts activeOrder & orders, reopens modal with weights intact...');
+    console.log('Test 18: Frontend rollback on API rejection (400, 403, 500) reverts activeOrder & orders, reopens modal with weights intact...');
     {
       const initialOrder = {
         id: 'order-rollback-ui',
@@ -838,7 +1110,7 @@ async function runTests() {
       assert.equal(weighingRequestRef, false, 'weighingRequestRef must be unlocked');
     }
 
-    console.log('Test 13: Frontend rollback on 15s AbortController timeout / network error...');
+    console.log('Test 19: Frontend rollback on 15s AbortController timeout / network error...');
     {
       const initialOrder = {
         id: 'order-timeout-ui',
@@ -875,7 +1147,7 @@ async function runTests() {
       assert.equal(weighingRequestRef, false);
     }
 
-    console.log('Test 14: GPS heartbeat yields while completion is in-flight, halts on completion, and resumes after rollback...');
+    console.log('Test 20: GPS heartbeat yields while completion is in-flight, halts on completion, and resumes after rollback...');
     {
       const TRACKING_ELIGIBLE_STATUSES = [
         'AGENT_ACCEPTED',
