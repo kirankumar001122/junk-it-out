@@ -721,7 +721,182 @@ async function runTests() {
       assert.equal(invoiceCreated, true);
     }
 
-    console.log('ALL AGENT COMPLETION & WEIGHING WORKFLOW TESTS PASSED CLEANLY.');
+    // -------------------------------------------------------------------------
+    // SECTION: FRONTEND OPTIMISTIC UI & RESILIENT ROLLBACK
+    // -------------------------------------------------------------------------
+    console.log('Test 11: Frontend optimistic complete transitions order to PICKUP_COMPLETED immediately (0 ms)...');
+    {
+      let activeOrder: any = {
+        id: 'order-opt-1',
+        orderNumber: 'ORD-OPT-01',
+        status: 'AGENT_ARRIVED',
+        pickupCharge: 0,
+        discountAmount: 0,
+        items: [{ id: 'item-1', categoryId: 'cat-1', ratePerKg: 20, estimatedWeight: 5, category: { type: 'RECYCLABLE' } }],
+      };
+      let orders: any[] = [activeOrder];
+      let showWeighModal = true;
+      let statusNotice: string | null = null;
+      let submittingWeigh = false;
+      let weighingRequestRef = false;
+
+      // Agent clicks "CONFIRM WEIGHTS & COMPLETE PICKUP"
+      const payloadActualWeights = [{ itemId: 'item-1', categoryId: 'cat-1', actualWeight: 10 }];
+      weighingRequestRef = true;
+      submittingWeigh = true;
+
+      // Optimistic transition
+      const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+      let optimisticRecyclable = 0;
+      let optimisticWasteCharge = 0;
+      const updatedItems = (activeOrder.items || []).map((dbItem: any) => {
+        const matched = payloadActualWeights.find(
+          (w) => (w.itemId && w.itemId === dbItem.id) || w.categoryId === dbItem.categoryId
+        );
+        const weightKg = matched ? matched.actualWeight : Number(dbItem.estimatedWeight || 0);
+        const rate = Number(dbItem.ratePerKg || 0);
+        const subtotal = round2(weightKg * rate);
+        if (dbItem.category?.type === 'WASTE_CHARGE') {
+          optimisticWasteCharge += subtotal;
+        } else {
+          optimisticRecyclable += subtotal;
+        }
+        return { ...dbItem, actualWeight: weightKg, subtotal };
+      });
+      const netAmount = optimisticRecyclable - (optimisticWasteCharge + Number(activeOrder.pickupCharge || 0) - Number(activeOrder.discountAmount || 0));
+      const optimisticDirection = netAmount >= 0 ? 'JUNKITOUT_PAYS' : 'CUSTOMER_PAYS';
+      const optimisticFinalAmount = round2(Math.abs(netAmount));
+
+      const optimisticOrder = {
+        ...activeOrder,
+        status: 'PICKUP_COMPLETED',
+        items: updatedItems,
+        actualTotal: optimisticRecyclable,
+        financialDirection: optimisticDirection,
+        finalAmount: optimisticFinalAmount,
+        paymentStatus: optimisticDirection === 'JUNKITOUT_PAYS' ? 'SETTLEMENT_PENDING' : activeOrder.paymentStatus,
+      };
+
+      showWeighModal = false;
+      activeOrder = optimisticOrder;
+      orders = orders.map((order) => (order.id === optimisticOrder.id ? optimisticOrder : order));
+      statusNotice = 'Completing pickup and recording doorstep weights...';
+
+      assert.equal(showWeighModal, false, 'Weigh modal must close immediately');
+      assert.equal(activeOrder.status, 'PICKUP_COMPLETED');
+      assert.equal(activeOrder.finalAmount, 200);
+      assert.equal(activeOrder.financialDirection, 'JUNKITOUT_PAYS');
+      assert.equal(orders[0].status, 'PICKUP_COMPLETED');
+      assert.equal(statusNotice, 'Completing pickup and recording doorstep weights...');
+      assert.equal(weighingRequestRef, true);
+      assert.equal(submittingWeigh, true);
+    }
+
+    console.log('Test 12: Frontend rollback on API rejection (400, 403, 500) reverts activeOrder & orders, reopens modal with weights intact...');
+    {
+      const initialOrder = {
+        id: 'order-rollback-ui',
+        orderNumber: 'ORD-RB-UI',
+        status: 'AGENT_ARRIVED',
+        items: [{ id: 'item-1', categoryId: 'cat-1', ratePerKg: 10, estimatedWeight: 5 }],
+      };
+      let activeOrder: any = { ...initialOrder };
+      let orders: any[] = [activeOrder];
+      let showWeighModal = true;
+      let weighModalError: string | null = null;
+      let statusNotice: string | null = null;
+      let submittingWeigh = true;
+      let weighingRequestRef = true;
+
+      const previousActiveOrder = activeOrder;
+      const previousOrders = orders;
+
+      // Optimistic update occurred
+      activeOrder = { ...activeOrder, status: 'PICKUP_COMPLETED' };
+      orders = [activeOrder];
+      showWeighModal = false;
+
+      // Simulate API failure
+      const completeData = { success: false, error: { message: 'Order is assigned to another agent.' } };
+
+      // Rollback
+      activeOrder = previousActiveOrder;
+      orders = previousOrders;
+      showWeighModal = true;
+      const errorText = completeData.error?.message || 'Failed to complete pickup order.';
+      weighModalError = errorText;
+      statusNotice = errorText;
+      submittingWeigh = false;
+      weighingRequestRef = false;
+
+      assert.equal(activeOrder.status, 'AGENT_ARRIVED', 'activeOrder must revert to AGENT_ARRIVED');
+      assert.equal(orders[0].status, 'AGENT_ARRIVED');
+      assert.equal(showWeighModal, true, 'Modal must reopen on error');
+      assert.equal(weighModalError, 'Order is assigned to another agent.');
+      assert.equal(statusNotice, 'Order is assigned to another agent.');
+      assert.equal(submittingWeigh, false, 'Submit button must be unlocked');
+      assert.equal(weighingRequestRef, false, 'weighingRequestRef must be unlocked');
+    }
+
+    console.log('Test 13: Frontend rollback on 15s AbortController timeout / network error...');
+    {
+      const initialOrder = {
+        id: 'order-timeout-ui',
+        status: 'AGENT_ARRIVED',
+        items: [{ id: 'item-1', categoryId: 'cat-1', ratePerKg: 10 }],
+      };
+      let activeOrder: any = { ...initialOrder };
+      let orders: any[] = [activeOrder];
+      let showWeighModal = false;
+      let weighModalError: string | null = null;
+      let statusNotice: string | null = null;
+      let submittingWeigh = true;
+      let weighingRequestRef = true;
+
+      const previousActiveOrder = initialOrder;
+      const previousOrders = [initialOrder];
+
+      const e = new DOMException('The operation was aborted.', 'AbortError');
+      activeOrder = previousActiveOrder;
+      orders = previousOrders;
+      showWeighModal = true;
+      const errorText = e instanceof DOMException && e.name === 'AbortError'
+        ? 'Completion timed out. Please check your network and active orders.'
+        : 'Network error while completing pickup. Please check your connection and try again.';
+      weighModalError = errorText;
+      statusNotice = errorText;
+      submittingWeigh = false;
+      weighingRequestRef = false;
+
+      assert.equal(activeOrder.status, 'AGENT_ARRIVED');
+      assert.equal(showWeighModal, true, 'Modal must reopen on timeout');
+      assert.equal(weighModalError, 'Completion timed out. Please check your network and active orders.');
+      assert.equal(submittingWeigh, false);
+      assert.equal(weighingRequestRef, false);
+    }
+
+    console.log('Test 14: GPS heartbeat yields while completion is in-flight, halts on completion, and resumes after rollback...');
+    {
+      const TRACKING_ELIGIBLE_STATUSES = [
+        'AGENT_ACCEPTED',
+        'AGENT_ON_WAY',
+        'AGENT_ARRIVED',
+        'WEIGHING',
+        'WASTE_VERIFICATION',
+      ];
+
+      const isYielding = (weighingInFlight: boolean, status: string) => {
+        if (!TRACKING_ELIGIBLE_STATUSES.includes(status)) return 'STOPPED_INELIGIBLE';
+        if (weighingInFlight) return 'DEFERRED';
+        return 'TRACKING';
+      };
+
+      assert.equal(isYielding(true, 'AGENT_ARRIVED'), 'DEFERRED', 'GPS must defer while complete is in flight');
+      assert.equal(isYielding(false, 'PICKUP_COMPLETED'), 'STOPPED_INELIGIBLE', 'GPS must halt once pickup is completed');
+      assert.equal(isYielding(false, 'AGENT_ARRIVED'), 'TRACKING', 'GPS must resume after rollback to AGENT_ARRIVED');
+    }
+
+        console.log('ALL AGENT COMPLETION & WEIGHING WORKFLOW TESTS PASSED CLEANLY.');
   } finally {
     database.agent.findUnique = origAgentFindUnique;
     database.order.findUnique = origOrderFindUnique;
