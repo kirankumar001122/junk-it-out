@@ -237,13 +237,14 @@ async function main() {
   ];
 
   for (const area of serviceAreasData) {
+    const isServingArea = area.name.includes('BTM') || area.name.includes('JP Nagar');
     await prisma.serviceArea.upsert({
       where: { name: area.name },
-      update: {},
+      update: { status: isServingArea ? 'ACTIVE' : 'INACTIVE' },
       create: {
         name: area.name,
         city: 'Bengaluru',
-        status: 'ACTIVE',
+        status: isServingArea ? 'ACTIVE' : 'INACTIVE',
         etaMinutes: area.etaMinutes,
         basePickupCharge: area.basePickupCharge,
         boundaryPolygon: area.boundaryPolygon,

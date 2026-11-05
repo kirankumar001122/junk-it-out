@@ -12,7 +12,8 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { BENGALURU_ZONES } from '@/lib/geofence';
-import { SERVICE_AREA_UNAVAILABLE_MESSAGE } from '@/lib/validations/serviceArea';
+import { SERVICE_AREA_UNAVAILABLE_MESSAGE, validateServiceArea } from '@/lib/validations/serviceArea';
+import { getCachedClientJson } from '@/lib/clientRequestCache';
 import { loadGoogleMaps } from '@/components/InteractiveMap';
 import { setSelectedLocation } from '@/lib/selectedLocation';
 
@@ -80,8 +81,11 @@ export default function LocationSearchModal({
   useEffect(() => {
     if (!open) return;
 
-    fetch('/api/service-areas')
-      .then((res) => res.json())
+    getCachedClientJson<{ success: boolean; data?: any[] }>(
+      'public-service-areas',
+      '/api/service-areas',
+      60_000
+    )
       .then((data) => {
         if (data.success && Array.isArray(data.data) && data.data.length > 0) {
           const activeOnly = data.data.filter((z: any) => z.status === 'ACTIVE');
@@ -322,8 +326,26 @@ export default function LocationSearchModal({
     setLoadingZoneId(zoneKey);
     setServiceError(null);
 
-    const lat = zone.centerLat || 12.9077;
-    const lng = zone.centerLng || 77.5854;
+    const lat = zone.centerLat || (zone.id === 'btm-layout' ? 12.9166 : 12.9077);
+    const lng = zone.centerLng || (zone.id === 'btm-layout' ? 77.6101 : 77.5854);
+
+    // Fast synchronous validation for approved active zones (instant 0ms response)
+    const localValidation = validateServiceArea({ lat, lng, area: zone.name });
+    if (localValidation.serviceable) {
+      const locData = {
+        address: `${zone.name}, Bengaluru`,
+        area: zone.name,
+        lat,
+        lng,
+        serviceable: true,
+        zoneName: localValidation.zone?.name || zone.name,
+      };
+      setSelectedLocation(locData);
+      onSelectLocation(locData);
+      setLoadingZoneId(null);
+      onClose();
+      return;
+    }
 
     try {
       const check = await checkServiceability(lat, lng);

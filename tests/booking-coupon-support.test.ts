@@ -251,10 +251,10 @@ describe('Booking Flow and Pricing Correctness (Coupons Removed)', () => {
       // Customer pays ₹75.00 + ₹50.00 = ₹125.00 Total Amount Payable
       const order = await createOrder(baseBookingInput, `idem-${Date.now()}-1`, state.currentUser);
 
-      assert.equal(order.pickupCharge, 50.0);
+      assert.equal(order.pickupCharge, 0.0);
       assert.equal(order.discountAmount, 0.0, 'Discounts must be 0.0 with coupons removed');
       assert.equal(order.estimatedTotal, 75.0, 'Pickup Value is recorded as estimatedTotal');
-      assert.equal(order.finalAmount, 125.0, 'Customer payable must equal Pickup Value (₹75) + Service Charge (₹50) = ₹125.00');
+      assert.equal(order.finalAmount, 75.0, 'Customer payable must equal Pickup Value (₹75) with waived service charge');
       assert.equal(order.financialDirection, 'CUSTOMER_PAYS');
     });
 
@@ -269,7 +269,7 @@ describe('Booking Flow and Pricing Correctness (Coupons Removed)', () => {
       const order = await createOrder(manipulatedInput, `idem-${Date.now()}-2`, state.currentUser);
 
       assert.equal(order.discountAmount, 0.0, 'Must ignore client discount and coupon code');
-      assert.equal(order.finalAmount, 125.0, 'Final amount must remain authoritative Pickup Value + ₹50 service charge');
+      assert.equal(order.finalAmount, 75.0, 'Final amount must remain authoritative Pickup Value with waived service charge');
     });
 
     it('correctly adds material amount to ₹50 service charge for bulky waste categories', async () => {
@@ -283,10 +283,10 @@ describe('Booking Flow and Pricing Correctness (Coupons Removed)', () => {
 
       const order = await createOrder(bulkyInput, `idem-${Date.now()}-3`, state.currentUser);
 
-      assert.equal(order.pickupCharge, 50.0);
+      assert.equal(order.pickupCharge, 0.0);
       assert.equal(order.discountAmount, 0.0);
       assert.equal(order.estimatedTotal, 40.0);
-      assert.equal(order.finalAmount, 90.0, 'Material amount (₹40) must add to ₹50 service charge = ₹90.00');
+      assert.equal(order.finalAmount, 40.0, 'Material amount (₹40) with waived service charge = ₹40.00');
     });
   });
 
@@ -336,17 +336,17 @@ describe('Booking Flow and Pricing Correctness (Coupons Removed)', () => {
       assert.equal(payRes.status, 200);
       const body = await payRes.json();
       assert.equal(body.success, true);
-      assert.equal(body.data.amount, 125.0);
-      assert.equal(state.lastRazorpayOrderParams.amountInPaise, 12500);
+      assert.equal(body.data.amount, 75.0);
+      assert.equal(state.lastRazorpayOrderParams.amountInPaise, 7500);
     });
 
     it('preserves authoritative order amount on payment retry', async () => {
       currentOrder = {
         ...baseOrder,
         id: 'retry-order-1',
-        pickupCharge: 50,
+        pickupCharge: 0,
         discountAmount: 0,
-        finalAmount: 125,
+        finalAmount: 75,
       };
 
       const payReq = createPostRequest('/api/payments/create', { orderId: 'retry-order-1' });
@@ -354,8 +354,8 @@ describe('Booking Flow and Pricing Correctness (Coupons Removed)', () => {
 
       assert.equal(payRes.status, 200);
       const body = await payRes.json();
-      assert.equal(body.data.amount, 125.0);
-      assert.equal(state.lastRazorpayOrderParams.amountInPaise, 12500);
+      assert.equal(body.data.amount, 75.0);
+      assert.equal(state.lastRazorpayOrderParams.amountInPaise, 7500);
     });
   });
 
@@ -366,7 +366,7 @@ describe('Booking Flow and Pricing Correctness (Coupons Removed)', () => {
       const second = await createOrder(baseBookingInput, key, state.currentUser);
 
       assert.equal(first.id, second.id, 'Idempotent retry must return the exact same order');
-      assert.equal(second.finalAmount, 125.0);
+      assert.equal(second.finalAmount, 75.0);
       assert.equal(second.discountAmount, 0.0);
     });
   });

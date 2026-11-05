@@ -3,6 +3,7 @@ import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import BottomNav from '@/components/BottomNav';
 import AgentBottomNav from '@/components/AgentBottomNav';
+import CustomerSupportChatWidget from '@/components/CustomerSupportChatWidget';
 import CustomerMotionShell from '@/components/CustomerMotionShell';
 
 const getMetadataBase = () => {
@@ -54,6 +55,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Footer />
         <BottomNav />
         <AgentBottomNav />
+        <CustomerSupportChatWidget />
       </body>
     </html>
   );

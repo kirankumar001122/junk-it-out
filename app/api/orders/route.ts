@@ -622,6 +622,7 @@ async function handleGet(req: NextRequest) {
     ];
 
     let orders: any[] = [];
+    let total = 0;
 
     if (authUser.role === 'AGENT') {
       const agentOrderSelect = {
@@ -727,82 +728,86 @@ async function handleGet(req: NextRequest) {
         : [];
 
       orders = [...activeOrders, ...unassignedOrders, ...historicalOrders];
+      total = await db.order.count({ where: whereClause }).catch(() => orders.length);
     } else {
-      orders = await db.order.findMany({
-        where: whereClause,
+      const [fetchedOrders, countResult] = await Promise.all([
+        db.order.findMany({
+          where: whereClause,
 
-        include: {
-          customer: {
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  name: true,
-                  phone: true,
-                  email: true,
-                },
-              },
-            },
-          },
-
-          agent: {
-            select: {
-              id: true,
-              userId: true,
-              vehicleType: true,
-              vehicleNumber: true,
-              status: true,
-              currentLat: true,
-              currentLng: true,
-              rating: true,
-              serviceAreas: true,
-
-              user: {
-                select: {
-                  id: true,
-                  name: true,
-                  phone: true,
-                },
-              },
-            },
-          },
-
-          address: true,
-
-          ...(authUser.role === 'CUSTOMER' || searchParams.get('includeItems') === 'true'
-            ? {
-                items: {
+          include: {
+            customer: {
+              include: {
+                user: {
                   select: {
                     id: true,
-                    categoryId: true,
-                    estimatedWeight: true,
-                    actualWeight: true,
-                    category: { select: { id: true, name: true } },
+                    name: true,
+                    phone: true,
+                    email: true,
                   },
                 },
-              }
-            : {}),
+              },
+            },
 
-          ...(searchParams.get('includeHistory') === 'true'
-            ? {
-                statusHistory: {
-                  orderBy: {
-                    timestamp: 'desc',
+            agent: {
+              select: {
+                id: true,
+                userId: true,
+                vehicleType: true,
+                vehicleNumber: true,
+                status: true,
+                currentLat: true,
+                currentLng: true,
+                rating: true,
+                serviceAreas: true,
+
+                user: {
+                  select: {
+                    id: true,
+                    name: true,
+                    phone: true,
                   },
                 },
-              }
-            : {}),
-        },
+              },
+            },
 
-        orderBy: {
-          createdAt: 'desc',
-        },
-        skip,
-        take: limit,
-      });
+            address: true,
+
+            ...(authUser.role === 'CUSTOMER' || searchParams.get('includeItems') === 'true'
+              ? {
+                  items: {
+                    select: {
+                      id: true,
+                      categoryId: true,
+                      estimatedWeight: true,
+                      actualWeight: true,
+                      category: { select: { id: true, name: true } },
+                    },
+                  },
+                }
+              : {}),
+
+            ...(searchParams.get('includeHistory') === 'true'
+              ? {
+                  statusHistory: {
+                    orderBy: {
+                      timestamp: 'desc',
+                    },
+                  },
+                }
+              : {}),
+          },
+
+          orderBy: {
+            createdAt: 'desc',
+          },
+          skip,
+          take: limit,
+        }),
+        db.order.count({ where: whereClause }).catch(() => 0),
+      ]);
+      orders = fetchedOrders;
+      total = countResult || orders.length;
     }
-
-    const total = await db.order.count({ where: whereClause }).catch(() => orders.length);
 
     const isAdmin = authUser.role === 'ADMIN' || authUser.role === 'SUPER_ADMIN';
     const isStaff = isAdmin || authUser.role === 'AGENT';

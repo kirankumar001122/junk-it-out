@@ -1058,7 +1058,16 @@ export default function OrderTrackingPage() {
       if (res.ok && data.success) {
         setShowCancelModal(false);
         setCustomCancelReason("");
-        await fetchOrderDetails();
+        setOrder((prev: any) =>
+          prev
+            ? {
+                ...prev,
+                status: 'CANCELLED',
+                paymentStatus: prev.paymentStatus === 'CAPTURED' ? 'REFUND_PENDING' : prev.paymentStatus,
+              }
+            : prev
+        );
+        void fetchOrderDetails();
       } else {
         setCancelError(
           getApiErrorMessage(

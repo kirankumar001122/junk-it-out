@@ -34,7 +34,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'What service areas does Junk It Out cover in Bengaluru?',
-    a: 'We cover major Bengaluru zones including JP Nagar, Jayanagar, Electronic City, Koramangala, HSR Layout, Whitefield, Indiranagar, Yelahanka, Hebbal, Rajajinagar, Malleshwaram, and MG Road.',
+    a: 'Our doorstep pickup service is currently available exclusively in two areas of Bengaluru: JP Nagar (Phases 1 to 9) and BTM Layout (1st & 2nd Stage). We are actively expanding to more zones across Bengaluru soon!',
   },
   {
     q: 'What waste materials are NOT accepted?',

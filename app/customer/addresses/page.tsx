@@ -170,7 +170,7 @@ export default function CustomerAddressesPage() {
         </div>
         <button
           onClick={() => setShowAddModal(true)}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 shadow-sm"
+          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer touch-manipulation select-none active:scale-95 transition-transform"
         >
           <Plus className="w-4 h-4" />
           Add Address
@@ -207,7 +207,7 @@ export default function CustomerAddressesPage() {
               <button
                 onClick={() => handleDeleteAddress(addr.id)}
                 disabled={deletingId === addr.id}
-                className="text-slate-400 hover:text-rose-600 p-1 disabled:opacity-50"
+                className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg cursor-pointer touch-manipulation select-none active:scale-90 transition-transform disabled:opacity-50"
               >
                 <Trash2 className={`w-4 h-4 ${deletingId === addr.id ? 'animate-pulse' : ''}`} />
               </button>
@@ -263,7 +263,7 @@ export default function CustomerAddressesPage() {
                       key={l}
                       type="button"
                       onClick={() => setNewLabel(l)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer touch-manipulation select-none active:scale-95 transition-all ${
                         newLabel === l ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-700'
                       }`}
                     >
@@ -289,7 +289,7 @@ export default function CustomerAddressesPage() {
                         setNewLat(a.lat);
                         setNewLng(a.lng);
                       }}
-                      className={`px-3 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors border ${
+                      className={`px-3 py-2 rounded-xl text-xs font-bold cursor-pointer touch-manipulation select-none active:scale-95 transition-all border ${
                         newArea === a.label
                           ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
                           : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
@@ -331,7 +331,7 @@ export default function CustomerAddressesPage() {
               <button
                 type="button"
                 onClick={() => setShowAddModal(false)}
-                className="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 rounded-xl transition-colors cursor-pointer"
+                className="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 rounded-xl transition-transform cursor-pointer touch-manipulation select-none active:scale-95"
               >
                 Cancel
               </button>

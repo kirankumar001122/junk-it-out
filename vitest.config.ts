@@ -62,6 +62,7 @@ export default defineConfig({
       'tests/agent-vehicle-privacy.test.ts',
       'tests/order-dispute-mobile-resilience.test.ts',
       'tests/admin-service-areas-production.test.ts',
+      'tests/ai-support-agent.test.ts',
     ],
   },
 });

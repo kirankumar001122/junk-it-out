@@ -149,11 +149,11 @@ async function run() {
     const first = await createOrder(input, retryKey, authUser);
     assert.ok(first?.id, "initial order must be created");
     // Verify exact server-side pickup summary calculation:
-    // 5 kg × ₹10/kg = ₹50 Pickup Value + ₹50 Service Charge = ₹100 Total Amount Payable
+    // 5 kg × ₹10/kg = ₹50 Pickup Value + ₹0 Service Charge (waived) = ₹50 Total Amount Payable
     assert.equal(first.estimatedTotal, 50, "estimatedTotal must equal Pickup Value (5kg × ₹10/kg = ₹50)");
-    assert.equal(first.pickupCharge, 50, "pickupCharge must equal ₹50 Service Charge");
-    assert.equal(first.finalAmount, 100, "finalAmount must equal Pickup Value + ₹50 Service Charge (₹100)");
-    assert.equal(first.payments?.create?.amount, 100, "Razorpay payment record must match finalAmount (₹100)");
+    assert.equal(first.pickupCharge, 0, "pickupCharge must equal waived ₹0 service charge");
+    assert.equal(first.finalAmount, 50, "finalAmount must equal Pickup Value when service charge is waived (₹50)");
+    assert.equal(first.payments?.create?.amount, 50, "Razorpay payment record must match finalAmount (₹50)");
 
     const retry = await createOrder(input, retryKey, authUser);
     assert.equal(retry.id, first.id, "retry must return the persisted order");

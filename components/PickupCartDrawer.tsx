@@ -21,7 +21,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import WeightQuantityInput from '@/components/WeightQuantityInput';
-import { calculatePickupSummary, PICKUP_SERVICE_CHARGE } from '@/lib/pricing';
+import { calculatePickupSummary, calculateMaterialItemAmount, SPECIAL_MATERIAL_THRESHOLD_KG, PICKUP_SERVICE_CHARGE } from '@/lib/pricing';
 import {
   pickupCartEvent,
   readPickupCart,
@@ -126,10 +126,10 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
       getCachedClientJson<any>(
         'public-customer-waste-categories',
         '/api/waste-categories?customer=true',
-        5_000,
+        15_000,
         { cache: 'no-store' }
       ),
-      checkAuth(true),
+      checkAuth(false),
     ])
       .then(([categoryData]) => {
         setCategories(
@@ -543,7 +543,9 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
                           )}
                         </div>
                         <p className="mt-0.5 text-xs font-semibold text-emerald-700">
-                          ₹{item.category.pricePerKg}/kg × {item.quantity} kg = ₹{(Number(item.category.pricePerKg || 0) * Number(item.quantity || 0)).toFixed(2)}
+                          {item.quantity > SPECIAL_MATERIAL_THRESHOLD_KG
+                            ? `₹99.00 (${item.quantity} kg)`
+                            : `₹${item.category.pricePerKg}/kg × ${item.quantity} kg = ₹${(Number(item.category.pricePerKg || 0) * Number(item.quantity || 0)).toFixed(2)}`}
                         </p>
                       </div>
                       <button
@@ -645,7 +647,10 @@ export default function PickupCartDrawer({ open, onClose }: Props) {
                   </div>
                   <div className="flex justify-between text-slate-300">
                     <span>Service Charge</span>
-                    <strong className="text-white">₹{summary.serviceCharge.toFixed(2)}</strong>
+                    <div className="flex items-center gap-1.5">
+                      <span className="line-through text-slate-500 font-medium">₹50.00</span>
+                      <strong className="text-emerald-400 font-bold">FREE</strong>
+                    </div>
                   </div>
                   <div className="border-t border-white/10 pt-2 text-sm font-black flex justify-between">
                     <span>Total Amount Payable</span>
