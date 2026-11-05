@@ -46,7 +46,7 @@ export default function AgentDashboardPage() {
   const [viewPickupModal, setViewPickupModal] = useState<any | null>(null);
   const [loadingPickupDetails, setLoadingPickupDetails] = useState(false);
   const [acceptingPickup, setAcceptingPickup] = useState(false);
-  const [actionLoading, setActionLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState<'accept' | 'start' | 'arrive' | null>(null);
 
   // Agent OTP Login State
   const [loginPhone, setLoginPhone] = useState('');
@@ -75,6 +75,8 @@ export default function AgentDashboardPage() {
   const statusRequestRef = useRef(false);
   const weighingRequestRef = useRef(false);
   const loginRequestRef = useRef(false);
+  const activeOrderRef = useRef(activeOrder);
+  activeOrderRef.current = activeOrder;
   const seenBookingNotificationIdsRef = useRef(new Set<string>());
   const locationUpdateRequestRef = useRef(false);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -460,10 +462,55 @@ export default function AgentDashboardPage() {
     if (acceptingPickupRef.current) return;
     acceptingPickupRef.current = true;
     setAcceptingPickup(true);
+
+    // Save previous state for safe rollback
+    const previousActiveOrder = activeOrder;
+    const previousOrders = orders;
+    const cachedModalOrder = viewPickupModal;
+    const previousNotice = newPickupNotice;
+
+    // 1. Optimistic UI transition: dismiss modal and notice immediately (0 ms response)
+    setViewPickupModal(null);
+    setNewPickupNotice(null);
+    setStatusNotice('Accepting pickup assignment...');
+
+    const optimisticOrder = cachedModalOrder
+      ? {
+          ...cachedModalOrder,
+          status: 'AGENT_ACCEPTED',
+          agentId: agent?.id,
+          agent: agent ? { ...agent, user: agent.user } : cachedModalOrder.agent,
+        }
+      : null;
+
+    if (optimisticOrder) {
+      setActiveOrder(optimisticOrder);
+      if (Array.isArray(optimisticOrder.items) && optimisticOrder.items.length > 0) {
+        setActualWeightsInput(
+          optimisticOrder.items.map((i: any) => ({
+            itemId: i.id,
+            categoryId: i.categoryId,
+            categoryName: i.category?.name || 'Waste item',
+            estimatedWeight: Number(i.estimatedWeight ?? 0),
+            weightStr:
+              typeof i.actualWeight === 'number' && i.actualWeight > 0
+                ? String(i.actualWeight)
+                : '',
+          }))
+        );
+      }
+      setOrders((currentOrders) => [
+        optimisticOrder,
+        ...currentOrders.filter(
+          (o) => o.id !== optimisticOrder.id && o.orderNumber !== optimisticOrder.orderNumber
+        ),
+      ]);
+    }
+
     let acceptTimeout: number | undefined;
     try {
       const controller = new AbortController();
-      acceptTimeout = window.setTimeout(() => controller.abort(), 30_000);
+      acceptTimeout = window.setTimeout(() => controller.abort(), 15_000);
       const res = await fetch(`/api/orders/${orderId}/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -473,21 +520,17 @@ export default function AgentDashboardPage() {
       const data = await res.json();
 
       if (res.status === 409) {
+        setActiveOrder(previousActiveOrder);
+        setOrders(previousOrders);
         const errorMsg = data.error?.message || data.message || 'This pickup has already been accepted by another agent.';
         setStatusNotice(errorMsg);
         setTimeout(() => setStatusNotice(null), 5000);
-        setViewPickupModal(null);
-        setNewPickupNotice(null);
-        alert(errorMsg);
         return;
       }
 
       if (res.ok && data.success) {
         setStatusNotice(`Pickup Accepted! Order #${data.data?.orderNumber || ''} assigned to you.`);
         setTimeout(() => setStatusNotice(null), 5000);
-        const cachedModalOrder = viewPickupModal;
-        setViewPickupModal(null);
-        setNewPickupNotice(null);
         const rawOrder = data.data;
         const updatedOrder = Array.isArray(rawOrder?.items)
           ? rawOrder
@@ -523,14 +566,25 @@ export default function AgentDashboardPage() {
           ]);
         }
       } else {
-        alert(data.error?.message || data.message || 'Failed to accept pickup.');
+        setActiveOrder(previousActiveOrder);
+        setOrders(previousOrders);
+        if (cachedModalOrder) setViewPickupModal(cachedModalOrder);
+        if (previousNotice) setNewPickupNotice(previousNotice);
+        const errorText = data.error?.message || data.message || 'Failed to accept pickup.';
+        setStatusNotice(errorText);
+        setTimeout(() => setStatusNotice(null), 5000);
       }
     } catch (err) {
-      alert(
+      setActiveOrder(previousActiveOrder);
+      setOrders(previousOrders);
+      if (cachedModalOrder) setViewPickupModal(cachedModalOrder);
+      if (previousNotice) setNewPickupNotice(previousNotice);
+      setStatusNotice(
         err instanceof DOMException && err.name === 'AbortError'
           ? 'Accepting pickup timed out. Please check your network and active pickups.'
           : 'Network error while accepting pickup.'
       );
+      setTimeout(() => setStatusNotice(null), 5000);
     } finally {
       if (acceptTimeout) window.clearTimeout(acceptTimeout);
       setAcceptingPickup(false);
@@ -688,12 +742,51 @@ export default function AgentDashboardPage() {
     }
 
     actionRequestRef.current = true;
-    setActionLoading(true);
-    setStatusNotice(null);
+    setActionLoading(action);
+
+    // Save previous state for safe rollback
+    const previousActiveOrder = activeOrder;
+    const previousOrders = orders;
+
+    // Optimistic UI feedback for 'accept', 'start', and 'arrive' (0 ms visual state transition)
+    if (action === 'accept') {
+      const optimisticOrder = {
+        ...activeOrder,
+        status: 'AGENT_ACCEPTED',
+      };
+      setActiveOrder(optimisticOrder);
+      setOrders((currentOrders) =>
+        currentOrders.map((order) => (order.id === optimisticOrder.id ? optimisticOrder : order))
+      );
+      setStatusNotice('Accepting pickup assignment...');
+    } else if (action === 'start') {
+      const optimisticOrder = {
+        ...activeOrder,
+        status: 'AGENT_ON_WAY',
+      };
+      setActiveOrder(optimisticOrder);
+      setOrders((currentOrders) =>
+        currentOrders.map((order) => (order.id === optimisticOrder.id ? optimisticOrder : order))
+      );
+      setStatusNotice('Starting journey to customer location...');
+    } else if (action === 'arrive') {
+      const optimisticOrder = {
+        ...activeOrder,
+        status: 'AGENT_ARRIVED',
+      };
+      setActiveOrder(optimisticOrder);
+      setOrders((currentOrders) =>
+        currentOrders.map((order) => (order.id === optimisticOrder.id ? optimisticOrder : order))
+      );
+      setStatusNotice('Marking arrival at customer doorstep...');
+    } else {
+      setStatusNotice(null);
+    }
+
     let actionTimeout: number | undefined;
     try {
       const controller = new AbortController();
-      actionTimeout = window.setTimeout(() => controller.abort(), 30_000);
+      actionTimeout = window.setTimeout(() => controller.abort(), 15_000);
       const res = await fetch(`/api/orders/${activeOrder.id}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -724,7 +817,13 @@ export default function AgentDashboardPage() {
                   status: rawOrder.status || 'AGENT_ACCEPTED',
                 }
               : await fetchOrderDetails(targetId)
-            : rawOrder;
+            : {
+                ...activeOrder,
+                ...rawOrder,
+                items: Array.isArray(rawOrder?.items) ? rawOrder.items : activeOrder?.items,
+                id: targetId,
+                status: rawOrder.status || (action === 'start' ? 'AGENT_ON_WAY' : 'AGENT_ARRIVED'),
+              };
           if (nextOrder) {
             setActiveOrder(nextOrder);
             if (action === 'accept' && Array.isArray(nextOrder.items) && nextOrder.items.length > 0) {
@@ -747,12 +846,28 @@ export default function AgentDashboardPage() {
           }
         }
       } else {
+        // Safe rollback on failure for optimistic actions
+        if (action === 'accept' || action === 'start' || action === 'arrive') {
+          setActiveOrder(previousActiveOrder);
+          setOrders(previousOrders);
+          if (action === 'arrive') {
+            setShowWeighModal(false);
+          }
+        }
         const errorText = data.error?.message || data.message || `Failed to perform ${action} action.`;
         setStatusNotice(errorText);
         setTimeout(() => setStatusNotice(null), 5000);
       }
     } catch (e) {
       console.error(e);
+      // Safe rollback on network error
+      if (action === 'accept' || action === 'start' || action === 'arrive') {
+        setActiveOrder(previousActiveOrder);
+        setOrders(previousOrders);
+        if (action === 'arrive') {
+          setShowWeighModal(false);
+        }
+      }
       setStatusNotice(
         e instanceof DOMException && e.name === 'AbortError'
           ? 'The action timed out. Please check the order status and try again.'
@@ -761,7 +876,7 @@ export default function AgentDashboardPage() {
       setTimeout(() => setStatusNotice(null), 4000);
     } finally {
       if (actionTimeout) window.clearTimeout(actionTimeout);
-      setActionLoading(false);
+      setActionLoading(null);
       actionRequestRef.current = false;
     }
   };
@@ -796,10 +911,61 @@ export default function AgentDashboardPage() {
 
     weighingRequestRef.current = true;
     setSubmittingWeigh(true);
+
+    // Save previous state for safe rollback
+    const previousActiveOrder = activeOrder;
+    const previousOrders = orders;
+
+    // 2. Immediate optimistic UI feedback (0 ms visual state transition)
+    const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+    let optimisticRecyclable = 0;
+    let optimisticWasteCharge = 0;
+    const updatedItems = (activeOrder.items || []).map((dbItem: any) => {
+      const matched = payloadActualWeights.find(
+        (w) => (w.itemId && w.itemId === dbItem.id) || w.categoryId === dbItem.categoryId
+      );
+      const weightKg = matched ? matched.actualWeight : Number(dbItem.estimatedWeight || 0);
+      const rate = Number(dbItem.ratePerKg || 0);
+      const subtotal = round2(weightKg * rate);
+      if (dbItem.category?.type === 'WASTE_CHARGE') {
+        optimisticWasteCharge += subtotal;
+      } else {
+        optimisticRecyclable += subtotal;
+      }
+      return {
+        ...dbItem,
+        actualWeight: weightKg,
+        subtotal,
+      };
+    });
+
+    const pickupCharge = Number(activeOrder.pickupCharge || 0);
+    const discountAmount = Number(activeOrder.discountAmount || 0);
+    const netAmount = optimisticRecyclable - (optimisticWasteCharge + pickupCharge - discountAmount);
+    const optimisticDirection = netAmount >= 0 ? 'JUNKITOUT_PAYS' : 'CUSTOMER_PAYS';
+    const optimisticFinalAmount = round2(Math.abs(netAmount));
+
+    const optimisticOrder = {
+      ...activeOrder,
+      status: 'PICKUP_COMPLETED',
+      items: updatedItems,
+      actualTotal: optimisticRecyclable,
+      financialDirection: optimisticDirection,
+      finalAmount: optimisticFinalAmount,
+      paymentStatus: optimisticDirection === 'JUNKITOUT_PAYS' ? 'SETTLEMENT_PENDING' : activeOrder.paymentStatus,
+    };
+
+    setShowWeighModal(false);
+    setActiveOrder(optimisticOrder);
+    setOrders((currentOrders) =>
+      currentOrders.map((order) => (order.id === optimisticOrder.id ? optimisticOrder : order))
+    );
+    setStatusNotice('Completing pickup and recording doorstep weights...');
+
     let weighTimeout: number | undefined;
     try {
       const controller = new AbortController();
-      weighTimeout = window.setTimeout(() => controller.abort(), 30_000);
+      weighTimeout = window.setTimeout(() => controller.abort(), 15_000);
       // Submit door-to-door scale weights and complete pickup in a single atomic request
       const completeRes = await fetch(`/api/orders/${activeOrder.id}/complete`, {
         method: 'POST',
@@ -814,13 +980,13 @@ export default function AgentDashboardPage() {
       window.clearTimeout(weighTimeout);
       const completeData = await completeRes.json().catch(() => ({}));
       if (completeRes.ok && completeData.success) {
-        setShowWeighModal(false);
         setStatusNotice(`Order #${activeOrder.orderNumber} successfully COMPLETED! Weights persisted & invoice generated.`);
         setTimeout(() => setStatusNotice(null), 6000);
         if (completeData.data?.id) {
+          const finalOrder = completeData.data;
           setOrders((currentOrders) =>
             currentOrders.map((order) =>
-              order.id === completeData.data.id ? completeData.data : order
+              order.id === finalOrder.id ? finalOrder : order
             )
           );
         }
@@ -828,15 +994,28 @@ export default function AgentDashboardPage() {
         setActualWeightsInput([]);
         void fetchAgentData(false);
       } else {
-        setWeighModalError(completeData.error?.message || completeData.message || 'Failed to complete pickup order.');
+        // Safe rollback on API rejection
+        setActiveOrder(previousActiveOrder);
+        setOrders(previousOrders);
+        setShowWeighModal(true);
+        const errorText = completeData.error?.message || completeData.message || 'Failed to complete pickup order.';
+        setWeighModalError(errorText);
+        setStatusNotice(errorText);
+        setTimeout(() => setStatusNotice(null), 5000);
       }
     } catch (e) {
       console.error('Weighing/Completion error:', e);
-      setWeighModalError(
+      // Safe rollback on network error or timeout
+      setActiveOrder(previousActiveOrder);
+      setOrders(previousOrders);
+      setShowWeighModal(true);
+      const errorText =
         e instanceof DOMException && e.name === 'AbortError'
           ? 'Completion timed out. Please check your network and active orders.'
-          : 'Network error while completing pickup. Please check your connection and try again.'
-      );
+          : 'Network error while completing pickup. Please check your connection and try again.';
+      setWeighModalError(errorText);
+      setStatusNotice(errorText);
+      setTimeout(() => setStatusNotice(null), 5000);
     } finally {
       if (weighTimeout) window.clearTimeout(weighTimeout);
       setSubmittingWeigh(false);
@@ -960,7 +1139,8 @@ export default function AgentDashboardPage() {
   }
 
   const todayPickups = orders.length;
-  const completedCount = orders.filter((o) => ['SETTLEMENT_COMPLETED', 'PICKUP_COMPLETED'].includes(o.status)).length;
+  const completedPickups = orders.filter((o) => ['SETTLEMENT_COMPLETED', 'PICKUP_COMPLETED'].includes(o.status));
+  const completedCount = completedPickups.length;
   const pendingCount = todayPickups - completedCount;
 
   return (
@@ -1215,45 +1395,45 @@ export default function AgentDashboardPage() {
             {isOnline && activeOrder.status === 'AGENT_ASSIGNED' && (
               <button
                 onClick={() => handleCallEndpoint('accept')}
-                disabled={actionLoading}
+                disabled={Boolean(actionLoading)}
                 className="w-full btn-glossy-primary rounded-full text-white font-black text-sm py-4 shadow-lg flex items-center justify-center gap-2 tracking-wide"
               >
-                {actionLoading ? (
+                {actionLoading === 'accept' ? (
                   <RefreshCw className="w-5 h-5 animate-spin shrink-0" />
                 ) : (
                   <CheckCircle className="w-5 h-5 shrink-0" />
                 )}
-                {actionLoading ? 'ACCEPTING ASSIGNMENT...' : 'ACCEPT PICKUP ASSIGNMENT'}
+                {actionLoading === 'accept' ? 'ACCEPTING ASSIGNMENT...' : 'ACCEPT PICKUP ASSIGNMENT'}
               </button>
             )}
 
             {activeOrder.status === 'AGENT_ACCEPTED' && (
               <button
                 onClick={() => handleCallEndpoint('start')}
-                disabled={actionLoading}
+                disabled={Boolean(actionLoading)}
                 className="w-full btn-glossy-primary rounded-full text-white font-black text-sm py-4 shadow-lg flex items-center justify-center gap-2 tracking-wide"
               >
-                {actionLoading ? (
+                {actionLoading === 'start' ? (
                   <RefreshCw className="w-5 h-5 animate-spin shrink-0" />
                 ) : (
                   <Play className="w-5 h-5 shrink-0" />
                 )}
-                {actionLoading ? 'STARTING JOURNEY...' : 'START JOURNEY TO CUSTOMER'}
+                {actionLoading === 'start' ? 'STARTING JOURNEY...' : 'START JOURNEY TO CUSTOMER'}
               </button>
             )}
 
             {activeOrder.status === 'AGENT_ON_WAY' && (
               <button
                 onClick={() => handleCallEndpoint('arrive')}
-                disabled={actionLoading}
+                disabled={Boolean(actionLoading)}
                 className="w-full btn-glossy-blue rounded-full text-white font-black text-sm py-4 shadow-lg flex items-center justify-center gap-2 tracking-wide"
               >
-                {actionLoading ? (
+                {actionLoading === 'arrive' ? (
                   <RefreshCw className="w-5 h-5 animate-spin shrink-0" />
                 ) : (
                   <MapPin className="w-5 h-5 shrink-0" />
                 )}
-                {actionLoading ? 'MARKING ARRIVED...' : 'MARK ARRIVED AT DOORSTEP'}
+                {actionLoading === 'arrive' ? 'MARKING ARRIVED...' : 'MARK ARRIVED AT DOORSTEP'}
               </button>
             )}
 
@@ -1281,6 +1461,58 @@ export default function AgentDashboardPage() {
           <Truck className="w-12 h-12 text-slate-600 mx-auto" />
           <h3 className="font-bold text-white text-base">No Active Pickup Assigned</h3>
           <p className="text-xs text-slate-400">You are on duty in Bengaluru. New orders will appear here automatically.</p>
+        </div>
+      )}
+
+      {/* RECENT COMPLETED PICKUPS & SETTLEMENTS */}
+      {completedPickups.length > 0 && (
+        <div className="mx-4 mt-6 space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-xs font-bold text-slate-400 uppercase">
+              Completed Pickups ({completedPickups.length})
+            </span>
+            <span className="text-[11px] text-emerald-400 font-semibold">
+              Today's Completed
+            </span>
+          </div>
+
+          <div className="space-y-2.5">
+            {completedPickups.slice(0, 5).map((co: any) => {
+              const totalKg = (co.items || []).reduce(
+                (sum: number, it: any) => sum + (Number(it.actualWeight || it.estimatedWeight) || 0),
+                0
+              );
+              return (
+                <div
+                  key={co.id}
+                  className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-3.5 space-y-1.5 shadow-sm"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-bold text-white">
+                      #{co.orderNumber || (co.id ? co.id.slice(-8) : '')}
+                    </span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/80">
+                      {co.status === 'SETTLEMENT_COMPLETED' ? 'SETTLED' : 'COMPLETED'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-slate-400">
+                    <span>📍 {co.address?.area || 'Bengaluru'}</span>
+                    <span className="text-slate-300 font-semibold">
+                      {totalKg > 0 ? `${totalKg.toFixed(1)} kg` : 'Weighed'}
+                    </span>
+                  </div>
+                  {typeof co.finalAmount === 'number' && co.finalAmount > 0 && (
+                    <div className="pt-1.5 border-t border-slate-700/50 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400">Settlement Amount:</span>
+                      <span className="font-bold text-emerald-400 font-mono">
+                        ₹{Number(co.finalAmount).toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 

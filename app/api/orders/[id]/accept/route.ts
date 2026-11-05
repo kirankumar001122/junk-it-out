@@ -32,11 +32,21 @@ export async function POST(
 
     const agentId = authUser.agentId;
 
-    // 2. Load Agent Profile & Check Availability Status
-    const agent = await db.agent.findUnique({
-      where: { id: agentId },
-      include: { user: { select: { id: true, name: true, phone: true } } },
-    });
+    // 2. Concurrently load Agent Profile and Order (consolidates 2 sequential round trips)
+    const [agent, order] = await Promise.all([
+      db.agent.findUnique({
+        where: { id: agentId },
+        include: { user: { select: { id: true, name: true, phone: true } } },
+      }),
+      db.order.findFirst({
+        where: {
+          OR: [{ id }, { orderNumber: id }],
+        },
+        include: {
+          address: true,
+        },
+      }),
+    ]);
 
     if (!agent) {
       return errorResponse('AGENT_NOT_FOUND', 'Agent profile not found.', 404);
@@ -49,16 +59,6 @@ export async function POST(
         403
       );
     }
-
-    // 3. Load Order & Address for Service Area Matching
-    const order = await db.order.findFirst({
-      where: {
-        OR: [{ id }, { orderNumber: id }],
-      },
-      include: {
-        address: true,
-      },
-    });
 
     if (!order) {
       return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
@@ -261,6 +261,7 @@ export async function POST(
       }
     }
 
+    invalidateAdminOperationsCaches();
     return successResponse(
       formatOrderResponse(updatedOrder, {
         id: order.id,

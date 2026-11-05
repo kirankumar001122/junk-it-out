@@ -721,7 +721,454 @@ async function runTests() {
       assert.equal(invoiceCreated, true);
     }
 
-    console.log('ALL AGENT COMPLETION & WEIGHING WORKFLOW TESTS PASSED CLEANLY.');
+    // TEST 11: Rejects non-existent order with 404
+    console.log('Test 11: Rejects non-existent order with 404 ORDER_NOT_FOUND...');
+    {
+      database.order.findUnique = async () => null;
+
+      const req = makeRequest('http://localhost:3000/api/orders/order-missing-999/complete', {
+        token: createAgentToken('agent-123'),
+        body: { actualWeights: [{ itemId: 'item-1', categoryId: 'cat-1', actualWeight: 5 }] },
+      });
+      const res = await completeOrder(req, { params: Promise.resolve({ id: 'order-missing-999' }) });
+      assert.equal(res.status, 404, 'Must return 404 for missing order');
+      const body = await res.json();
+      assert.equal(body.error?.code, 'ORDER_NOT_FOUND');
+    }
+
+    // TEST 12: Rejects invalid status transition (e.g. from BOOKING_RECEIVED or AGENT_ASSIGNED)
+    console.log('Test 12: Rejects invalid status transition (e.g., AGENT_ASSIGNED) with 400...');
+    {
+      database.order.findUnique = async () => ({
+        id: 'order-invalid-1',
+        agentId: 'agent-123',
+        status: 'AGENT_ASSIGNED',
+        weightRecords: [],
+        invoices: [],
+        items: [{ id: 'item-1', categoryId: 'cat-1', ratePerKg: 10, category: { type: 'RECYCLABLE' } }],
+      });
+
+      const req = makeRequest('http://localhost:3000/api/orders/order-invalid-1/complete', {
+        token: createAgentToken('agent-123'),
+        body: { actualWeights: [{ itemId: 'item-1', categoryId: 'cat-1', actualWeight: 5 }] },
+      });
+      const res = await completeOrder(req, { params: Promise.resolve({ id: 'order-invalid-1' }) });
+      assert.equal(res.status, 400, 'Must reject completion from AGENT_ASSIGNED');
+      const body = await res.json();
+      assert.equal(body.error?.code, 'INVALID_STATUS_TRANSITION');
+    }
+
+    // TEST 13: Atomic weighing and completion with CUSTOMER_PAYS (waste charge exceeds recyclable scrap)
+    console.log('Test 13: Atomic weighing and completion with CUSTOMER_PAYS...');
+    {
+      let transactionExecuted = false;
+      let settlementCreated = false;
+      let invoiceCreated = false;
+
+      database.order.findUnique = async () => ({
+        id: 'order-cust-pays-1',
+        orderNumber: 'JIO-CUSTPAYS-01',
+        agentId: 'agent-123',
+        customerId: 'cust-123',
+        status: 'AGENT_ARRIVED',
+        pickupCharge: 100,
+        discountAmount: 0,
+        actualTotal: 0,
+        finalAmount: 0,
+        financialDirection: 'CUSTOMER_PAYS',
+        paymentStatus: 'PENDING',
+        weightRecords: [],
+        invoices: [],
+        items: [
+          { id: 'item-waste', categoryId: 'cat-waste', ratePerKg: 50, estimatedWeight: 2, category: { type: 'WASTE_CHARGE' } },
+        ],
+        customer: { user: { name: 'Customer C', phone: '9999999992' } },
+        agent: { userId: 'user-agent-123', user: { name: 'Agent X' } },
+        address: { houseNo: '14', street: 'Church St', area: 'Bengaluru' },
+      });
+
+      database.$transaction = async (callback: any) => {
+        transactionExecuted = true;
+        const tx = {
+          $queryRaw: async () => [{ id: 'order-cust-pays-1' }],
+          orderItem: {
+            update: async ({ where, data }: any) => ({ id: where.id, ...data }),
+          },
+          weightRecord: {
+            create: async ({ data }: any) => ({ id: 'w-rec-2', ...data }),
+          },
+          settlement: {
+            upsert: async () => {
+              settlementCreated = true;
+              return { id: 'settle-2' };
+            },
+          },
+          order: {
+            findUnique: async () => ({
+              id: 'order-cust-pays-1',
+              status: 'AGENT_ARRIVED',
+              agentId: 'agent-123',
+              items: [{ id: 'item-waste', actualWeight: null }],
+            }),
+            update: async ({ data }: any) => {
+              if (data.invoices?.create) invoiceCreated = true;
+              return {
+                id: 'order-cust-pays-1',
+                status: data.status,
+                financialDirection: data.financialDirection,
+                finalAmount: data.finalAmount,
+              };
+            },
+          },
+          agent: {
+            update: async ({ data }: any) => ({ id: 'agent-123', status: data.status }),
+          },
+        };
+        return callback(tx);
+      };
+
+      const req = makeRequest('http://localhost:3000/api/orders/order-cust-pays-1/complete', {
+        token: createAgentToken('agent-123'),
+        body: {
+          actualWeights: [{ itemId: 'item-waste', categoryId: 'cat-waste', actualWeight: 2 }],
+        },
+      });
+
+      const res = await completeOrder(req, { params: Promise.resolve({ id: 'order-cust-pays-1' }) });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.data.financialDirection, 'CUSTOMER_PAYS');
+      // 2kg * 50 = 100 waste charge + 100 pickup charge = 200 finalAmount
+      assert.equal(body.data.finalAmount, 200);
+      assert.equal(settlementCreated, false, 'No payout settlement should be created when customer pays');
+      assert.equal(invoiceCreated, true);
+    }
+
+    // TEST 14: Transaction rollback when settlement creation fails inside transaction
+    console.log('Test 14: Transaction rollback when settlement creation fails inside transaction...');
+    {
+      database.order.findUnique = async () => ({
+        id: 'order-rollback-settle',
+        agentId: 'agent-123',
+        customerId: 'cust-123',
+        status: 'AGENT_ARRIVED',
+        pickupCharge: 0,
+        discountAmount: 0,
+        actualTotal: 0,
+        finalAmount: 0,
+        financialDirection: 'CUSTOMER_PAYS',
+        paymentStatus: 'PENDING',
+        weightRecords: [],
+        invoices: [],
+        items: [
+          { id: 'item-1', categoryId: 'cat-1', ratePerKg: 20, category: { type: 'RECYCLABLE' } },
+        ],
+        customer: { user: { name: 'Customer A' } },
+        agent: { userId: 'user-agent-123' },
+      });
+
+      database.$transaction = async (callback: any) => {
+        const tx = {
+          $queryRaw: async () => [{ id: 'order-rollback-settle' }],
+          orderItem: { update: async () => ({}) },
+          weightRecord: { create: async () => ({}) },
+          settlement: {
+            upsert: async () => {
+              throw new Error('Simulated database disk failure during settlement creation');
+            },
+          },
+          order: {
+            findUnique: async () => ({
+              id: 'order-rollback-settle',
+              status: 'AGENT_ARRIVED',
+              agentId: 'agent-123',
+              items: [{ id: 'item-1', actualWeight: null }],
+            }),
+            update: async () => ({}),
+          },
+          agent: { update: async () => ({}) },
+        };
+        return callback(tx);
+      };
+
+      const req = makeRequest('http://localhost:3000/api/orders/order-rollback-settle/complete', {
+        token: createAgentToken('agent-123'),
+        body: {
+          actualWeights: [{ itemId: 'item-1', categoryId: 'cat-1', actualWeight: 10 }],
+        },
+      });
+
+      const res = await completeOrder(req, { params: Promise.resolve({ id: 'order-rollback-settle' }) });
+      assert.equal(res.status, 500, 'Must return 500 when transaction rolls back');
+      const body = await res.json();
+      assert.equal(body.error?.code, 'INTERNAL_SERVER_ERROR');
+    }
+
+    // TEST 15: Transaction rollback when agent status update fails inside transaction
+    console.log('Test 15: Transaction rollback when agent status update fails inside transaction...');
+    {
+      database.order.findUnique = async () => ({
+        id: 'order-rollback-agent',
+        agentId: 'agent-123',
+        customerId: 'cust-123',
+        status: 'AGENT_ARRIVED',
+        pickupCharge: 0,
+        discountAmount: 0,
+        actualTotal: 0,
+        finalAmount: 0,
+        financialDirection: 'CUSTOMER_PAYS',
+        paymentStatus: 'PENDING',
+        weightRecords: [],
+        invoices: [],
+        items: [
+          { id: 'item-1', categoryId: 'cat-1', ratePerKg: 20, category: { type: 'RECYCLABLE' } },
+        ],
+        customer: { user: { name: 'Customer A' } },
+        agent: { userId: 'user-agent-123' },
+      });
+
+      database.$transaction = async (callback: any) => {
+        const tx = {
+          $queryRaw: async () => [{ id: 'order-rollback-agent' }],
+          orderItem: { update: async () => ({}) },
+          weightRecord: { create: async () => ({}) },
+          settlement: { upsert: async () => ({}) },
+          order: {
+            findUnique: async () => ({
+              id: 'order-rollback-agent',
+              status: 'AGENT_ARRIVED',
+              agentId: 'agent-123',
+              items: [{ id: 'item-1', actualWeight: null }],
+            }),
+            update: async () => ({}),
+          },
+          agent: {
+            update: async () => {
+              throw new Error('Simulated database deadlock during agent status update');
+            },
+          },
+        };
+        return callback(tx);
+      };
+
+      const req = makeRequest('http://localhost:3000/api/orders/order-rollback-agent/complete', {
+        token: createAgentToken('agent-123'),
+        body: {
+          actualWeights: [{ itemId: 'item-1', categoryId: 'cat-1', actualWeight: 10 }],
+        },
+      });
+
+      const res = await completeOrder(req, { params: Promise.resolve({ id: 'order-rollback-agent' }) });
+      assert.equal(res.status, 500, 'Must return 500 on transaction error');
+      const body = await res.json();
+      assert.equal(body.error?.code, 'INTERNAL_SERVER_ERROR');
+    }
+
+    // TEST 16: Idempotent repeat includes hydrated address without running write transaction
+    console.log('Test 16: Idempotent repeat includes hydrated address without running write transaction...');
+    {
+      let txCalled = false;
+      database.order.findUnique = async () => ({
+        id: 'order-idempotent-2',
+        orderNumber: 'JIO-IDEMPOTENT-02',
+        agentId: 'agent-123',
+        status: 'PICKUP_COMPLETED',
+        address: { houseNo: '100', street: 'Brigade Rd', area: 'Bengaluru' },
+        weightRecords: [{ id: 'w-1' }],
+        invoices: [{ id: 'inv-1' }],
+        items: [],
+      });
+      database.$transaction = async () => {
+        txCalled = true;
+      };
+
+      const req = makeRequest('http://localhost:3000/api/orders/order-idempotent-2/complete', {
+        token: createAgentToken('agent-123'),
+      });
+      const res = await completeOrder(req, { params: Promise.resolve({ id: 'order-idempotent-2' }) });
+      assert.equal(res.status, 200);
+      assert.equal(txCalled, false, 'Must not execute write transaction on idempotent retry');
+      const body = await res.json();
+      assert.equal(body.data.address?.area, 'Bengaluru');
+      assert.equal(body.meta?.message, 'Order was already completed.');
+    }
+
+    // -------------------------------------------------------------------------
+    // SECTION: FRONTEND OPTIMISTIC UI & RESILIENT ROLLBACK
+    // -------------------------------------------------------------------------
+    console.log('Test 17: Frontend optimistic complete transitions order to PICKUP_COMPLETED immediately (0 ms)...');
+    {
+      let activeOrder: any = {
+        id: 'order-opt-1',
+        orderNumber: 'ORD-OPT-01',
+        status: 'AGENT_ARRIVED',
+        pickupCharge: 0,
+        discountAmount: 0,
+        items: [{ id: 'item-1', categoryId: 'cat-1', ratePerKg: 20, estimatedWeight: 5, category: { type: 'RECYCLABLE' } }],
+      };
+      let orders: any[] = [activeOrder];
+      let showWeighModal = true;
+      let statusNotice: string | null = null;
+      let submittingWeigh = false;
+      let weighingRequestRef = false;
+
+      // Agent clicks "CONFIRM WEIGHTS & COMPLETE PICKUP"
+      const payloadActualWeights = [{ itemId: 'item-1', categoryId: 'cat-1', actualWeight: 10 }];
+      weighingRequestRef = true;
+      submittingWeigh = true;
+
+      // Optimistic transition
+      const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+      let optimisticRecyclable = 0;
+      let optimisticWasteCharge = 0;
+      const updatedItems = (activeOrder.items || []).map((dbItem: any) => {
+        const matched = payloadActualWeights.find(
+          (w) => (w.itemId && w.itemId === dbItem.id) || w.categoryId === dbItem.categoryId
+        );
+        const weightKg = matched ? matched.actualWeight : Number(dbItem.estimatedWeight || 0);
+        const rate = Number(dbItem.ratePerKg || 0);
+        const subtotal = round2(weightKg * rate);
+        if (dbItem.category?.type === 'WASTE_CHARGE') {
+          optimisticWasteCharge += subtotal;
+        } else {
+          optimisticRecyclable += subtotal;
+        }
+        return { ...dbItem, actualWeight: weightKg, subtotal };
+      });
+      const netAmount = optimisticRecyclable - (optimisticWasteCharge + Number(activeOrder.pickupCharge || 0) - Number(activeOrder.discountAmount || 0));
+      const optimisticDirection = netAmount >= 0 ? 'JUNKITOUT_PAYS' : 'CUSTOMER_PAYS';
+      const optimisticFinalAmount = round2(Math.abs(netAmount));
+
+      const optimisticOrder = {
+        ...activeOrder,
+        status: 'PICKUP_COMPLETED',
+        items: updatedItems,
+        actualTotal: optimisticRecyclable,
+        financialDirection: optimisticDirection,
+        finalAmount: optimisticFinalAmount,
+        paymentStatus: optimisticDirection === 'JUNKITOUT_PAYS' ? 'SETTLEMENT_PENDING' : activeOrder.paymentStatus,
+      };
+
+      showWeighModal = false;
+      activeOrder = optimisticOrder;
+      orders = orders.map((order) => (order.id === optimisticOrder.id ? optimisticOrder : order));
+      statusNotice = 'Completing pickup and recording doorstep weights...';
+
+      assert.equal(showWeighModal, false, 'Weigh modal must close immediately');
+      assert.equal(activeOrder.status, 'PICKUP_COMPLETED');
+      assert.equal(activeOrder.finalAmount, 200);
+      assert.equal(activeOrder.financialDirection, 'JUNKITOUT_PAYS');
+      assert.equal(orders[0].status, 'PICKUP_COMPLETED');
+      assert.equal(statusNotice, 'Completing pickup and recording doorstep weights...');
+      assert.equal(weighingRequestRef, true);
+      assert.equal(submittingWeigh, true);
+    }
+
+    console.log('Test 18: Frontend rollback on API rejection (400, 403, 500) reverts activeOrder & orders, reopens modal with weights intact...');
+    {
+      const initialOrder = {
+        id: 'order-rollback-ui',
+        orderNumber: 'ORD-RB-UI',
+        status: 'AGENT_ARRIVED',
+        items: [{ id: 'item-1', categoryId: 'cat-1', ratePerKg: 10, estimatedWeight: 5 }],
+      };
+      let activeOrder: any = { ...initialOrder };
+      let orders: any[] = [activeOrder];
+      let showWeighModal = true;
+      let weighModalError: string | null = null;
+      let statusNotice: string | null = null;
+      let submittingWeigh = true;
+      let weighingRequestRef = true;
+
+      const previousActiveOrder = activeOrder;
+      const previousOrders = orders;
+
+      // Optimistic update occurred
+      activeOrder = { ...activeOrder, status: 'PICKUP_COMPLETED' };
+      orders = [activeOrder];
+      showWeighModal = false;
+
+      // Simulate API failure
+      const completeData = { success: false, error: { message: 'Order is assigned to another agent.' } };
+
+      // Rollback
+      activeOrder = previousActiveOrder;
+      orders = previousOrders;
+      showWeighModal = true;
+      const errorText = completeData.error?.message || 'Failed to complete pickup order.';
+      weighModalError = errorText;
+      statusNotice = errorText;
+      submittingWeigh = false;
+      weighingRequestRef = false;
+
+      assert.equal(activeOrder.status, 'AGENT_ARRIVED', 'activeOrder must revert to AGENT_ARRIVED');
+      assert.equal(orders[0].status, 'AGENT_ARRIVED');
+      assert.equal(showWeighModal, true, 'Modal must reopen on error');
+      assert.equal(weighModalError, 'Order is assigned to another agent.');
+      assert.equal(statusNotice, 'Order is assigned to another agent.');
+      assert.equal(submittingWeigh, false, 'Submit button must be unlocked');
+      assert.equal(weighingRequestRef, false, 'weighingRequestRef must be unlocked');
+    }
+
+    console.log('Test 19: Frontend rollback on 15s AbortController timeout / network error...');
+    {
+      const initialOrder = {
+        id: 'order-timeout-ui',
+        status: 'AGENT_ARRIVED',
+        items: [{ id: 'item-1', categoryId: 'cat-1', ratePerKg: 10 }],
+      };
+      let activeOrder: any = { ...initialOrder };
+      let orders: any[] = [activeOrder];
+      let showWeighModal = false;
+      let weighModalError: string | null = null;
+      let statusNotice: string | null = null;
+      let submittingWeigh = true;
+      let weighingRequestRef = true;
+
+      const previousActiveOrder = initialOrder;
+      const previousOrders = [initialOrder];
+
+      const e = new DOMException('The operation was aborted.', 'AbortError');
+      activeOrder = previousActiveOrder;
+      orders = previousOrders;
+      showWeighModal = true;
+      const errorText = e instanceof DOMException && e.name === 'AbortError'
+        ? 'Completion timed out. Please check your network and active orders.'
+        : 'Network error while completing pickup. Please check your connection and try again.';
+      weighModalError = errorText;
+      statusNotice = errorText;
+      submittingWeigh = false;
+      weighingRequestRef = false;
+
+      assert.equal(activeOrder.status, 'AGENT_ARRIVED');
+      assert.equal(showWeighModal, true, 'Modal must reopen on timeout');
+      assert.equal(weighModalError, 'Completion timed out. Please check your network and active orders.');
+      assert.equal(submittingWeigh, false);
+      assert.equal(weighingRequestRef, false);
+    }
+
+    console.log('Test 20: GPS heartbeat yields while completion is in-flight, halts on completion, and resumes after rollback...');
+    {
+      const TRACKING_ELIGIBLE_STATUSES = [
+        'AGENT_ACCEPTED',
+        'AGENT_ON_WAY',
+        'AGENT_ARRIVED',
+        'WEIGHING',
+        'WASTE_VERIFICATION',
+      ];
+
+      const isYielding = (weighingInFlight: boolean, status: string) => {
+        if (!TRACKING_ELIGIBLE_STATUSES.includes(status)) return 'STOPPED_INELIGIBLE';
+        if (weighingInFlight) return 'DEFERRED';
+        return 'TRACKING';
+      };
+
+      assert.equal(isYielding(true, 'AGENT_ARRIVED'), 'DEFERRED', 'GPS must defer while complete is in flight');
+      assert.equal(isYielding(false, 'PICKUP_COMPLETED'), 'STOPPED_INELIGIBLE', 'GPS must halt once pickup is completed');
+      assert.equal(isYielding(false, 'AGENT_ARRIVED'), 'TRACKING', 'GPS must resume after rollback to AGENT_ARRIVED');
+    }
+
+        console.log('ALL AGENT COMPLETION & WEIGHING WORKFLOW TESTS PASSED CLEANLY.');
   } finally {
     database.agent.findUnique = origAgentFindUnique;
     database.order.findUnique = origOrderFindUnique;

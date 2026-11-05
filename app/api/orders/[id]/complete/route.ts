@@ -29,6 +29,7 @@ export async function POST(
       include: {
         agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
         customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
+        address: true,
         items: { include: { category: true } },
         weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
         invoices: { take: 1 },
@@ -359,6 +360,7 @@ export async function POST(
 
       return { kind: 'completed' as const, order: updated };
     }, {
+      isolationLevel: 'ReadCommitted',
       maxWait: 10000,
       timeout: 25000,
     });

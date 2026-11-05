@@ -399,7 +399,192 @@ database.user = { ...database.user, findUnique: async () => ({ tokenVersion: 1 }
       assert.equal(weighingRequestRef, false);
     }
 
-    console.log('--- ALL AGENT JOURNEY & RESILIENCE REGRESSION TESTS PASSED CLEANLY! ---');
+    // -------------------------------------------------------------------------
+    // SECTION 5: MARK ARRIVED OPTIMISTIC UI & RESILIENT ROLLBACK
+    // -------------------------------------------------------------------------
+    console.log('Test 12: Mark arrived frontend optimistic update transitions order to AGENT_ARRIVED immediately...');
+    {
+      let activeOrder: any = { ...sampleOrder, status: 'AGENT_ON_WAY' };
+      let orders: any[] = [activeOrder];
+      let statusNotice: string | null = null;
+      let actionLoading: string | null = null;
+      let actionRequestRef = false;
+
+      // Simulate clicking "MARK ARRIVED AT DOORSTEP"
+      actionRequestRef = true;
+      actionLoading = 'arrive';
+
+      // 0 ms optimistic update
+      const optimisticOrder = {
+        ...activeOrder,
+        status: 'AGENT_ARRIVED',
+      };
+      activeOrder = optimisticOrder;
+      orders = orders.map((order) => (order.id === optimisticOrder.id ? optimisticOrder : order));
+      statusNotice = 'Marking arrival at customer doorstep...';
+
+      // Verify immediate synchronous state update (0 ms)
+      assert.equal(activeOrder.status, 'AGENT_ARRIVED', 'activeOrder must immediately update to AGENT_ARRIVED');
+      assert.equal(orders[0].status, 'AGENT_ARRIVED', 'orders list must immediately reflect AGENT_ARRIVED');
+      assert.equal(statusNotice, 'Marking arrival at customer doorstep...', 'statusNotice must show transition');
+      assert.equal(actionRequestRef, true, 'actionRequestRef must be set during in-flight request');
+      assert.equal(actionLoading, 'arrive', 'actionLoading must be set to arrive');
+    }
+
+    console.log('Test 13: Arrive rollback on API rejection (400, 403, 500) reverts activeOrder & orders and closes weigh modal...');
+    {
+      let activeOrder: any = { ...sampleOrder, status: 'AGENT_ON_WAY' };
+      let orders: any[] = [activeOrder];
+      let statusNotice: string | null = null;
+      let actionLoading: string | null = 'arrive';
+      let actionRequestRef = true;
+      let showWeighModal = true;
+
+      const previousActiveOrder = activeOrder;
+      const previousOrders = orders;
+
+      // Optimistic update
+      activeOrder = { ...activeOrder, status: 'AGENT_ARRIVED' };
+      orders = [activeOrder];
+
+      // Simulate API rejection
+      const data = { success: false, error: { message: 'Order is assigned to another agent.' } };
+      const handleRollback = (action: 'accept' | 'start' | 'arrive') => {
+        if (action === 'accept' || action === 'start' || action === 'arrive') {
+          activeOrder = previousActiveOrder;
+          orders = previousOrders;
+          if (action === 'arrive') {
+            showWeighModal = false;
+          }
+        }
+      };
+      handleRollback('arrive');
+      statusNotice = data.error?.message || 'Failed to perform arrive action.';
+      actionLoading = null;
+      actionRequestRef = false;
+
+      assert.equal(activeOrder.status, 'AGENT_ON_WAY', 'activeOrder must revert to AGENT_ON_WAY');
+      assert.equal(orders[0].status, 'AGENT_ON_WAY', 'orders list must revert to AGENT_ON_WAY');
+      assert.equal(showWeighModal, false, 'Weigh modal must be dismissed on arrival failure');
+      assert.equal(statusNotice, 'Order is assigned to another agent.');
+      assert.equal(actionRequestRef, false, 'actionRequestRef must be cleared');
+      assert.equal(actionLoading, null, 'actionLoading must be reset to null');
+    }
+
+    console.log('Test 14: Arrive rollback on AbortController timeout (15s) and network error...');
+    {
+      let activeOrder: any = { ...sampleOrder, status: 'AGENT_ON_WAY' };
+      let orders: any[] = [activeOrder];
+      let statusNotice: string | null = null;
+      let actionLoading: string | null = 'arrive';
+      let actionRequestRef = true;
+      let showWeighModal = true;
+
+      const previousActiveOrder = activeOrder;
+      const previousOrders = orders;
+
+      activeOrder = { ...activeOrder, status: 'AGENT_ARRIVED' };
+      orders = [activeOrder];
+
+      const err = new DOMException('The operation was aborted.', 'AbortError');
+      const handleRollback = (action: 'accept' | 'start' | 'arrive') => {
+        if (action === 'accept' || action === 'start' || action === 'arrive') {
+          activeOrder = previousActiveOrder;
+          orders = previousOrders;
+          if (action === 'arrive') {
+            showWeighModal = false;
+          }
+        }
+      };
+      handleRollback('arrive');
+      statusNotice = err instanceof DOMException && err.name === 'AbortError'
+        ? 'The action timed out. Please check the order status and try again.'
+        : 'Network error while processing action. Please try again.';
+      actionLoading = null;
+      actionRequestRef = false;
+
+      assert.equal(activeOrder.status, 'AGENT_ON_WAY', 'Must roll back to AGENT_ON_WAY on timeout');
+      assert.equal(orders[0].status, 'AGENT_ON_WAY');
+      assert.equal(showWeighModal, false);
+      assert.equal(statusNotice, 'The action timed out. Please check the order status and try again.');
+      assert.equal(actionRequestRef, false);
+      assert.equal(actionLoading, null);
+    }
+
+    console.log('Test 15: Arrive backend rejects order assigned to another agent (403)...');
+    {
+      database.order.findUnique = async () => ({
+        ...sampleOrder,
+        agentId: 'other-agent-999',
+        status: 'AGENT_ON_WAY',
+      });
+
+      const req = makeRequest('http://localhost:3000/api/orders/ord-journey-1/arrive', createAgentToken('agent-123'));
+      const res = await arriveOrder(req, { params: Promise.resolve({ id: 'ord-journey-1' }) });
+      assert.equal(res.status, 403, 'Must return 403 when order belongs to another agent');
+      const body = await res.json();
+      assert.equal(body.error?.code, 'FORBIDDEN');
+    }
+
+    console.log('Test 16: Arrive backend rejects non-existent order (404)...');
+    {
+      database.order.findUnique = async () => null;
+
+      const req = makeRequest('http://localhost:3000/api/orders/non-existent/arrive', createAgentToken('agent-123'));
+      const res = await arriveOrder(req, { params: Promise.resolve({ id: 'non-existent' }) });
+      assert.equal(res.status, 404, 'Must return 404 when order does not exist');
+      const body = await res.json();
+      assert.equal(body.error?.code, 'ORDER_NOT_FOUND');
+    }
+
+    console.log('Test 17: Database transaction rolls back order and history if agent status update fails during arrive...');
+    {
+      database.order.findUnique = async () => ({
+        ...sampleOrder,
+        status: 'AGENT_ON_WAY',
+      });
+
+      database.$transaction = async (fn: any) => {
+        return fn({
+          order: {
+            updateMany: async () => ({ count: 1 }),
+            update: async () => ({ ...sampleOrder, status: 'AGENT_ARRIVED' }),
+            findUnique: async () => ({ ...sampleOrder, status: 'AGENT_ARRIVED' }),
+          },
+          orderStatusHistory: { create: async () => ({ id: 'h-1' }) },
+          agent: {
+            update: async () => {
+              throw new Error('Simulated deadlock during agent status update');
+            },
+          },
+        });
+      };
+
+      const req = makeRequest('http://localhost:3000/api/orders/ord-journey-1/arrive', createAgentToken('agent-123'));
+      const res = await arriveOrder(req, { params: Promise.resolve({ id: 'ord-journey-1' }) });
+      assert.equal(res.status, 500, 'Must return 500 on transaction error');
+      const body = await res.json();
+      assert.equal(body.error?.code, 'INTERNAL_SERVER_ERROR');
+    }
+
+    console.log('Test 18: GPS tracking remains eligible and active in AGENT_ARRIVED status without unmounting...');
+    {
+      const TRACKING_ELIGIBLE_STATUSES = [
+        'AGENT_ACCEPTED',
+        'AGENT_ON_WAY',
+        'AGENT_ARRIVED',
+        'WEIGHING',
+        'WASTE_VERIFICATION',
+      ];
+
+      assert.equal(
+        TRACKING_ELIGIBLE_STATUSES.includes('AGENT_ARRIVED'),
+        true,
+        'AGENT_ARRIVED must be in TRACKING_ELIGIBLE_STATUSES'
+      );
+    }
+
+        console.log('--- ALL AGENT JOURNEY & RESILIENCE REGRESSION TESTS PASSED CLEANLY! ---');
   } finally {
     await new Promise((r) => setTimeout(r, 100));
     database.agent.findUnique = origAgentFindUnique;

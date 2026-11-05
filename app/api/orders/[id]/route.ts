@@ -44,8 +44,13 @@ export async function GET(
             customerId: true,
             agentId: true,
             status: true,
+            createdAt: true,
             financialDirection: true,
             paymentStatus: true,
+            pickupCharge: true,
+            discountAmount: true,
+            finalAmount: true,
+            actualTotal: true,
             customer: {
               select: {
                 user: { select: { name: true, phone: true } },
@@ -68,7 +73,8 @@ export async function GET(
                 categoryId: true,
                 estimatedWeight: true,
                 actualWeight: true,
-                category: { select: { id: true, name: true } },
+                ratePerKg: true,
+                category: { select: { id: true, name: true, type: true } },
               },
             },
           },
@@ -124,23 +130,27 @@ export async function GET(
       }
 
       if (!isAssignedAgent) {
-        const agent = authUser.agentId
-          ? await db.agent.findUnique({
-              where: { id: authUser.agentId },
-              select: { id: true, status: true, serviceAreas: true },
-            })
-          : null;
+        const [agent, activeOrder] = await Promise.all([
+          authUser.agentId
+            ? db.agent.findUnique({
+                where: { id: authUser.agentId },
+                select: { id: true, status: true, serviceAreas: true },
+              })
+            : Promise.resolve(null),
+          authUser.agentId
+            ? db.order.findFirst({
+                where: {
+                  agentId: authUser.agentId,
+                  status: { in: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WASTE_VERIFICATION', 'WEIGHING'] },
+                },
+                select: { id: true },
+              })
+            : Promise.resolve(null),
+        ]);
         if (!agent || agent.status !== 'AVAILABLE') {
           return errorResponse('FORBIDDEN', 'Only available agents may view open pickup details.', 403);
         }
 
-        const activeOrder = await db.order.findFirst({
-          where: {
-            agentId: agent.id,
-            status: { in: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WASTE_VERIFICATION', 'WEIGHING'] },
-          },
-          select: { id: true },
-        });
         if (activeOrder) {
           return errorResponse('FORBIDDEN', 'An active pickup is already assigned to your agent profile.', 403);
         }
@@ -159,7 +169,7 @@ export async function GET(
           agentId: order.agentId,
           status: order.status,
           address: { area: order.address?.area ?? null },
-          items: order.items.map((item) => ({
+          items: order.items.map((item: any) => ({
             id: item.id,
             categoryId: item.categoryId,
             estimatedWeight: item.estimatedWeight,
@@ -169,7 +179,7 @@ export async function GET(
       }
     }
 
-    const locations = order.agentId
+    const locations = order.agentId && authUser?.role !== 'AGENT'
       ? await db.agentLocation.findMany({
           where: { orderId: order.id, agentId: order.agentId },
           orderBy: { timestamp: 'desc' },

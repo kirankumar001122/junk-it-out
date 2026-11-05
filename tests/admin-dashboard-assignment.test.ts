@@ -190,4 +190,23 @@ describe('Admin Dashboard Order Assignment and Status Invariants', () => {
     expect(validateStatusTransition('BOOKING_RECEIVED', 'AGENT_ASSIGNED')).toBe(true);
     expect(validateStatusTransition('AGENT_ASSIGNED', 'AGENT_ASSIGNED')).toBe(true);
   });
+
+  it('invalidates admin operations cache when an agent assignment completes', async () => {
+    const { setCachedAdminAgents, getCachedAdminAgents } = await import('../lib/cache/adminAgentsCache');
+    setCachedAdminAgents([{ id: testAgentId, status: 'AVAILABLE' }]);
+    expect(getCachedAdminAgents()).not.toBeNull();
+
+    const req = new NextRequest(`http://localhost:3007/api/orders/${activeOrderId}/assign`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+      },
+      body: JSON.stringify({ agentId: testAgentId }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ id: activeOrderId }) });
+    expect(res.status).toBe(200);
+    expect(getCachedAdminAgents()).toBeNull();
+  });
 });
