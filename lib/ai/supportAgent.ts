@@ -128,17 +128,18 @@ export async function getLiveServiceAreas() {
       },
     });
 
+    const primaryZones = ['JP Nagar (Phases 1 to 9)', 'BTM Layout (1st & 2nd Stage)'];
     const activeAreas =
-      areas.length > 0
+      areas.length >= 2
         ? areas.map((a) => a.name)
-        : ['JP Nagar (Phases 1 to 9)', 'BTM Layout (1st & 2nd Stage)'];
+        : Array.from(new Set([...areas.map((a) => a.name), ...primaryZones]));
 
     return {
       success: true,
       city: 'Bengaluru',
       supportedCount: 2,
       activeAreas,
-      primaryZones: ['JP Nagar (Phases 1 to 9)', 'BTM Layout (1st & 2nd Stage)'],
+      primaryZones,
       serviceNotice:
         'IMPORTANT: Junk It Out currently serves ONLY TWO locations: JP Nagar and BTM Layout in Bengaluru. All other locations (Whitefield, Koramangala, Indiranagar, Electronic City, HSR Layout, etc.) are strictly NOT supported.',
       serviceHours: '8:00 AM – 8:00 PM Daily',

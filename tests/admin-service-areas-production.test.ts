@@ -67,6 +67,27 @@ describe('Admin Service Areas Production Resilience & CRUD Suite', () => {
     // Ensure seed record exists with UUID primary key and unique name (matching production state)
     try {
       await db.serviceArea.upsert({
+        where: { name: 'BTM Layout (1st & 2nd Stage)' },
+        update: { status: 'ACTIVE' },
+        create: {
+          id: 'b1a2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d',
+          name: 'BTM Layout (1st & 2nd Stage)',
+          city: 'Bengaluru',
+          status: 'ACTIVE',
+          etaMinutes: 20,
+          basePickupCharge: 50,
+          boundaryPolygon: JSON.stringify([
+            [12.92, 77.6],
+            [12.92, 77.625],
+            [12.9, 77.625],
+            [12.9, 77.6],
+          ]),
+          centerLat: 12.9166,
+          centerLng: 77.6101,
+        },
+      });
+
+      await db.serviceArea.upsert({
         where: { name: TEST_ZONE_NAME },
         update: { status: 'ACTIVE' },
         create: {
