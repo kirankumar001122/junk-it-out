@@ -4,6 +4,8 @@ import { getAuthUser, requireAdminUser } from '@/lib/auth/middleware';
 import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
+import { invalidateAdminAgentsCache } from '@/lib/cache/adminAgentsCache';
+import { invalidateAdminStatsCache } from '@/lib/cache/adminStatsCache';
 import {
   broadcastAgentBookingNotification,
   persistAgentBookingNotificationOnce,
@@ -140,6 +142,9 @@ export async function POST(
       }
       return errorResponse('CONFLICT', 'Order assignment changed before this request completed.', 409);
     }
+
+    invalidateAdminAgentsCache();
+    invalidateAdminStatsCache();
 
     if (result.order) {
       broadcaster.broadcast('ORDER_UPDATED', result.order);

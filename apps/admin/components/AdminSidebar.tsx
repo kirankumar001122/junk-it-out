@@ -25,7 +25,7 @@ import {
 
 export default function AdminSidebar() {
   const pathname = usePathname();
-  const customerSiteUrl = process.env.NEXT_PUBLIC_CUSTOMER_SITE_URL || 'https://www.junkitout.in';
+  const customerSiteUrl = process.env.NEXT_PUBLIC_CUSTOMER_SITE_URL || (process.env.NODE_ENV === 'development' ? (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3007') : 'https://www.junkitout.in');
 
   const menuItems = [
     { href: '/', label: 'Dashboard', icon: LayoutDashboard },

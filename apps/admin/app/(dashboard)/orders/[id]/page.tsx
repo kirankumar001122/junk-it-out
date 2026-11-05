@@ -16,8 +16,6 @@ import {
   RefreshCw,
   ShieldCheck,
 } from 'lucide-react';
-import InteractiveMap from '@/components/InteractiveMap';
-import { getSecurePhotoUrl } from '@/lib/utils/photoUrl';
 import { adminFetch } from '@/lib/api';
 
 export default function AdminOrderDetailPage() {

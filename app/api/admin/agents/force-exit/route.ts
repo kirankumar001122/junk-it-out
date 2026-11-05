@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
+import { invalidateAdminOperationsCaches } from '@/lib/cache/adminAgentsCache';
 
 export async function POST(req: NextRequest) {
   try {
@@ -44,6 +45,7 @@ export async function POST(req: NextRequest) {
         where: { id: agent.userId },
         data: { tokenVersion: { increment: 1 } },
       }).catch(() => null);
+
     }
 
     // Immutable audit log for destructive force-exit session revocation
@@ -56,6 +58,8 @@ export async function POST(req: NextRequest) {
         newValue: `Agent forced offline - Status: OFFLINE, TokenVersion: ${oldTokenVersion + 1}`,
       },
     }).catch(() => null);
+
+    invalidateAdminOperationsCaches();
 
     return NextResponse.json({
       success: true,

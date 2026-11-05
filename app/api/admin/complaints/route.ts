@@ -73,7 +73,7 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ success: false, message: 'Missing or invalid complaint ID.' }, { status: 400 });
     }
 
-    const allowedStatuses = ['PENDING', 'IN_PROGRESS', 'RESOLVED', 'DISMISSED'];
+    const allowedStatuses = ['OPEN', 'PENDING', 'IN_PROGRESS', 'RESOLVED', 'DISMISSED'];
     if (!status || !allowedStatuses.includes(status)) {
       return NextResponse.json({
         success: false,

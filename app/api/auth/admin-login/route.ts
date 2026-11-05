@@ -113,6 +113,16 @@ export async function POST(req: NextRequest) {
       maxAge: 7 * 24 * 60 * 60,
     });
 
+    response.cookies.set({
+      name: 'jio_admin_token',
+      value: token,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60,
+    });
+
     return addCorsHeaders(response, req);
   } catch (err: any) {
     console.error('Admin login failed:', { errorType: err instanceof Error ? err.name : 'UnknownError' });

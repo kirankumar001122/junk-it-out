@@ -7,6 +7,7 @@ import {
 import { getAuthUser } from '@/lib/auth/middleware';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
+import { invalidateAdminOperationsCaches } from '@/lib/cache/adminAgentsCache';
 import { SAFE_HYDRATED_ORDER_INCLUDE, formatOrderResponse } from '@/lib/orders/orderFormat';
 import {
   broadcastAgentBookingNotification,

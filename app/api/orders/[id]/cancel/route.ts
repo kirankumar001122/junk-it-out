@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { invalidateAdminOperationsCaches } from '@/lib/cache/adminAgentsCache';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { CANCELLABLE_ORDER_STATUSES } from '@/lib/orders/cancellation';
 import { validateStatusTransition } from '@/lib/validations/schemas';
@@ -325,6 +326,7 @@ export async function POST(
         reason,
       });
     }
+    invalidateAdminOperationsCaches();
     return NextResponse.json({
       success: true,
       message: isPaid
