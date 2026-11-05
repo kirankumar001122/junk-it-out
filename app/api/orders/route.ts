@@ -630,6 +630,13 @@ async function handleGet(req: NextRequest) {
         orderNumber: true,
         agentId: true,
         status: true,
+        createdAt: true,
+        financialDirection: true,
+        paymentStatus: true,
+        pickupCharge: true,
+        discountAmount: true,
+        finalAmount: true,
+        actualTotal: true,
         customer: {
           select: {
             user: { select: { id: true, name: true, phone: true } },
@@ -652,20 +659,29 @@ async function handleGet(req: NextRequest) {
             categoryId: true,
             estimatedWeight: true,
             actualWeight: true,
-            category: { select: { id: true, name: true } },
+            ratePerKg: true,
+            category: { select: { id: true, name: true, type: true } },
           },
         },
       };
 
-      // 1. Fetch active assignments for the agent
-      const activeOrders = await db.order.findMany({
-        where: {
-          ...whereClause,
-          status: { in: AGENT_ACTIVE_STATUSES },
-        },
-        select: agentOrderSelect,
-        orderBy: { createdAt: 'desc' },
-      });
+      // 1. Concurrently fetch active assignments and agent profile (consolidates sequential round trips)
+      const [activeOrders, agentProfile] = await Promise.all([
+        db.order.findMany({
+          where: {
+            ...whereClause,
+            status: { in: AGENT_ACTIVE_STATUSES },
+          },
+          select: agentOrderSelect,
+          orderBy: { createdAt: 'desc' },
+        }),
+        authUser.agentId
+          ? db.agent.findUnique({
+              where: { id: authUser.agentId },
+              select: { id: true, serviceAreas: true, status: true },
+            })
+          : Promise.resolve(null),
+      ]);
 
       // 2. Anomaly detection: log if agent has multiple active assignments
       if (activeOrders.length > 1) {
@@ -682,53 +698,56 @@ async function handleGet(req: NextRequest) {
         );
       }
 
-      // 3. Fetch unassigned orders available in agent's service area
-      let unassignedOrders: any[] = [];
-      const agentProfile = authUser.agentId
-        ? await db.agent.findUnique({
-            where: { id: authUser.agentId },
-            select: { id: true, serviceAreas: true, status: true },
-          })
-        : null;
-
-      if (agentProfile && (agentProfile.status === 'AVAILABLE' || activeOrders.length === 0)) {
-        const rawUnassigned = await db.order.findMany({
-          where: {
-            agentId: null,
-            status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED'] },
-            OR: [
-              { financialDirection: { not: 'CUSTOMER_PAYS' } },
-              { financialDirection: 'CUSTOMER_PAYS', paymentStatus: 'CAPTURED' },
-            ],
-          },
-          select: agentOrderSelect,
-          orderBy: { createdAt: 'desc' },
-          take: 20,
-        });
-
-        unassignedOrders = rawUnassigned.filter((o: any) =>
-          isAgentEligibleForServiceArea(agentProfile.serviceAreas, o.address?.area)
-        );
-      }
-
-      // 4. Retrieve historical orders excluding active order IDs up to remaining requested limit
+      // 3. Concurrently fetch unassigned orders (if eligible), historical orders, and total count
       const activeIds = activeOrders.map((o) => o.id);
-      const remainingLimit = Math.max(0, limit - activeOrders.length - unassignedOrders.length);
+      const shouldFetchUnassigned = Boolean(
+        agentProfile && (agentProfile.status === 'AVAILABLE' || activeOrders.length === 0)
+      );
+      const remainingLimit = Math.max(0, limit - activeOrders.length);
 
-      const historicalOrders = remainingLimit > 0
-        ? await db.order.findMany({
-            where: {
-              ...whereClause,
-              ...(activeIds.length > 0 ? { id: { notIn: activeIds } } : {}),
-            },
-            select: agentOrderSelect,
-            orderBy: { createdAt: 'desc' },
-            take: remainingLimit,
-          })
+      const [rawUnassigned, historicalOrders, countResult] = await Promise.all([
+        shouldFetchUnassigned
+          ? db.order.findMany({
+              where: {
+                agentId: null,
+                status: { in: ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED'] },
+                OR: [
+                  { financialDirection: { not: 'CUSTOMER_PAYS' } },
+                  { financialDirection: 'CUSTOMER_PAYS', paymentStatus: 'CAPTURED' },
+                ],
+              },
+              select: agentOrderSelect,
+              orderBy: { createdAt: 'desc' },
+              take: 20,
+            })
+          : Promise.resolve([]),
+        remainingLimit > 0
+          ? db.order.findMany({
+              where: {
+                ...whereClause,
+                ...(activeIds.length > 0 ? { id: { notIn: activeIds } } : {}),
+              },
+              select: agentOrderSelect,
+              orderBy: { createdAt: 'desc' },
+              take: remainingLimit,
+            })
+          : Promise.resolve([]),
+        db.order.count({ where: whereClause }).catch(() => 0),
+      ]);
+
+      const unassignedOrders = agentProfile
+        ? rawUnassigned.filter((o: any) =>
+            isAgentEligibleForServiceArea(agentProfile.serviceAreas, o.address?.area)
+          )
         : [];
 
-      orders = [...activeOrders, ...unassignedOrders, ...historicalOrders];
-      total = await db.order.count({ where: whereClause }).catch(() => orders.length);
+      // Combine orders preserving all active orders without truncation even if exceeding limit
+      const nonActiveOrders = [...unassignedOrders, ...historicalOrders];
+      const maxNonActiveToTake = Math.max(0, limit - activeOrders.length);
+      const limitedNonActive = nonActiveOrders.slice(0, maxNonActiveToTake);
+
+      orders = [...activeOrders, ...limitedNonActive];
+      total = countResult || orders.length;
     } else {
       const [fetchedOrders, countResult] = await Promise.all([
         db.order.findMany({
