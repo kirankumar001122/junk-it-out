@@ -155,7 +155,8 @@ export default function AgentDashboardPage() {
       const unassignedOpen = data.data.filter(
         (o: any) => !o.agentId && ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED'].includes(o.status)
       );
-      if (unassignedOpen.length > 0 && !assigned) {
+      const isAgentAvailable = agentProfile.status === 'AVAILABLE';
+      if (unassignedOpen.length > 0 && !assigned && isAgentAvailable) {
         const topUnassigned = unassignedOpen[0];
         const estQty = (topUnassigned.items || []).reduce(
           (sum: number, it: any) => sum + (Number(it.estimatedWeight) || 0),
@@ -170,6 +171,8 @@ export default function AgentDashboardPage() {
           itemsSummary: `${topUnassigned.items?.length || 0} category item(s)`,
           createdAt: topUnassigned.createdAt,
         });
+      } else if (!isAgentAvailable || assigned) {
+        setNewPickupNotice(null);
       }
       setActualWeightsInput(
         assigned
@@ -320,6 +323,7 @@ export default function AgentDashboardPage() {
         try {
           const payload = JSON.parse(e.data);
           console.log('[AGENT SSE] NEW_PICKUP_AVAILABLE notification received:', payload);
+          if (activeOrderRef.current || agent?.status !== 'AVAILABLE') return;
           setNewPickupNotice(payload);
         } catch (err) {
           console.error('[AGENT SSE] Error parsing notification payload:', err);
@@ -448,11 +452,23 @@ export default function AgentDashboardPage() {
   };
 
   const handleViewPickupDetails = async (orderId: string) => {
+    if (!isOnline || agent?.status !== 'AVAILABLE') {
+      setStatusNotice('You are currently OFFLINE. Please switch status to ONLINE to view and accept available pickups.');
+      setTimeout(() => setStatusNotice(null), 5000);
+      return;
+    }
     setLoadingPickupDetails(true);
     try {
       setViewPickupModal(await fetchOrderDetails(orderId));
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Network error fetching pickup details.');
+      const message = err instanceof Error ? err.message : 'Network error fetching pickup details.';
+      if (message.includes('available agents')) {
+        setStatusNotice('You must be ONLINE and AVAILABLE to view open pickups. Please check your status toggle.');
+        setTimeout(() => setStatusNotice(null), 6000);
+      } else {
+        setStatusNotice(message);
+        setTimeout(() => setStatusNotice(null), 5000);
+      }
     } finally {
       setLoadingPickupDetails(false);
     }
@@ -685,6 +701,9 @@ export default function AgentDashboardPage() {
     // Optimistic UI state for instant response
     setIsOnline(optimisticOnline);
     setAgent((prev: any) => (prev ? { ...prev, status: targetStatus } : prev));
+    if (targetStatus === 'OFFLINE') {
+      setNewPickupNotice(null);
+    }
     setStatusUpdating(true);
     setStatusNotice(null);
 

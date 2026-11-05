@@ -701,7 +701,7 @@ async function handleGet(req: NextRequest) {
       // 3. Concurrently fetch unassigned orders (if eligible), historical orders, and total count
       const activeIds = activeOrders.map((o) => o.id);
       const shouldFetchUnassigned = Boolean(
-        agentProfile && (agentProfile.status === 'AVAILABLE' || activeOrders.length === 0)
+        agentProfile && agentProfile.status === 'AVAILABLE'
       );
       const remainingLimit = Math.max(0, limit - activeOrders.length);
 

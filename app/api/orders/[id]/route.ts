@@ -130,17 +130,26 @@ export async function GET(
       }
 
       if (!isAssignedAgent) {
+        const targetAgentId = authUser.agentId ?? (
+          authUser.userId
+            ? (await db.agent.findUnique({
+                where: { userId: authUser.userId },
+                select: { id: true },
+              }))?.id
+            : null
+        );
+
         const [agent, activeOrder] = await Promise.all([
-          authUser.agentId
+          targetAgentId
             ? db.agent.findUnique({
-                where: { id: authUser.agentId },
+                where: { id: targetAgentId },
                 select: { id: true, status: true, serviceAreas: true },
               })
             : Promise.resolve(null),
-          authUser.agentId
+          targetAgentId
             ? db.order.findFirst({
                 where: {
-                  agentId: authUser.agentId,
+                  agentId: targetAgentId,
                   status: { in: ['AGENT_ASSIGNED', 'AGENT_ACCEPTED', 'AGENT_ON_WAY', 'AGENT_ARRIVED', 'WASTE_VERIFICATION', 'WEIGHING'] },
                 },
                 select: { id: true },
