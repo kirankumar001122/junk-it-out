@@ -36,6 +36,7 @@ export default function AdminSidebar() {
     { href: '/accepted-materials', label: 'Accepted Materials', icon: Recycle },
     { href: '/waste-categories', label: 'Waste Categories', icon: Trash2 },
     { href: '/pricing', label: 'Pricing & Rates', icon: Tag },
+    { href: '/subscription-offers', label: 'Subscription Offers', icon: CreditCard },
     { href: '/service-areas', label: 'Service Areas', icon: Globe },
     { href: '/payments', label: 'Payments & Settlement', icon: CreditCard },
     { href: '/complaints', label: 'Support & Complaints', icon: AlertCircle },

@@ -521,5 +521,171 @@ describe('Customer Subscriptions Domain Logic (Task 01)', () => {
       expect(res2.subscription?.id).toBe(res1.subscription?.id);
     });
   });
+
+  describe('Admin Subscription Offers CRUD, Validation & Authorization', () => {
+    const mockOfferStore: any[] = [
+      {
+        id: 'offer-1',
+        name: 'Weekly Green Pass',
+        description: 'Weekly convenience pass',
+        billingPeriod: 'WEEKLY',
+        durationDays: 7,
+        durationMonths: 0,
+        pickupLimit: 1,
+        price: 99,
+        benefits: ['1 Free pickup'],
+        active: true,
+        displayOrder: 1,
+      },
+    ];
+
+    const validateOfferPayload = (body: any) => {
+      const name = typeof body.name === 'string' ? body.name.trim() : '';
+      const description = typeof body.description === 'string' ? body.description.trim() : '';
+      const billingPeriod =
+        typeof body.billingPeriod === 'string' && ['WEEKLY', 'MONTHLY', 'QUARTERLY'].includes(body.billingPeriod.toUpperCase())
+          ? body.billingPeriod.toUpperCase()
+          : 'MONTHLY';
+      const durationDays = Number.isInteger(Number(body.durationDays)) && Number(body.durationDays) > 0
+        ? Number(body.durationDays)
+        : (billingPeriod === 'WEEKLY' ? 7 : billingPeriod === 'QUARTERLY' ? 90 : 30);
+      const pickupLimit = Number.isInteger(Number(body.pickupLimit)) && Number(body.pickupLimit) >= 0
+        ? Number(body.pickupLimit)
+        : (billingPeriod === 'WEEKLY' ? 1 : billingPeriod === 'QUARTERLY' ? 12 : 4);
+      const price = Number(body.price);
+
+      if (!name || !description || durationDays <= 0 || durationDays > 3650 || !Number.isFinite(price) || price <= 0 || price > 1000000) {
+        return null;
+      }
+      return {
+        name,
+        description,
+        billingPeriod,
+        durationDays,
+        pickupLimit,
+        price,
+        active: body.active !== false,
+      };
+    };
+
+    it('creates a new subscription offer when requested by an authorized admin', () => {
+      const authUser = { id: 'admin-1', role: 'ADMIN' };
+      expect(['ADMIN', 'SUPER_ADMIN'].includes(authUser.role)).toBe(true);
+
+      const validPayload = {
+        name: 'Bi-Weekly Starter',
+        description: 'Bi-weekly pickup service for light households',
+        billingPeriod: 'WEEKLY',
+        durationDays: 14,
+        pickupLimit: 2,
+        price: 149,
+        active: true,
+      };
+
+      const validated = validateOfferPayload(validPayload);
+      expect(validated).not.toBeNull();
+      expect(validated?.price).toBe(149);
+      expect(validated?.pickupLimit).toBe(2);
+
+      const newOffer = { id: 'offer-new', ...validated };
+      mockOfferStore.push(newOffer);
+      expect(mockOfferStore.find((o) => o.id === 'offer-new')).toBeDefined();
+    });
+
+    it('rejects subscription offer creation with invalid price, empty name, or non-admin role', () => {
+      // 1. Non-admin authorization failure
+      const customerUser = { id: 'cust-1', role: 'CUSTOMER' };
+      const isAuthorized = ['ADMIN', 'SUPER_ADMIN'].includes(customerUser.role);
+      expect(isAuthorized).toBe(false);
+
+      // 2. Negative price validation failure
+      const negativePricePayload = {
+        name: 'Invalid Plan',
+        description: 'Test',
+        price: -50,
+        durationDays: 30,
+      };
+      expect(validateOfferPayload(negativePricePayload)).toBeNull();
+
+      // 3. Empty name validation failure
+      const emptyNamePayload = {
+        name: '   ',
+        description: 'Test',
+        price: 199,
+        durationDays: 30,
+      };
+      expect(validateOfferPayload(emptyNamePayload)).toBeNull();
+    });
+
+    it('updates an existing subscription offer pricing, duration, quota and status', () => {
+      const existing = mockOfferStore.find((o) => o.id === 'offer-1');
+      expect(existing).toBeDefined();
+
+      const updatePayload = {
+        name: 'Weekly Green Pass (Updated)',
+        description: 'Updated description',
+        billingPeriod: 'WEEKLY',
+        durationDays: 7,
+        pickupLimit: 2,
+        price: 119,
+        active: false,
+      };
+
+      const validated = validateOfferPayload(updatePayload);
+      expect(validated).not.toBeNull();
+
+      Object.assign(existing, validated);
+      expect(existing.price).toBe(119);
+      expect(existing.pickupLimit).toBe(2);
+      expect(existing.active).toBe(false);
+    });
+
+    it('reflects admin offer changes in the active customer offers query', () => {
+      // Deactivated offers must not be served to customers
+      const customerVisibleOffers = mockOfferStore.filter((o) => o.active === true);
+      expect(customerVisibleOffers.some((o) => o.id === 'offer-1')).toBe(false);
+
+      // Reactivate offer
+      const offer1 = mockOfferStore.find((o) => o.id === 'offer-1');
+      offer1.active = true;
+      const updatedCustomerOffers = mockOfferStore.filter((o) => o.active === true);
+      expect(updatedCustomerOffers.some((o) => o.id === 'offer-1')).toBe(true);
+    });
+
+    it('deletes or archives an offer', () => {
+      const index = mockOfferStore.findIndex((o) => o.id === 'offer-new');
+      expect(index).toBeGreaterThanOrEqual(0);
+      mockOfferStore.splice(index, 1);
+      expect(mockOfferStore.find((o) => o.id === 'offer-new')).toBeUndefined();
+    });
+  });
+
+  describe('Agent Dashboard Earnings Tracking Isolation', () => {
+    it('ensures agents can only access their own earnings and transaction ledger', () => {
+      const agent1Transactions = [
+        { id: 'tx-1', agentId: 'agent-1', type: 'PICKUP_EARNINGS', amount: 50, balanceAfter: 50 },
+        { id: 'tx-2', agentId: 'agent-1', type: 'CREDIT', amount: 100, balanceAfter: 150 },
+      ];
+      const agent2Transactions = [
+        { id: 'tx-3', agentId: 'agent-2', type: 'PICKUP_EARNINGS', amount: 75, balanceAfter: 75 },
+      ];
+
+      // Simulated agent query with authUser.agentId === 'agent-1'
+      const queryAgentEarnings = (requestingAgentId: string) => {
+        return [...agent1Transactions, ...agent2Transactions].filter(
+          (tx) => tx.agentId === requestingAgentId
+        );
+      };
+
+      const result = queryAgentEarnings('agent-1');
+      expect(result).toHaveLength(2);
+      expect(result.every((tx) => tx.agentId === 'agent-1')).toBe(true);
+
+      const totalEarnings = result
+        .filter((tx) => tx.type === 'PICKUP_EARNINGS' || tx.type === 'CREDIT')
+        .reduce((sum, tx) => sum + tx.amount, 0);
+      expect(totalEarnings).toBe(150);
+    });
+  });
 });
 

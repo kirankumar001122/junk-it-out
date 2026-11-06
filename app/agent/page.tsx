@@ -23,6 +23,11 @@ import {
   Eye,
   X,
   Wallet,
+  ArrowUpRight,
+  ArrowDownRight,
+  TrendingUp,
+  Receipt,
+  ChevronRight,
 } from 'lucide-react';
 import {
   getAgentGeolocationErrorMessage,
@@ -72,6 +77,15 @@ export default function AgentDashboardPage() {
   const [weighNotes, setWeighNotes] = useState('');
   const [submittingWeigh, setSubmittingWeigh] = useState(false);
   const [weighModalError, setWeighModalError] = useState<string | null>(null);
+
+  // Agent Wallet & Earnings Tracking State
+  const [walletData, setWalletData] = useState<{
+    balance: number;
+    transactions: any[];
+    totalEarnings: number;
+    totalDeductions: number;
+  } | null>(null);
+  const [loadingWallet, setLoadingWallet] = useState(false);
   const dataRequestRef = useRef(false);
   const refreshAfterRequestRef = useRef(false);
   const acceptingPickupRef = useRef(false);
@@ -250,14 +264,50 @@ export default function AgentDashboardPage() {
     }
   }, []);
 
+  const fetchAgentWallet = useCallback(async () => {
+    setLoadingWallet(true);
+    try {
+      const res = await fetch('/api/agent/wallet', {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      });
+      const json = await res.json();
+      if (res.ok && json.success && json.data) {
+        const txs: any[] = json.data.transactions || [];
+        const earnings = txs
+          .filter((t) => t.type === 'PICKUP_EARNINGS' || t.type === 'CREDIT' || t.direction === 'CREDIT')
+          .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+        const deductions = txs
+          .filter((t) => t.type === 'DEBIT' || t.direction === 'DEBIT')
+          .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+        setWalletData({
+          balance: Number(json.data.wallet?.balance || 0),
+          transactions: txs,
+          totalEarnings: earnings,
+          totalDeductions: deductions,
+        });
+      }
+    } catch {
+      // Non-blocking
+    } finally {
+      setLoadingWallet(false);
+    }
+  }, []);
+
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
-    await fetchAgentData(false, true);
-  }, [fetchAgentData]);
+    await Promise.all([fetchAgentData(false, true), fetchAgentWallet()]);
+  }, [fetchAgentData, fetchAgentWallet]);
 
   useEffect(() => {
     void fetchAgentData();
   }, [fetchAgentData]);
+
+  useEffect(() => {
+    if (agent?.id) {
+      void fetchAgentWallet();
+    }
+  }, [agent?.id, fetchAgentWallet]);
 
   useEffect(() => {
     const TRACKING_ELIGIBLE_STATUSES = [
@@ -1356,28 +1406,112 @@ export default function AgentDashboardPage() {
         </div>
       </div>
 
-      {/* AGENT WALLET PREVIEW */}
+      {/* AGENT EARNINGS TRACKING SECTION */}
       <div className="px-4">
-        <Link
-          href="/agent/wallet"
-          className="flex items-center justify-between bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border border-emerald-500/30 hover:border-emerald-500/60 p-4 rounded-3xl transition-all shadow-lg group"
-        >
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-emerald-500/20 border border-emerald-500/30 rounded-2xl text-emerald-400 group-hover:scale-105 transition-transform">
-              <Wallet className="w-5 h-5" />
+        <div className="rounded-3xl border border-slate-700 bg-slate-900/95 p-5 shadow-xl space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-emerald-500/20 border border-emerald-500/30 rounded-xl text-emerald-400">
+                <Wallet className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-wider text-white">Earnings & Wallet</h3>
+                <p className="text-[10px] text-slate-400 font-semibold">Verified personal earnings ledger</p>
+              </div>
             </div>
-            <div>
-              <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Agent Wallet</span>
-              <p className="text-xs font-bold text-white flex items-center gap-1.5">
-                View Ledger & Payouts
+            <Link
+              href="/agent/wallet"
+              className="flex items-center gap-1 text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors"
+            >
+              <span>Full Ledger</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          {/* Earnings Overview Cards */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-slate-800/80 p-3 rounded-2xl border border-slate-700/60">
+              <span className="text-[9px] uppercase font-bold tracking-wider text-slate-400 block mb-0.5">Balance</span>
+              <p className="text-base font-black text-emerald-400">
+                ₹{(walletData?.balance ?? 0).toFixed(2)}
+              </p>
+            </div>
+            <div className="bg-slate-800/80 p-3 rounded-2xl border border-slate-700/60">
+              <span className="text-[9px] uppercase font-bold tracking-wider text-slate-400 block mb-0.5">Approved Credits</span>
+              <p className="text-base font-black text-white">
+                ₹{(walletData?.totalEarnings ?? 0).toFixed(2)}
+              </p>
+            </div>
+            <div className="bg-slate-800/80 p-3 rounded-2xl border border-slate-700/60">
+              <span className="text-[9px] uppercase font-bold tracking-wider text-slate-400 block mb-0.5">Deductions</span>
+              <p className="text-base font-black text-rose-400">
+                ₹{(walletData?.totalDeductions ?? 0).toFixed(2)}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-xs">
-            <span>Open Wallet</span>
-            <ArrowRight className="w-4 h-4" />
+
+          {/* Recent Earnings Activity */}
+          <div className="space-y-2 pt-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                Recent Activity
+              </span>
+              {loadingWallet && <RefreshCw className="w-3 h-3 text-slate-500 animate-spin" />}
+            </div>
+
+            {walletData && walletData.transactions.length > 0 ? (
+              <div className="space-y-1.5">
+                {walletData.transactions.slice(0, 3).map((tx) => {
+                  const isCredit = tx.type === 'CREDIT' || tx.type === 'PICKUP_EARNINGS' || tx.type === 'REFUND';
+                  return (
+                    <div
+                      key={tx.id}
+                      className="flex items-center justify-between p-2.5 rounded-xl bg-slate-800/50 border border-slate-800 text-xs"
+                    >
+                      <div className="space-y-0.5 min-w-0 pr-2">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`rounded-full px-1.5 py-0.5 text-[9px] font-black uppercase ${
+                              isCredit
+                                ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/50'
+                                : 'bg-rose-950 text-rose-400 border border-rose-800/50'
+                            }`}
+                          >
+                            {tx.type}
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-mono">
+                            {new Date(tx.createdAt).toLocaleDateString('en-IN')}
+                          </span>
+                        </div>
+                        <p className="text-slate-300 font-medium text-[11px] truncate">
+                          {tx.reason || 'Agent wallet transaction'}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span
+                          className={`font-black text-xs ${
+                            isCredit ? 'text-emerald-400' : 'text-rose-400'
+                          }`}
+                        >
+                          {isCredit ? '+' : '-'}₹{Number(tx.amount).toFixed(2)}
+                        </span>
+                        <p className="text-[9px] text-slate-500 font-mono">
+                          Bal: ₹{Number(tx.balanceAfter).toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="p-3 rounded-2xl bg-slate-800/40 border border-slate-800 text-center">
+                <p className="text-[11px] text-slate-400">
+                  No earnings transactions recorded yet. Approved pickup earnings will appear here.
+                </p>
+              </div>
+            )}
           </div>
-        </Link>
+        </div>
       </div>
 
       {/* ACTIVE ASSIGNED ORDER */}
