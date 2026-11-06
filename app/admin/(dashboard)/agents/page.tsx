@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Users, Truck, Star, Phone, MapPin, RefreshCw, Plus, AlertCircle, LogOut } from 'lucide-react';
+import Link from 'next/link';
+import { Users, Truck, Star, Phone, MapPin, RefreshCw, Plus, AlertCircle, LogOut, Wallet } from 'lucide-react';
 
 export default function AdminAgentsPage() {
   const [agents, setAgents] = useState<any[]>([]);
@@ -290,6 +291,14 @@ export default function AdminAgentsPage() {
                   <LogOut className="w-3.5 h-3.5" />
                   Force Exit
                 </button>
+                <Link
+                  href="/admin/wallets"
+                  className="px-3 text-xs font-bold py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 flex items-center gap-1.5 transition-colors"
+                  title="View agent wallet & ledger"
+                >
+                  <Wallet className="w-3.5 h-3.5 text-emerald-600" />
+                  Wallet
+                </Link>
               </div>
             </div>
           ))}

@@ -28,6 +28,7 @@ model User {
   refundRequests     RefundRequest[]       @relation("RefundRequestedBy")
   refundReviews      RefundRequest[]       @relation("RefundReviewedBy")
   walletAdjustments  WalletTransaction[]   @relation("WalletAdjustmentAdmin")
+  agentWalletAdjustments AgentWalletTransaction[] @relation("AgentWalletAdjustmentAdmin")
   weightRecords      WeightRecord[]
 }
 
@@ -170,6 +171,44 @@ model Agent {
   locations     AgentLocation[]
   orders        Order[]
   reviews       Review[]
+  wallet        AgentWallet?
+  walletTransactions AgentWalletTransaction[]
+}
+
+model AgentWallet {
+  id           String                   @id @default(uuid())
+  agentId      String                   @unique
+  balance      Float                    @default(0)
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+  agent        Agent                    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  transactions AgentWalletTransaction[]
+}
+
+model AgentWalletTransaction {
+  id            String      @id @default(uuid())
+  walletId      String
+  agentId       String
+  type          String
+  amount        Float
+  balanceAfter  Float       @default(0)
+  status        String      @default("SUCCESS")
+  referenceId   String?     @unique
+  orderId       String?
+  reason        String?
+  adminId       String?
+  failureReason String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  wallet        AgentWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  agent         Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  admin         User?       @relation("AgentWalletAdjustmentAdmin", fields: [adminId], references: [id])
+  order         Order?      @relation("AgentWalletTransactionOrder", fields: [orderId], references: [id])
+
+  @@index([agentId, createdAt])
+  @@index([walletId, status, createdAt])
+  @@index([type, status, createdAt])
+  @@index([orderId])
 }
 
 model Admin {
@@ -288,6 +327,7 @@ model Order {
   settlement         Settlement?
   weightRecords      WeightRecord[]
   orderIdempotency   OrderIdempotency?
+  agentWalletTransactions AgentWalletTransaction[] @relation("AgentWalletTransactionOrder")
 
   @@index([customerId, createdAt])
   @@index([createdAt(sort: Desc)])
