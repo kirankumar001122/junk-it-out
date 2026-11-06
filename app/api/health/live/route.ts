@@ -1,4 +1,6 @@
 // Pure Clean Monitoring, Logging & Alerting - Single File
+import { NextResponse } from 'next/server';
+import { db } from '@/lib/db';
 
 const SENSITIVE = ['password', 'token', 'secret', 'authorization', 'cookie', 'card', 'pin'];
 
@@ -52,7 +54,7 @@ function checkAlerts(metrics: any, dbOk: boolean) {
 async function checkDb(): Promise<{ ok: boolean; latencyMs: number }> {
   const start = Date.now();
   try {
-    await Promise.resolve();
+    await db.$queryRaw`SELECT 1`;
     return { ok: true, latencyMs: Date.now() - start };
   } catch (e) {
     log('error', 'DB_HEALTH_FAILED', { error: String(e) });
@@ -63,22 +65,30 @@ async function checkDb(): Promise<{ ok: boolean; latencyMs: number }> {
 export async function GET() {
   const start = Date.now();
   try {
-    const db = await checkDb();
-    const latencyMs = Date.now() - start;
-    recordMetrics(latencyMs, !db.ok);
+    const dbResult = await checkDb();
     const metrics = getMetrics();
-    const alerts = checkAlerts(metrics, db.ok);
+    const alerts = checkAlerts(metrics, dbResult.ok);
 
-    log('info', 'health_check', { db, metrics, alerts, latencyMs });
+    const isHealthy = dbResult.ok && alerts.length === 0;
+    const latencyMs = Date.now() - start;
 
-    const isHealthy = db.ok;
+    recordMetrics(latencyMs, !isHealthy);
 
-    return Response.json(
+    log(isHealthy ? 'info' : 'error', 'health_check', {
+      status: isHealthy ? 'alive' : 'down',
+      db: dbResult,
+      metrics: getMetrics(),
+      alerts,
+      latencyMs,
+    });
+
+    return NextResponse.json(
       {
-        status: isHealthy ? 'alive' : 'degraded',
+        status: isHealthy ? 'alive' : 'down',
         timestamp: new Date().toISOString(),
-        db,
-        metrics,
+        service: 'junk-it-out',
+        db: dbResult,
+        metrics: getMetrics(),
         alerts,
         uptime: process.uptime(),
       },
@@ -88,11 +98,10 @@ export async function GET() {
       }
     );
   } catch (error) {
-    recordMetrics(Date.now() - start, true);
     log('error', 'health_check_failed', { error: String(error) });
-    return Response.json(
+    return NextResponse.json(
       { status: 'down', error: 'health check failed' },
-      { status: 503, headers: { 'Cache-Control': 'no-store' } }
+      { status: 503 }
     );
   }
 }
