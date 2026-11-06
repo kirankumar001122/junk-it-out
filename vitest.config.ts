@@ -63,6 +63,8 @@ export default defineConfig({
       'tests/order-dispute-mobile-resilience.test.ts',
       'tests/admin-service-areas-production.test.ts',
       'tests/ai-support-agent.test.ts',
+      'tests/admin-dashboard-assignment.test.ts',
+      'tests/admin-settings.test.ts',
     ],
   },
 });

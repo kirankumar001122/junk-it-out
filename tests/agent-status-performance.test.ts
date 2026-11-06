@@ -259,6 +259,36 @@ async function runTests() {
       assert.equal(searchedWhere.address?.area, undefined, 'Must not restrict area when agent serves all');
     }
 
+    // -------------------------------------------------------------
+    // TEST 9: Status update invalidates admin operations caches
+    // -------------------------------------------------------------
+    console.log('Test 9: Agent status update invalidates admin operations caches...');
+    {
+      const { setCachedAdminAgents, getCachedAdminAgents } = await import('../lib/cache/adminAgentsCache');
+      setCachedAdminAgents([{ id: 'agent-stat-1', name: 'Cached Agent' }]);
+      assert.notEqual(getCachedAdminAgents(), null, 'Cache must be populated before request');
+
+      database.$transaction = async (callback: any) => {
+        const tx = {
+          order: { findFirst: async () => null },
+          agent: {
+            update: async ({ data }: any) => ({
+              id: 'agent-stat-1',
+              status: data.status,
+              serviceAreas: 'all',
+              user: { name: 'Status Agent' },
+            }),
+          },
+        };
+        return callback(tx);
+      };
+
+      const req = makeStatusRequest('OFFLINE');
+      const res = await updateStatus(req);
+      assert.equal(res.status, 200);
+      assert.equal(getCachedAdminAgents(), null, 'Cache must be invalidated after agent status update');
+    }
+
     console.log('ALL AGENT STATUS & DISPATCH RECOVERY TESTS PASSED CLEANLY.');
   } finally {
     database.agent.findUnique = origAgentFindUnique;

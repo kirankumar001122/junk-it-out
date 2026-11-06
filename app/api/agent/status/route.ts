@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth/middleware';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { reconcileUndispatchedPaidOrders } from '@/lib/payments/dispatchRecovery';
 import { runBackgroundTask } from '@/lib/utils/backgroundTask';
+import { invalidateAdminOperationsCaches } from '@/lib/cache/adminAgentsCache';
 
 const ALLOWED_STATUSES = ['AVAILABLE', 'OFFLINE', 'ASSIGNED'];
 
@@ -91,6 +92,7 @@ export async function PATCH(req: NextRequest) {
       }, 'AgentStatusDispatchRecovery');
     }
 
+    invalidateAdminOperationsCaches();
     return successResponse({
       agentId: updatedAgent.id,
       status: updatedAgent.status,

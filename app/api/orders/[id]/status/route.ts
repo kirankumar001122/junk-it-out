@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { invalidateAdminOperationsCaches } from '@/lib/cache/adminAgentsCache';
 import { getAuthUser, requireAdminUser } from '@/lib/auth/middleware';
 import { broadcaster } from '@/lib/realtime';
 import { validateStatusTransition } from '@/lib/validations/schemas';
@@ -100,6 +101,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       }
     });
 
+    invalidateAdminOperationsCaches();
     return NextResponse.json({
       success: true,
       message: `Order status updated to ${newStatus}`,

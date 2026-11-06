@@ -129,7 +129,11 @@ export default function AdminOrdersPage() {
 
   const openAssignModal = (order: any) => {
     setSelectedOrderForAssign(order);
-    setAssignError(null);
+    if (['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED', 'CANCELLED'].includes(order.status)) {
+      setAssignError(`Cannot assign agent to an order that is already ${order.status.replace(/_/g, ' ')}.`);
+    } else {
+      setAssignError(null);
+    }
     if (order.agentId && agents.some((a) => a.id === order.agentId)) {
       setSelectedAgentId(order.agentId);
     } else if (agents.length > 0) {
@@ -141,6 +145,10 @@ export default function AdminOrdersPage() {
 
   const handleAssignAgent = async () => {
     if (!selectedOrderForAssign) return;
+    if (['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED', 'CANCELLED'].includes(selectedOrderForAssign.status)) {
+      setAssignError(`Cannot assign agent to an order that is already ${selectedOrderForAssign.status.replace(/_/g, ' ')}.`);
+      return;
+    }
     if (!selectedAgentId) {
       setAssignError('Please select a valid registered field agent from the dropdown.');
       return;
@@ -299,13 +307,15 @@ export default function AdminOrdersPage() {
                           <Eye className="w-3.5 h-3.5" />
                           View
                         </Link>
-                        <button
-                          onClick={() => openAssignModal(o)}
-                          className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1"
-                        >
-                          <UserPlus className="w-3.5 h-3.5" />
-                          Assign
-                        </button>
+                        {!['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED', 'CANCELLED'].includes(o.status) && (
+                          <button
+                            onClick={() => openAssignModal(o)}
+                            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1"
+                          >
+                            <UserPlus className="w-3.5 h-3.5" />
+                            Assign
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -420,7 +430,7 @@ export default function AdminOrdersPage() {
               <button
                 type="button"
                 onClick={handleAssignAgent}
-                disabled={assignLoading || agents.length === 0 || !selectedAgentId}
+                disabled={assignLoading || agents.length === 0 || !selectedAgentId || ['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED', 'CANCELLED'].includes(selectedOrderForAssign?.status)}
                 className="w-1/2 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {assignLoading ? 'Assigning...' : 'Confirm'}
