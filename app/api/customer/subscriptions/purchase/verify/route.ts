@@ -6,12 +6,6 @@ import { calculateSubscriptionExpiry } from '@/lib/subscriptions';
 
 export const runtime = 'nodejs';
 
-function addMonths(date: Date, months: number) {
-  const result = new Date(date);
-  result.setMonth(result.getMonth() + months);
-  return result;
-}
-
 export async function POST(req: NextRequest) {
   const authUser = await getAuthUser(req);
   if (!authUser || authUser.role !== 'CUSTOMER' || !authUser.customerId) {

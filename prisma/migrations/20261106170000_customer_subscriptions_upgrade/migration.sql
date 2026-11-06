@@ -21,3 +21,4 @@ DO $$ BEGIN
   ALTER TABLE "Order" ADD CONSTRAINT "Order_subscriptionId_fkey"
     FOREIGN KEY ("subscriptionId") REFERENCES "CustomerSubscription"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
