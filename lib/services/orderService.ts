@@ -445,11 +445,13 @@ export async function createOrder(
     if (!user?.customer?.id) {
       throw new Error('Customer profile required to use subscription plan.');
     }
+    const now = new Date();
     activeSub = await db.customerSubscription.findFirst({
       where: {
         customerId: user.customer.id,
         status: 'ACTIVE',
-        expiryDate: { gt: new Date() },
+        startDate: { lte: now },
+        expiryDate: { gt: now },
       },
       include: { offer: true },
       orderBy: { expiryDate: 'asc' },

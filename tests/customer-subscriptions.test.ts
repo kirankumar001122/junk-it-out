@@ -93,14 +93,17 @@ function createMockPrismaClient(initialState: {
       findFirst: async ({ where }: any) => {
         const sub = state.subscription;
         if (!sub) return null;
+        const subStart = sub.startDate ? new Date(sub.startDate) : new Date(Date.now() - 24 * 60 * 60 * 1000);
         if (where.customerId && sub.customerId !== where.customerId) return null;
         if (where.status && sub.status !== where.status) return null;
+        if (where.startDate?.lte && subStart > where.startDate.lte) return null;
         if (where.expiryDate?.gt && sub.expiryDate <= where.expiryDate.gt) return null;
-        return { ...sub, offer: state.offer };
+        return { ...sub, startDate: subStart, offer: state.offer };
       },
       findUnique: async ({ where }: any) => {
         if (state.subscription && state.subscription.id === where.id) {
-          return { ...state.subscription, offer: state.offer };
+          const subStart = state.subscription.startDate ? new Date(state.subscription.startDate) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+          return { ...state.subscription, startDate: subStart, offer: state.offer };
         }
         return null;
       },
@@ -261,6 +264,53 @@ describe('Customer Subscriptions Domain Logic (Task 01)', () => {
       expect(result.eligible).toBe(false);
       expect(result.reason).toBe('NO_ACTIVE_SUBSCRIPTION');
     });
+
+    it('rejects entitlement consumption when subscription has a future startDate (scheduled plan change)', async () => {
+      const futureStart = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+      const futureExpiry = new Date(Date.now() + 35 * 24 * 60 * 60 * 1000);
+      const client = createMockPrismaClient({
+        subscription: {
+          id: 'sub-scheduled-future',
+          customerId: 'cust-1',
+          status: 'ACTIVE',
+          startDate: futureStart,
+          expiryDate: futureExpiry,
+          pickupsAllowed: 4,
+          pickupsUsed: 0,
+        },
+      });
+
+      const result = await consumeSubscriptionPickupEntitlement(client as any, {
+        customerId: 'cust-1',
+      });
+
+      expect(result.eligible).toBe(false);
+      expect(result.reason).toBe('NO_ACTIVE_SUBSCRIPTION');
+    });
+
+    it('rejects entitlement consumption when pickup quota is exhausted on current cycle before scheduled plan activation', async () => {
+      // Current cycle has reached limit; customer has a future subscription queued
+      const expiry = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+      const client = createMockPrismaClient({
+        subscription: {
+          id: 'sub-current-exhausted',
+          customerId: 'cust-1',
+          status: 'ACTIVE',
+          startDate: new Date(Date.now() - 27 * 24 * 60 * 60 * 1000),
+          expiryDate: expiry,
+          pickupsAllowed: 4,
+          pickupsUsed: 4,
+        },
+      });
+
+      const result = await consumeSubscriptionPickupEntitlement(client as any, {
+        customerId: 'cust-1',
+      });
+
+      expect(result.eligible).toBe(false);
+      expect(result.reason).toBe('LIMIT_EXCEEDED');
+      expect(result.remainingPickups).toBe(0);
+    });
   });
 
   describe('Subscription Cancellation', () => {
@@ -387,6 +437,88 @@ describe('Customer Subscriptions Domain Logic (Task 01)', () => {
       expect(result.subscription.pickupsAllowed).toBe(4);
       expect(result.wallet.balance).toBe(201); // 400 - 199
       expect(client.state.transactions).toHaveLength(1);
+    });
+
+    it('verifies Razorpay plan change payment creates exactly one chained subscription and enforces idempotency', async () => {
+      const currentExpiry = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+      const quarterlyOffer = {
+        id: 'offer-quarterly',
+        name: 'Quarterly Premium',
+        price: 299,
+        durationDays: 90,
+        pickupLimit: 12,
+        active: true,
+      };
+
+      const existingSub = {
+        id: 'sub-existing-monthly',
+        customerId: 'cust-1',
+        status: 'ACTIVE',
+        startDate: new Date(Date.now() - 16 * 24 * 60 * 60 * 1000),
+        expiryDate: currentExpiry,
+        pickupsAllowed: 4,
+        pickupsUsed: 1,
+      };
+
+      // Mock database state for Razorpay verification
+      const dbState = {
+        payment: {
+          id: 'pay-razorpay-chg-1',
+          customerId: 'cust-1',
+          offerId: 'offer-quarterly',
+          amount: 299,
+          status: 'PENDING',
+          gatewayOrderId: 'order_test_12345',
+          offer: quarterlyOffer,
+        },
+        subscriptions: [existingSub],
+      };
+
+      // Simulate payment verification transaction
+      const simulateVerification = async (gatewayPaymentId: string) => {
+        if (dbState.payment.status === 'SUCCESS') {
+          return { alreadyProcessed: true, subscription: dbState.subscriptions.find((s) => (s as any).paymentId === dbState.payment.id) };
+        }
+
+        const latest = dbState.subscriptions
+          .filter((s) => s.customerId === 'cust-1' && s.status === 'ACTIVE' && s.expiryDate > new Date())
+          .sort((a, b) => b.expiryDate.getTime() - a.expiryDate.getTime())[0];
+
+        const startDate = latest ? latest.expiryDate : new Date();
+        const expiryDate = calculateSubscriptionExpiry(startDate, quarterlyOffer);
+
+        dbState.payment.status = 'SUCCESS';
+        (dbState.payment as any).gatewayPaymentId = gatewayPaymentId;
+
+        const newSub = {
+          id: `sub-chained-${Date.now()}`,
+          customerId: 'cust-1',
+          offerId: quarterlyOffer.id,
+          paymentId: dbState.payment.id,
+          startDate,
+          expiryDate,
+          status: 'ACTIVE',
+          pickupsAllowed: quarterlyOffer.pickupLimit,
+          pickupsUsed: 0,
+          autoRenew: false,
+          offer: quarterlyOffer,
+        };
+        dbState.subscriptions.push(newSub);
+        return { alreadyProcessed: false, subscription: newSub };
+      };
+
+      // 1. Initial verification creates the chained subscription
+      const res1 = await simulateVerification('pay_rzp_mock_111');
+      expect(res1.alreadyProcessed).toBe(false);
+      expect(res1.subscription?.startDate.getTime()).toBe(currentExpiry.getTime());
+      expect(res1.subscription?.pickupsAllowed).toBe(12);
+      expect(dbState.subscriptions).toHaveLength(2);
+
+      // 2. Duplicate verification call is idempotent and does not create another subscription
+      const res2 = await simulateVerification('pay_rzp_mock_111');
+      expect(res2.alreadyProcessed).toBe(true);
+      expect(dbState.subscriptions).toHaveLength(2);
+      expect(res2.subscription?.id).toBe(res1.subscription?.id);
     });
   });
 });

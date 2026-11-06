@@ -230,6 +230,7 @@ export async function consumeSubscriptionPickupEntitlement(
     where: {
       customerId: input.customerId,
       status: 'ACTIVE',
+      startDate: { lte: now },
       expiryDate: { gt: now },
     },
     include: { offer: true },
@@ -247,7 +248,7 @@ export async function consumeSubscriptionPickupEntitlement(
     include: { offer: true },
   });
 
-  if (!lockedSub || lockedSub.status !== 'ACTIVE' || lockedSub.expiryDate <= now) {
+  if (!lockedSub || lockedSub.status !== 'ACTIVE' || lockedSub.expiryDate <= now || lockedSub.startDate > now) {
     return { eligible: false, reason: 'SUBSCRIPTION_EXPIRED' };
   }
 

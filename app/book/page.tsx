@@ -230,7 +230,11 @@ export default function BookingPage() {
           const subData = await subResponse.json();
           if (subData.success && Array.isArray(subData.data)) {
             const active = subData.data.find(
-              (s: any) => (s.computedStatus || s.status) === 'ACTIVE' && s.remainingPickups > 0,
+              (s: any) =>
+                (s.computedStatus || s.status) === 'ACTIVE' &&
+                new Date(s.startDate) <= new Date() &&
+                new Date(s.expiryDate) > new Date() &&
+                s.remainingPickups > 0,
             );
             setActiveSubscription(
               active

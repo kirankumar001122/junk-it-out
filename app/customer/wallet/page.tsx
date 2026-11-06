@@ -507,6 +507,8 @@ export default function CustomerWalletPage() {
                           className={`rounded-full px-2 py-0.5 text-[10px] font-black ${
                             isActive
                               ? 'bg-emerald-100 text-emerald-800'
+                              : status === 'SCHEDULED'
+                              ? 'bg-amber-100 text-amber-800'
                               : status === 'CANCELLED'
                               ? 'bg-rose-100 text-rose-800'
                               : 'bg-slate-200 text-slate-600'

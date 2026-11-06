@@ -29,12 +29,21 @@ export async function GET(req: NextRequest) {
     const now = new Date();
     const data = subscriptions.map((subscription) => {
       const isExpired = subscription.expiryDate <= now;
-      const status = subscription.status === 'CANCELLED' ? 'CANCELLED' : isExpired ? 'EXPIRED' : subscription.status;
+      const isScheduled = subscription.startDate > now;
+      const computedStatus =
+        subscription.status === 'CANCELLED'
+          ? 'CANCELLED'
+          : isExpired
+            ? 'EXPIRED'
+            : isScheduled
+              ? 'SCHEDULED'
+              : subscription.status;
       const remainingPickups = Math.max(0, (subscription.pickupsAllowed || 0) - (subscription.pickupsUsed || 0));
 
       return {
         ...subscription,
-        status,
+        status: computedStatus,
+        computedStatus,
         remainingPickups,
         offer: {
           ...subscription.offer,
