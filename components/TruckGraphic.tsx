@@ -128,8 +128,11 @@ export default function TruckGraphic({ className = '' }: { className?: string })
             letterSpacing="2"
           >
             JUNK IT <tspan fill="#4ade80">OUT</tspan>
-            <tspan fontSize="20" dy="-20">™</tspan>
           </text>
+          <g aria-label="Trademark TM badge">
+            <circle cx="440" cy="128" r="13" fill="#ffffff" stroke="#000000" strokeWidth="1.5" />
+            <text x="440" y="132" fill="#000000" fontSize="9" fontWeight="900" textAnchor="middle" fontFamily="Arial, sans-serif">TM</text>
+          </g>
 
           {/* Tagline under Logo */}
           <text

@@ -48,7 +48,7 @@ const INITIAL_SETTINGS: SystemSettingsConfig = {
   dpiitNumber: 'DIPP265455',
   sector: 'Green Technology / Waste Management',
   supportPhone: '+91 7676272709 / +91 9591883174',
-  supportEmail: 'info@junkitout.in',
+  supportEmail: 'support@junkitout.in',
   headquarters: 'Bengaluru, Karnataka, India',
   dispatchSlaMinutes: 30,
   autoAssignEnabled: true,
@@ -382,7 +382,7 @@ export default function AdminSettingsPage() {
                       type="email"
                       value={settings.supportEmail}
                       onChange={(e) => setSettings({ ...settings, supportEmail: e.target.value })}
-                      placeholder="e.g. info@junkitout.in"
+                      placeholder="e.g. support@junkitout.in"
                       className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-slate-900 font-mono"
                     />
                   </div>

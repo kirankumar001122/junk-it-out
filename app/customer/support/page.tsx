@@ -105,7 +105,7 @@ export default function CustomerSupportPage() {
             Open the support assistant to start a conversation. For order-specific help, stay signed in so only your
             own pickup information can be used.
           </p>
-          <CustomerSupportChatWidget initiallyOpen />
+          <CustomerSupportChatWidget />
         </div>
       </div>
 

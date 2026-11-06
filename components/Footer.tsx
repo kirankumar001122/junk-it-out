@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Phone, Mail, MapPin, ShieldCheck, Award } from 'lucide-react';
+import { Phone, Mail, MapPin, ShieldCheck, Award, ExternalLink } from 'lucide-react';
+import TrademarkBadge from '@/components/TrademarkBadge';
 
 export default function Footer() {
   const pathname = usePathname();
@@ -29,7 +30,7 @@ export default function Footer() {
 
               <span className="text-lg font-bold tracking-tight text-white">
                 JUNK IT{' '}
-                <span className="text-emerald-400 font-extrabold">OUT</span>
+                <span className="text-emerald-400 font-extrabold"><span className="relative inline-block">OUT<TrademarkBadge /></span></span>
               </span>
             </div>
 
@@ -39,18 +40,21 @@ export default function Footer() {
               responsibly with transparent pricing.
             </p>
 
-            {/* DPIIT Recognition Badge */}
+            {/* DPIIT Certificate */}
             <div className="flex items-center gap-2.5 text-xs text-slate-300 bg-slate-800/60 p-3 rounded-xl border border-slate-700/60">
               <Award className="w-4 h-4 shrink-0 text-emerald-400" />
 
               <div>
-                <span className="font-semibold block text-white text-xs">
-                  DPIIT Registered Startup
-                </span>
-
-                <span className="text-[10px] text-slate-400">
-                  Cert No: DIPP265455 • Govt. of India
-                </span>
+                <a
+                  href="https://recognition-be.startupindia.gov.in/s3/download/document/RECOGNITION_CERTIFICATE/11968c82-3e09-4c6d-8edd-7a39a4bf6698.pdf"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 font-semibold text-white transition-colors hover:text-emerald-300"
+                  aria-label="Open DPIIT certificate DIPP265455"
+                >
+                  DIPP265455
+                  <ExternalLink className="h-3 w-3 text-emerald-400" aria-hidden="true" />
+                </a>
               </div>
             </div>
 
@@ -152,7 +156,7 @@ export default function Footer() {
             <div className="space-y-3 text-xs text-slate-400 font-medium">
               <div className="flex items-start gap-2.5">
                 <MapPin className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                <span>Munnekollala, Bengaluru, Karnataka 560037</span>
+                <span>Koramangala, Bengaluru, Karnataka 560034</span>
               </div>
 
               <div className="flex items-center gap-2.5">
@@ -162,7 +166,7 @@ export default function Footer() {
 
               <div className="flex items-center gap-2.5">
                 <Mail className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>info@junkitout.in</span>
+                <span>support@junkitout.in</span>
               </div>
             </div>
           </div>

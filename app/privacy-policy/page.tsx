@@ -143,8 +143,8 @@ export default function PrivacyPolicyPage() {
           </p>
           <p className="text-xs sm:text-sm text-slate-600 font-medium leading-relaxed">
             To submit a data access or complete account deletion request, please contact our privacy support team by email at{' '}
-            <a href="mailto:info@junkitout.in" className="text-emerald-700 font-bold underline break-all hover:text-emerald-800">
-              info@junkitout.in
+            <a href="mailto:support@junkitout.in" className="text-emerald-700 font-bold underline break-all hover:text-emerald-800">
+              support@junkitout.in
             </a>. Upon receipt of your request, we will process the deletion of your personal profile and address data, except where retention is mandated by law for financial audit or dispute resolution records.
           </p>
         </section>
@@ -158,4 +158,3 @@ export default function PrivacyPolicyPage() {
     </div>
   );
 }
-

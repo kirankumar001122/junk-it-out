@@ -3,9 +3,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import {
-  MessageSquare,
   X,
   Minimize2,
+  Maximize2,
   Send,
   Loader2,
   Sparkles,
@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   RotateCcw,
 } from 'lucide-react';
+import TrademarkBadge from '@/components/TrademarkBadge';
 
 interface Message {
   id: string;
@@ -30,9 +31,9 @@ const DEFAULT_SUGGESTIONS = [
   'What locations are supported?',
 ];
 
-export default function CustomerSupportChatWidget({ initiallyOpen = false }: { initiallyOpen?: boolean }) {
+export default function CustomerSupportChatWidget() {
   const pathname = usePathname();
-  const [isOpen, setIsOpen] = useState(initiallyOpen);
+  const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -159,19 +160,17 @@ export default function CustomerSupportChatWidget({ initiallyOpen = false }: { i
             setIsMinimized(false);
           }}
           aria-label="Open 24/7 AI Customer Support"
-          className="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-50 group flex items-center gap-2.5 rounded-full bg-slate-900 text-white pl-4 pr-5 py-3.5 shadow-2xl hover:bg-slate-800 border-2 border-emerald-500/40 hover:border-emerald-400 transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer"
+          title="Open Junk It Out™ Support"
+          className="fixed bottom-20 md:bottom-6 right-3 md:right-6 z-50 group grid h-12 w-12 place-items-center rounded-full bg-slate-900 text-white shadow-2xl shadow-slate-950/25 ring-2 ring-emerald-500/35 transition-all duration-300 hover:scale-105 hover:bg-slate-800 hover:ring-emerald-400 active:scale-95 cursor-pointer"
         >
           <div className="relative flex items-center justify-center w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 group-hover:bg-emerald-500 group-hover:text-slate-950 transition-colors">
-            <Bot className="w-5 h-5" />
+            <Bot className="w-5 h-5" aria-hidden="true" />
             <span className="absolute -top-1 -right-1 flex h-3 w-3">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border border-slate-900" />
             </span>
           </div>
-          <div className="text-left">
-            <span className="block text-xs font-black tracking-wide leading-none">Junk It Out Support</span>
-            <span className="block text-[10px] text-emerald-400 font-semibold mt-1">24/7 Live • English / ಕನ್ನಡ / Hindi</span>
-          </div>
+          <span className="sr-only">Open Junk It Out™ Support</span>
         </button>
       )}
 
@@ -183,7 +182,7 @@ export default function CustomerSupportChatWidget({ initiallyOpen = false }: { i
           className={`fixed z-50 transition-all duration-300 ease-out flex flex-col shadow-2xl border border-slate-700/60 bg-white ${
             isMinimized
               ? 'bottom-20 md:bottom-6 right-4 md:right-6 w-72 h-14 rounded-2xl overflow-hidden'
-              : 'bottom-20 md:bottom-6 right-4 md:right-6 w-[calc(100vw-2rem)] sm:w-[420px] h-[580px] max-h-[calc(100dvh-6.5rem)] rounded-3xl overflow-hidden'
+              : 'bottom-20 md:bottom-6 right-3 md:right-6 w-[calc(100vw-24px)] max-w-[380px] h-[min(75dvh,520px)] max-h-[calc(100dvh-6.5rem)] sm:w-[370px] sm:h-[500px] rounded-3xl overflow-hidden'
           }`}
         >
           {/* HEADER */}
@@ -195,7 +194,10 @@ export default function CustomerSupportChatWidget({ initiallyOpen = false }: { i
               </div>
               <div className="min-w-0">
                 <h3 className="text-xs font-black tracking-wide text-white truncate flex items-center gap-1.5">
-                  Junk It Out Support
+                  <span className="whitespace-nowrap">
+                    JUNK IT <span className="text-emerald-400"><span className="relative inline-block">OUT<TrademarkBadge /></span></span>
+                  </span>{' '}
+                  Support
                   <span className="px-1.5 py-0.2 bg-emerald-500/20 text-emerald-400 text-[9px] font-bold rounded">24/7 Live</span>
                 </h3>
                 <p className="text-[10px] text-slate-400 truncate">Live Database Verification & Rates</p>
@@ -219,7 +221,7 @@ export default function CustomerSupportChatWidget({ initiallyOpen = false }: { i
                 className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                 aria-label={isMinimized ? 'Expand' : 'Minimize'}
               >
-                <Minimize2 className="w-3.5 h-3.5" />
+                {isMinimized ? <Maximize2 className="w-3.5 h-3.5" /> : <Minimize2 className="w-3.5 h-3.5" />}
               </button>
               <button
                 type="button"
@@ -346,7 +348,7 @@ export default function CustomerSupportChatWidget({ initiallyOpen = false }: { i
                   <ShieldCheck className="w-3 h-3 text-emerald-600" />
                   Live Database Connected
                 </span>
-                <span>Junk It Out Support</span>
+                <span>Junk It Out™ Support</span>
               </div>
             </>
           )}
