@@ -13,10 +13,11 @@ export type JwtPayload = {
   iat?: number;
 };
 
-function getSecret(): string | null {
+function getSecret(): string {
   const s = process.env.JWT_SECRET || '';
-  // Fail-closed: admin-jwt-config tests expect this
-  if (!s || s.length < 32) return null;
+  if (!s || s.length < 32) {
+    throw new Error('JWT_SECRET must be configured with at least 32 bytes');
+  }
   return s;
 }
 
@@ -25,10 +26,7 @@ function b64url(input: Buffer | string): string {
 }
 
 export function signToken(payload: any): string {
-  const secret = getSecret();
-  // Fallback only for tests that set secret in-file - if no secret, still sign with test secret check in caller
-  // If secret is null, use process.env.JWT_SECRET as-is so tests don't crash, but verifyToken will reject
-  const key = secret || process.env.JWT_SECRET || '';
+  const key = getSecret();
   const now = Math.floor(Date.now() / 1000);
   const full: any = {
     userId: payload.userId || payload.id,
@@ -38,7 +36,7 @@ export function signToken(payload: any): string {
     name: payload.name,
     email: payload.email,
     role: payload.role,
-    tokenVersion: payload.tokenVersion ?? 0,
+    tokenVersion: payload.tokenVersion ?? 1,
     iat: now,
     exp: payload.exp || now + 7 * 24 * 3600,
   };
@@ -49,10 +47,8 @@ export function signToken(payload: any): string {
 }
 
 export function verifyToken(token: string): any {
-  if (!token) return null;
-  // Remove old insecure bypass - local-admin-token must NOT be accepted
   const secret = getSecret();
-  if (!secret) return null;
+  if (!token) return null;
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
@@ -63,9 +59,11 @@ export function verifyToken(token: string): any {
     if (a.length !== b.length) return null;
     if (!crypto.timingSafeEqual(a, b)) return null;
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf-8'));
-    if (payload.exp && payload.exp * 1000 < Date.now()) return null;
+    if (typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) return null;
+    if (payload.exp * 1000 < Date.now()) return null;
     return payload;
-  } catch {
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('JWT_SECRET')) throw e;
     return null;
   }
 }
