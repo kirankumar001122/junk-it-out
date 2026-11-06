@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { db } from '@/lib/db';
 import { spendWalletPaise, toPaise } from '@/lib/wallet';
+import { dispatchCustomerWalletNotification } from '@/lib/services/walletNotification';
 import { roundCurrency } from '@/lib/wallet';
 
 export const runtime = 'nodejs';
@@ -77,6 +78,18 @@ export async function POST(req: NextRequest) {
         where: { id: order.id },
         data: { paymentStatus: 'CAPTURED' },
       });
+
+      if (debit.transaction) {
+        await dispatchCustomerWalletNotification(tx, {
+          customerId: authUser.customerId!,
+          type: 'WALLET_DEBIT',
+          amount: payableAmount,
+          balanceAfter: debit.transaction.balanceAfter,
+          reason: `Payment for order #${order.orderNumber}`,
+          referenceId: `order:${order.id}`,
+        });
+      }
+
       return { status: 200, body: { success: true, data: updatedOrder } };
     });
 

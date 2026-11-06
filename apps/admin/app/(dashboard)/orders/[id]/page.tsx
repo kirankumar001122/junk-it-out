@@ -156,16 +156,24 @@ export default function AdminOrderDetailPage() {
             <h2 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider">Payment Breakdown</h2>
             <div className="space-y-2 text-xs font-semibold">
               <div className="flex justify-between text-slate-600">
-                <span>Base Service Fee</span>
-                <span>₹{order.basePickupCharge || 50}</span>
+                <span>Doorstep Pickup Fee</span>
+                <span>₹{Number(order.pickupFee ?? order.pickupCharge ?? 0).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-slate-600">
+                <span>Taxable Service Fee</span>
+                <span>₹{Number(order.serviceFee ?? 0).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-slate-600">
+                <span>GST ({order.gstRate ? Math.round(order.gstRate * 100) : 18}% on Service Fee)</span>
+                <span>₹{Number(order.gstAmount ?? 0).toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-slate-600">
                 <span>Discount / Coupon</span>
-                <span className="text-emerald-600">-₹{order.discountAmount || 0}</span>
+                <span className="text-emerald-600">-₹{Number(order.discountAmount || 0).toFixed(2)}</span>
               </div>
               <div className="border-t border-slate-100 pt-2 flex justify-between text-sm font-extrabold text-slate-900">
                 <span>Net Payable</span>
-                <span>₹{order.finalAmount || order.estimatedTotal}</span>
+                <span>₹{Number(order.finalAmount || order.estimatedTotal || 0).toFixed(2)}</span>
               </div>
             </div>
           </div>
