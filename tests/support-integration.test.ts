@@ -38,11 +38,13 @@ describe('Customer support integration', () => {
     );
   });
 
-  it('mounts the chatbot only inside Customer Support', async () => {
+  it('mounts the chatbot on the customer home and support pages, not the global layout', async () => {
     const layout = await readFile(new URL('../app/layout.tsx', import.meta.url), 'utf8');
+    const homePage = await readFile(new URL('../app/page.tsx', import.meta.url), 'utf8');
     const supportPage = await readFile(new URL('../app/customer/support/page.tsx', import.meta.url), 'utf8');
 
     assert.equal(layout.includes('CustomerSupportChatWidget'), false);
+    assert.equal(homePage.includes('CustomerSupportChatWidget'), true);
     assert.equal(supportPage.includes('CustomerSupportChatWidget'), true);
   });
 });
