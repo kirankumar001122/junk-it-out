@@ -14,6 +14,7 @@ import {
 import PickupCartDrawer from '@/components/PickupCartDrawer';
 import LocationSearchModal from '@/components/LocationSearchModal';
 import { getCachedClientJson } from '@/lib/clientRequestCache';
+import TrademarkBadge from '@/components/TrademarkBadge';
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -125,7 +126,7 @@ export default function Navbar() {
               <img src="/logo.png" alt="Junk It Out Logo" decoding="async" className="h-full w-full object-contain p-1" />
             </span>
             <span className="hidden text-base sm:text-lg font-bold tracking-tight text-slate-900 md:block">
-              JUNK IT <span className="text-emerald-600 font-extrabold">OUT</span>
+              JUNK IT <span className="text-emerald-600 font-extrabold"><span className="relative inline-block">OUT<TrademarkBadge /></span></span>
             </span>
           </Link>
 

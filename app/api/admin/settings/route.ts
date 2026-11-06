@@ -27,7 +27,7 @@ export const DEFAULT_SETTINGS: SystemSettingsConfig = {
   dpiitNumber: 'DIPP265455',
   sector: 'Green Technology / Waste Management',
   supportPhone: '+91 7676272709 / +91 9591883174',
-  supportEmail: 'info@junkitout.in',
+  supportEmail: 'support@junkitout.in',
   headquarters: 'Bengaluru, Karnataka, India',
   dispatchSlaMinutes: 30,
   autoAssignEnabled: true,

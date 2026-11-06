@@ -97,7 +97,7 @@ export default function ContactPage() {
                 <div>
                   <h3 className="font-bold text-slate-900 text-xs sm:text-sm">Bengaluru Operational Hub</h3>
                   <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                    Munnekollala, Bengaluru, Karnataka 560037
+                    Koramangala, Bengaluru, Karnataka 560034
                   </p>
                 </div>
               </div>
@@ -121,7 +121,7 @@ export default function ContactPage() {
                 <div>
                   <h3 className="font-bold text-slate-900 text-xs sm:text-sm">Support Email</h3>
                   <p className="text-xs text-slate-600 mt-0.5 font-semibold">
-                    info@junkitout.in
+                    support@junkitout.in
                   </p>
                 </div>
               </div>

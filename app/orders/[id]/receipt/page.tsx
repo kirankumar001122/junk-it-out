@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { formatPickupAddress } from '@/lib/address';
 import { isPickupCompletedStatus } from '@/lib/orders/lifecycle';
 import { downloadReceiptPdf } from '@/lib/receiptPdf';
+import TrademarkBadge from '@/components/TrademarkBadge';
 
 export default function ReceiptPage() {
   const params = useParams();
@@ -148,7 +149,7 @@ export default function ReceiptPage() {
         <header className="receipt-header">
           <div>
             <h1 className="company-name">
-              JUNK IT <span>OUT</span>
+              JUNK IT <span><span className="relative inline-block">OUT<TrademarkBadge /></span></span>
             </h1>
 
             <p className="receipt-title">
