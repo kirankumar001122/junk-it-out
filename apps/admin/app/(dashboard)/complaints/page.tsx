@@ -19,6 +19,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { adminFetch } from '@/lib/api';
+import EvidenceImagePreview from '@/components/EvidenceImagePreview';
 
 interface ComplaintRecord {
   id: string;
@@ -54,8 +55,66 @@ export default function AdminComplaintsPage() {
   const [selectedComplaint, setSelectedComplaint] = useState<ComplaintRecord | null>(null);
   const [editStatus, setEditStatus] = useState<string>('OPEN');
   const [editResolutionNotes, setEditResolutionNotes] = useState<string>('');
+  const [editCustomerUpdate, setEditCustomerUpdate] = useState<string>('');
+  const [editInternalNotes, setEditInternalNotes] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [modalFeedback, setModalFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+
+  // Dirty check for unsaved edits in dispute modal
+  const isDirty = useMemo(() => {
+    if (!selectedComplaint) return false;
+    const initialStatus = selectedComplaint.status || 'OPEN';
+    const initialNotes = selectedComplaint.resolutionNotes || '';
+    return (
+      editStatus !== initialStatus ||
+      editResolutionNotes !== initialNotes ||
+      editCustomerUpdate.trim() !== '' ||
+      editInternalNotes.trim() !== ''
+    );
+  }, [selectedComplaint, editStatus, editResolutionNotes, editCustomerUpdate, editInternalNotes]);
+
+  const handleRequestClose = () => {
+    if (submitting) return;
+    if (isDirty) {
+      setShowDiscardConfirm(true);
+    } else {
+      setSelectedComplaint(null);
+      setShowDiscardConfirm(false);
+    }
+  };
+
+  const handleConfirmDiscard = () => {
+    setShowDiscardConfirm(false);
+    setSelectedComplaint(null);
+  };
+
+  // Keyboard shortcut: Escape closes modal or discard confirm dialog
+  useEffect(() => {
+    if (!selectedComplaint) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showDiscardConfirm) {
+          setShowDiscardConfirm(false);
+        } else {
+          handleRequestClose();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedComplaint, showDiscardConfirm, isDirty, submitting]);
+
+  // Lock body scroll when modal is active
+  useEffect(() => {
+    if (selectedComplaint) {
+      const origOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = origOverflow;
+      };
+    }
+  }, [selectedComplaint]);
 
   const loadComplaints = async () => {
     setLoading(true);
@@ -83,25 +142,33 @@ export default function AdminComplaintsPage() {
   // Summary Metrics
   const metrics = useMemo(() => {
     let openCount = 0;
-    let inProgressCount = 0;
+    let underReviewCount = 0;
+    let awaitingCustomerCount = 0;
     let resolvedCount = 0;
+    let rejectedCount = 0;
 
     for (const c of complaints) {
       const st = (c.status || '').toUpperCase();
       if (st === 'OPEN' || st === 'PENDING') {
         openCount++;
-      } else if (st === 'IN_PROGRESS') {
-        inProgressCount++;
-      } else if (st === 'RESOLVED') {
+      } else if (st === 'UNDER_REVIEW' || st === 'IN_PROGRESS' || st === 'INVESTIGATING') {
+        underReviewCount++;
+      } else if (st === 'AWAITING_CUSTOMER') {
+        awaitingCustomerCount++;
+      } else if (st === 'RESOLVED' || st === 'CLOSED') {
         resolvedCount++;
+      } else if (st === 'REJECTED' || st === 'DISMISSED') {
+        rejectedCount++;
       }
     }
 
     return {
       total: complaints.length,
       open: openCount,
-      inProgress: inProgressCount,
+      underReview: underReviewCount,
+      awaitingCustomer: awaitingCustomerCount,
       resolved: resolvedCount,
+      rejected: rejectedCount,
     };
   }, [complaints]);
 
@@ -113,9 +180,10 @@ export default function AdminComplaintsPage() {
         if (statusFilter !== 'ALL') {
           const st = (c.status || '').toUpperCase();
           if (statusFilter === 'OPEN' && st !== 'OPEN' && st !== 'PENDING') return false;
-          if (statusFilter === 'IN_PROGRESS' && st !== 'IN_PROGRESS') return false;
-          if (statusFilter === 'RESOLVED' && st !== 'RESOLVED') return false;
-          if (statusFilter === 'DISMISSED' && st !== 'DISMISSED') return false;
+          if (statusFilter === 'UNDER_REVIEW' && st !== 'UNDER_REVIEW' && st !== 'IN_PROGRESS' && st !== 'INVESTIGATING') return false;
+          if (statusFilter === 'AWAITING_CUSTOMER' && st !== 'AWAITING_CUSTOMER') return false;
+          if (statusFilter === 'RESOLVED' && st !== 'RESOLVED' && st !== 'CLOSED') return false;
+          if (statusFilter === 'REJECTED' && st !== 'REJECTED' && st !== 'DISMISSED') return false;
         }
 
         // Category Filter
@@ -167,7 +235,10 @@ export default function AdminComplaintsPage() {
     setSelectedComplaint(complaint);
     setEditStatus(complaint.status || 'OPEN');
     setEditResolutionNotes(complaint.resolutionNotes || '');
+    setEditCustomerUpdate('');
+    setEditInternalNotes('');
     setModalFeedback(null);
+    setShowDiscardConfirm(false);
   };
 
   const handleSaveResolution = async () => {
@@ -183,13 +254,15 @@ export default function AdminComplaintsPage() {
           id: selectedComplaint.id,
           status: editStatus,
           resolutionNotes: editResolutionNotes.trim() || undefined,
+          customerUpdate: editCustomerUpdate.trim() || undefined,
+          internalNotes: editInternalNotes.trim() || undefined,
         }),
       });
 
       const data = await res.json();
 
       if (res.ok && data.success) {
-        setModalFeedback({ type: 'success', text: 'Complaint status updated successfully.' });
+        setModalFeedback({ type: 'success', text: 'Complaint status and live timeline updated successfully.' });
         setTimeout(() => {
           setSelectedComplaint(null);
           loadComplaints();
@@ -263,49 +336,60 @@ export default function AdminComplaintsPage() {
       </div>
 
       {/* Summary Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-1">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-1">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Total Tickets</span>
-            <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-              <FileText className="w-4 h-4" />
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total Tickets</span>
+            <div className="w-7 h-7 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
+              <FileText className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="text-2xl font-black text-slate-900">{metrics.total}</div>
-          <div className="text-[11px] font-bold text-slate-400">All recorded inquiries</div>
+          <div className="text-xl font-black text-slate-900">{metrics.total}</div>
+          <div className="text-[10px] font-bold text-slate-400">All recorded inquiries</div>
         </div>
 
-        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-1">
+        <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-1">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Open / Pending</span>
-            <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
-              <Clock className="w-4 h-4" />
+            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Open</span>
+            <div className="w-7 h-7 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+              <Clock className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="text-2xl font-black text-amber-600">{metrics.open}</div>
-          <div className="text-[11px] font-bold text-amber-700">Awaiting customer response or review</div>
+          <div className="text-xl font-black text-amber-600">{metrics.open}</div>
+          <div className="text-[10px] font-bold text-amber-700">New & unassigned</div>
         </div>
 
-        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-1">
+        <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-1">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">In Progress</span>
-            <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-              <ShieldAlert className="w-4 h-4" />
+            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700">Under Review</span>
+            <div className="w-7 h-7 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+              <ShieldAlert className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="text-2xl font-black text-indigo-600">{metrics.inProgress}</div>
-          <div className="text-[11px] font-bold text-indigo-700">Active investigations</div>
+          <div className="text-xl font-black text-blue-600">{metrics.underReview}</div>
+          <div className="text-[10px] font-bold text-blue-700">Active investigations</div>
         </div>
 
-        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-1">
+        <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-1">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Resolved</span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <CheckCircle2 className="w-4 h-4" />
+            <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700">Awaiting Customer</span>
+            <div className="w-7 h-7 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+              <MessageSquare className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="text-2xl font-black text-emerald-600">{metrics.resolved}</div>
-          <div className="text-[11px] font-bold text-emerald-700">Successfully closed tickets</div>
+          <div className="text-xl font-black text-purple-600">{metrics.awaitingCustomer}</div>
+          <div className="text-[10px] font-bold text-purple-700">Waiting for evidence/reply</div>
+        </div>
+
+        <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm space-y-1 col-span-2 sm:col-span-1">
+          <div className="flex items-center justify-between text-slate-400">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Resolved</span>
+            <div className="w-7 h-7 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="text-xl font-black text-emerald-600">{metrics.resolved}</div>
+          <div className="text-[10px] font-bold text-emerald-700">Completed & closed</div>
         </div>
       </div>
 
@@ -347,10 +431,11 @@ export default function AdminComplaintsPage() {
               className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             >
               <option value="ALL">All Ticket Statuses</option>
-              <option value="OPEN">Open / Pending</option>
-              <option value="IN_PROGRESS">In Progress</option>
-              <option value="RESOLVED">Resolved</option>
-              <option value="DISMISSED">Dismissed</option>
+              <option value="OPEN">OPEN (New / Unreviewed)</option>
+              <option value="UNDER_REVIEW">UNDER REVIEW (Investigating)</option>
+              <option value="AWAITING_CUSTOMER">AWAITING CUSTOMER</option>
+              <option value="RESOLVED">RESOLVED</option>
+              <option value="REJECTED">REJECTED</option>
             </select>
           </div>
 
@@ -421,9 +506,91 @@ export default function AdminComplaintsPage() {
         </div>
       )}
 
-      {/* Complaints Table */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-6 space-y-4">
-        <div className="overflow-x-auto">
+      {/* Complaints Table & Mobile Cards */}
+      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-4 sm:p-6 space-y-4">
+        {/* Mobile Cards View (viewport < 768px) */}
+        <div className="block md:hidden space-y-3">
+          {loading ? (
+            <div className="text-center p-8 text-slate-400 font-semibold flex items-center justify-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+              Loading support tickets...
+            </div>
+          ) : paginatedComplaints.length === 0 ? (
+            <div className="text-center p-8 text-slate-400 font-semibold bg-slate-50 rounded-2xl">
+              No support tickets match the active filters.
+            </div>
+          ) : (
+            paginatedComplaints.map((c) => {
+              const st = (c.status || 'OPEN').toUpperCase();
+              let badgeStyle = 'bg-amber-100 text-amber-800 border-amber-200';
+              if (st === 'UNDER_REVIEW' || st === 'IN_PROGRESS' || st === 'INVESTIGATING') {
+                badgeStyle = 'bg-blue-100 text-blue-800 border-blue-200';
+              } else if (st === 'AWAITING_CUSTOMER') {
+                badgeStyle = 'bg-purple-100 text-purple-800 border-purple-200';
+              } else if (st === 'RESOLVED' || st === 'CLOSED') {
+                badgeStyle = 'bg-emerald-100 text-emerald-800 border-emerald-200';
+              } else if (st === 'REJECTED' || st === 'DISMISSED') {
+                badgeStyle = 'bg-rose-100 text-rose-800 border-rose-200';
+              }
+
+              return (
+                <div
+                  key={c.id}
+                  className="p-4 bg-slate-50 hover:bg-white rounded-2xl border border-slate-200 transition-all space-y-2.5 text-xs shadow-xs"
+                >
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="font-mono text-[11px] font-black text-slate-900 bg-white px-2 py-0.5 rounded-lg border border-slate-200 truncate">
+                        #{c.id.slice(0, 8)}...
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-slate-200/80 text-slate-700 truncate">
+                        {(c.category || 'GENERAL').replace(/_/g, ' ')}
+                      </span>
+                    </div>
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border ${badgeStyle} shrink-0`}>
+                      {st.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 text-slate-600">
+                    <div>
+                      <span className="font-bold text-slate-900 block">{c.customerName || 'Customer'}</span>
+                      <span className="text-[11px] text-slate-500 font-mono">{c.customerPhone || '—'}</span>
+                    </div>
+                    {c.orderNumber ? (
+                      <span className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-bold text-slate-800 shrink-0">
+                        #{c.orderNumber}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 text-[11px] shrink-0">General Support</span>
+                    )}
+                  </div>
+
+                  <p className="text-slate-700 line-clamp-2 leading-relaxed bg-white p-2.5 rounded-xl border border-slate-100">
+                    {c.description || c.message || 'No description provided.'}
+                  </p>
+
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-200/70 text-[11px]">
+                    <span className="text-slate-400 font-medium">
+                      {c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-IN') : 'N/A'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenDetails(c)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-xl text-xs inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>View & Resolve</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Desktop / Tablet Table View (viewport >= 768px) */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 text-slate-500 uppercase font-bold text-[10px]">
               <tr>
@@ -455,8 +622,17 @@ export default function AdminComplaintsPage() {
                 </tr>
               ) : (
                 paginatedComplaints.map((c) => {
-                  const isResolved = c.status === 'RESOLVED';
-                  const isProgress = c.status === 'IN_PROGRESS';
+                  const st = (c.status || 'OPEN').toUpperCase();
+                  let badgeStyle = 'bg-amber-100 text-amber-800 border-amber-200';
+                  if (st === 'UNDER_REVIEW' || st === 'IN_PROGRESS' || st === 'INVESTIGATING') {
+                    badgeStyle = 'bg-blue-100 text-blue-800 border-blue-200';
+                  } else if (st === 'AWAITING_CUSTOMER') {
+                    badgeStyle = 'bg-purple-100 text-purple-800 border-purple-200';
+                  } else if (st === 'RESOLVED' || st === 'CLOSED') {
+                    badgeStyle = 'bg-emerald-100 text-emerald-800 border-emerald-200';
+                  } else if (st === 'REJECTED' || st === 'DISMISSED') {
+                    badgeStyle = 'bg-rose-100 text-rose-800 border-rose-200';
+                  }
                   return (
                     <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="p-3">
@@ -494,18 +670,8 @@ export default function AdminComplaintsPage() {
                         )}
                       </td>
                       <td className="p-3">
-                        <span
-                          className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase ${
-                            isResolved
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : isProgress
-                              ? 'bg-indigo-100 text-indigo-800'
-                              : c.status === 'DISMISSED'
-                              ? 'bg-slate-100 text-slate-700'
-                              : 'bg-amber-100 text-amber-800'
-                          }`}
-                        >
-                          {c.status || 'OPEN'}
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase border ${badgeStyle}`}>
+                          {st.replace(/_/g, ' ')}
                         </span>
                         {c.resolutionNotes && (
                           <span className="block text-[10px] text-slate-500 font-semibold mt-1 truncate max-w-[120px]" title={c.resolutionNotes}>
@@ -516,6 +682,7 @@ export default function AdminComplaintsPage() {
                       <td className="p-3 text-slate-500 whitespace-nowrap">{c.createdAt || 'N/A'}</td>
                       <td className="p-3 text-right">
                         <button
+                          type="button"
                           onClick={() => handleOpenDetails(c)}
                           className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold px-3 py-1.5 rounded-xl text-[11px] inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                           title="View Ticket & Update Resolution"
@@ -579,122 +746,170 @@ export default function AdminComplaintsPage() {
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          aria-labelledby="dispute-modal-title"
+          className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 transition-opacity"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !submitting) {
+              handleRequestClose();
+            }
+          }}
         >
-          <div className="bg-white rounded-3xl p-6 max-w-lg w-full space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center font-bold text-lg">
+          <div
+            className="relative flex flex-col w-full max-w-xl max-h-[min(90vh,780px)] rounded-3xl bg-white shadow-2xl overflow-hidden border border-slate-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Sticky Header with visible Close (X) button */}
+            <div className="sticky top-0 bg-white z-10 border-b border-slate-100 p-4 sm:p-5 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center font-bold text-lg shrink-0">
                   💬
                 </div>
-                <div>
-                  <h3 className="text-base font-extrabold text-slate-900">Support Ticket Investigation</h3>
-                  <p className="text-xs text-slate-500 font-mono">ID: {selectedComplaint.id}</p>
+                <div className="min-w-0">
+                  <h3 id="dispute-modal-title" className="text-base font-extrabold text-slate-900 truncate">
+                    Support Ticket Investigation
+                  </h3>
+                  <p className="text-xs text-slate-500 font-mono truncate">ID: {selectedComplaint.id}</p>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={() => setSelectedComplaint(null)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+                onClick={handleRequestClose}
+                disabled={submitting}
+                aria-label="Close dialog"
+                className="text-slate-400 hover:text-slate-700 p-2 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Category</span>
-                <span className="text-xs font-black uppercase text-slate-800">
-                  {(selectedComplaint.category || 'General').replace(/_/g, ' ')}
-                </span>
+            {/* Scrollable Body */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Category</span>
+                  <span className="text-xs font-black uppercase text-slate-800">
+                    {(selectedComplaint.category || 'General').replace(/_/g, ' ')}
+                  </span>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Linked Order</span>
+                  <span className="text-xs font-black text-slate-900">
+                    {selectedComplaint.orderNumber ? `#${selectedComplaint.orderNumber}` : 'General Support'}
+                  </span>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Customer Name</span>
+                  <span className="text-xs font-black text-slate-900">{selectedComplaint.customerName || 'Customer'}</span>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Customer Phone</span>
+                  <span className="text-xs font-mono font-bold text-slate-800">{selectedComplaint.customerPhone || '—'}</span>
+                </div>
               </div>
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Linked Order</span>
-                <span className="text-xs font-black text-slate-900">
-                  {selectedComplaint.orderNumber ? `#${selectedComplaint.orderNumber}` : 'General Support'}
-                </span>
-              </div>
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Customer Name</span>
-                <span className="text-xs font-black text-slate-900">{selectedComplaint.customerName || 'Customer'}</span>
-              </div>
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Customer Phone</span>
-                <span className="text-xs font-mono font-bold text-slate-800">{selectedComplaint.customerPhone || '—'}</span>
-              </div>
-            </div>
 
-            {/* Complaint Statement */}
-            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 space-y-1">
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Customer Statement</span>
-              <p className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed">
-                {selectedComplaint.description || selectedComplaint.message || 'No description provided.'}
-              </p>
-            </div>
+              {/* Complaint Statement */}
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 space-y-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Customer Statement</span>
+                <p className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed">
+                  {selectedComplaint.description || selectedComplaint.message || 'No description provided.'}
+                </p>
+              </div>
 
-            {/* Evidence Preview if Photo attached */}
-            {selectedComplaint.photoUrl ? (
-              <div className="p-3 bg-blue-50 rounded-2xl border border-blue-100 text-xs text-blue-900 space-y-2">
-                <span className="font-bold flex items-center gap-1">
-                  <Paperclip className="w-3.5 h-3.5" />
-                  Photographic Evidence Attached
-                </span>
-                <div className="rounded-xl overflow-hidden border border-blue-200 max-h-40 bg-white flex items-center justify-center">
-                  <img
+              {/* Evidence Preview if Photo attached */}
+              {selectedComplaint.photoUrl && (
+                <div className="p-3.5 bg-blue-50/70 rounded-2xl border border-blue-100">
+                  <EvidenceImagePreview
                     src={selectedComplaint.photoUrl}
                     alt="Complaint evidence"
-                    className="max-h-40 object-contain w-full"
+                    caption="Photographic Evidence Attached"
+                  />
+                </div>
+              )}
+
+              {/* Status & Resolution Form */}
+              <div className="space-y-3 pt-1 border-t border-slate-100">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Update Lifecycle Status:</label>
+                  <select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="OPEN">OPEN (New / Unreviewed)</option>
+                    <option value="UNDER_REVIEW">UNDER_REVIEW (Active Investigation)</option>
+                    <option value="AWAITING_CUSTOMER">AWAITING_CUSTOMER (Needs Customer Response / Evidence)</option>
+                    <option value="RESOLVED">RESOLVED (Approved & Closed)</option>
+                    <option value="REJECTED">REJECTED (Dispute Rejected / Dismissed)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Customer-Visible Timeline Update:
+                    <span className="text-[11px] font-normal text-emerald-700 ml-1">(Visible on customer live timeline)</span>
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={editCustomerUpdate}
+                    onChange={(e) => setEditCustomerUpdate(e.target.value)}
+                    placeholder={
+                      editStatus === 'AWAITING_CUSTOMER'
+                        ? "e.g., 'Please upload a photo of the receipt or scale reading so we can adjust the weight.'"
+                        : "Optional message logged to customer's live status timeline..."
+                    }
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Internal Operations Notes:
+                    <span className="text-[11px] font-normal text-amber-700 ml-1">(Private to Admins — Never shown to customer)</span>
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={editInternalNotes}
+                    onChange={(e) => setEditInternalNotes(e.target.value)}
+                    placeholder="Internal agent checks, GPS audit, scale cross-verification notes..."
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Resolution Notes:
+                    <span className="text-[11px] font-normal text-slate-500 ml-1">(Final disposition / adjustment details)</span>
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={editResolutionNotes}
+                    onChange={(e) => setEditResolutionNotes(e.target.value)}
+                    placeholder="Document resolution outcome, refund/payout details, or rejection reasoning..."
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
               </div>
-            ) : null}
 
-            {/* Status & Resolution Form */}
-            <div className="space-y-3 pt-1 border-t border-slate-100">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Update Status:</label>
-                <select
-                  value={editStatus}
-                  onChange={(e) => setEditStatus(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              {modalFeedback && (
+                <div
+                  className={`p-3 rounded-xl text-xs font-bold ${
+                    modalFeedback.type === 'success'
+                      ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                      : 'bg-rose-50 border border-rose-200 text-rose-800'
+                  }`}
                 >
-                  <option value="OPEN">OPEN / PENDING</option>
-                  <option value="IN_PROGRESS">IN_PROGRESS (Investigating)</option>
-                  <option value="RESOLVED">RESOLVED (Closed)</option>
-                  <option value="DISMISSED">DISMISSED</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Resolution & Investigation Notes:</label>
-                <textarea
-                  rows={3}
-                  value={editResolutionNotes}
-                  onChange={(e) => setEditResolutionNotes(e.target.value)}
-                  placeholder="Document resolution findings, price adjustments, or follow-up actions..."
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
+                  {modalFeedback.text}
+                </div>
+              )}
             </div>
 
-            {modalFeedback && (
-              <div
-                className={`p-3 rounded-xl text-xs font-bold ${
-                  modalFeedback.type === 'success'
-                    ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
-                    : 'bg-rose-50 border border-rose-200 text-rose-800'
-                }`}
-              >
-                {modalFeedback.text}
-              </div>
-            )}
-
-            <div className="flex gap-3 pt-2">
+            {/* Sticky Footer with Cancel & Save Resolution actions */}
+            <div className="sticky bottom-0 bg-slate-50 border-t border-slate-100 p-4 sm:p-5 flex items-center justify-end gap-3 shrink-0">
               <button
                 type="button"
-                onClick={() => setSelectedComplaint(null)}
+                onClick={handleRequestClose}
                 disabled={submitting}
-                className="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 rounded-xl cursor-pointer transition-colors"
+                className="px-5 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs rounded-xl cursor-pointer transition-colors"
               >
                 Cancel
               </button>
@@ -702,10 +917,45 @@ export default function AdminComplaintsPage() {
                 type="button"
                 onClick={handleSaveResolution}
                 disabled={submitting}
-                className="w-1/2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer transition-colors disabled:opacity-50"
               >
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                 {submitting ? 'Saving...' : 'Save Resolution'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Unsaved Changes Confirmation Dialog */}
+      {showDiscardConfirm && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          className="fixed inset-0 z-[60] bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
+        >
+          <div className="bg-white rounded-2xl p-5 max-w-sm w-full space-y-3 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-2.5 text-amber-600">
+              <AlertCircle className="w-5 h-5 shrink-0" />
+              <h4 className="text-sm font-extrabold text-slate-900">Unsaved Changes</h4>
+            </div>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              You have modified the dispute status or resolution notes. If you leave now, your changes will be discarded.
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowDiscardConfirm(false)}
+                className="px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 cursor-pointer"
+              >
+                Keep Editing
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDiscard}
+                className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer"
+              >
+                Discard Changes
               </button>
             </div>
           </div>
