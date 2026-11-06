@@ -558,12 +558,21 @@ async function handleGet(req: NextRequest) {
     //
     // =====================================================
 
-    else if (
+    let resolvedAgentId = authUser.agentId;
+    if (
       authUser.role === 'AGENT'
     ) {
+      if (!resolvedAgentId && authUser.userId) {
+        const agentRec = await db.agent.findUnique({
+          where: { userId: authUser.userId },
+          select: { id: true },
+        });
+        resolvedAgentId = agentRec?.id ?? null;
+      }
+
       whereClause = {
         agentId:
-          authUser.agentId ||
+          resolvedAgentId ||
           'unmatched',
 
         OR: [
@@ -675,9 +684,9 @@ async function handleGet(req: NextRequest) {
           select: agentOrderSelect,
           orderBy: { createdAt: 'desc' },
         }),
-        authUser.agentId
+        resolvedAgentId
           ? db.agent.findUnique({
-              where: { id: authUser.agentId },
+              where: { id: resolvedAgentId },
               select: { id: true, serviceAreas: true, status: true },
             })
           : Promise.resolve(null),
@@ -690,7 +699,7 @@ async function handleGet(req: NextRequest) {
             timestamp: new Date().toISOString(),
             severity: 'error',
             event: 'agent.data_integrity.multiple_active_orders',
-            agentId: authUser.agentId,
+            agentId: resolvedAgentId,
             activeOrderIds: activeOrders.map((o) => o.id),
             count: activeOrders.length,
             message: 'Agent has multiple active assignments; returning all active assignments.',
@@ -701,7 +710,7 @@ async function handleGet(req: NextRequest) {
       // 3. Concurrently fetch unassigned orders (if eligible), historical orders, and total count
       const activeIds = activeOrders.map((o) => o.id);
       const shouldFetchUnassigned = Boolean(
-        agentProfile && (agentProfile.status === 'AVAILABLE' || activeOrders.length === 0)
+        agentProfile && agentProfile.status === 'AVAILABLE'
       );
       const remainingLimit = Math.max(0, limit - activeOrders.length);
 

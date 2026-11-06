@@ -81,20 +81,29 @@ export default function AgentDashboardPage() {
   const locationUpdateRequestRef = useRef(false);
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  const fetchAgentData = useCallback(async (showLoading = true) => {
+  const fetchAgentData = useCallback(async (showLoading = true, isManual = false) => {
     if (dataRequestRef.current) {
       refreshAfterRequestRef.current = true;
+      if (!showLoading) {
+        setIsRefreshing(true);
+      }
       return;
     }
     dataRequestRef.current = true;
     setDashboardError(null);
     if (showLoading) setLoading(true);
     else setIsRefreshing(true);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
     try {
       const [profileRes, ordersRes] = await Promise.all([
-        fetch('/api/auth/me', { cache: 'no-store' }),
-        fetch('/api/orders?limit=20', { cache: 'no-store' }),
+        fetch('/api/auth/me', { cache: 'no-store', signal: controller.signal }),
+        fetch('/api/orders?limit=20', { cache: 'no-store', signal: controller.signal }),
       ]);
+      clearTimeout(timeout);
+
       const profileData = await profileRes.json().catch(() => ({ success: false }));
 
       if (!profileData.success || !profileData.data?.user || profileData.data.user.role !== 'AGENT') {
@@ -155,13 +164,14 @@ export default function AgentDashboardPage() {
       const unassignedOpen = data.data.filter(
         (o: any) => !o.agentId && ['BOOKING_RECEIVED', 'AGENT_BEING_ASSIGNED'].includes(o.status)
       );
-      if (unassignedOpen.length > 0 && !assigned) {
+      const isAgentAvailable = agentProfile.status === 'AVAILABLE';
+      if (unassignedOpen.length > 0 && !assigned && isAgentAvailable) {
         const topUnassigned = unassignedOpen[0];
         const estQty = (topUnassigned.items || []).reduce(
           (sum: number, it: any) => sum + (Number(it.estimatedWeight) || 0),
           0
         );
-        setNewPickupNotice((current: any) => current || {
+        setNewPickupNotice({
           type: 'NEW_PICKUP_AVAILABLE',
           orderId: topUnassigned.id,
           orderNumber: topUnassigned.orderNumber,
@@ -170,6 +180,8 @@ export default function AgentDashboardPage() {
           itemsSummary: `${topUnassigned.items?.length || 0} category item(s)`,
           createdAt: topUnassigned.createdAt,
         });
+      } else {
+        setNewPickupNotice(null);
       }
       setActualWeightsInput(
         assigned
@@ -185,19 +197,36 @@ export default function AgentDashboardPage() {
             }))
           : [],
       );
+
+      if (isManual) {
+        setStatusNotice('Pickup assignments refreshed.');
+        setTimeout(() => setStatusNotice(null), 3000);
+      }
     } catch (error) {
       console.error('Agent dashboard refresh failed:', error);
-      setDashboardError('Network error while loading your pickup dashboard.');
+      const isTimeout = error instanceof DOMException && error.name === 'AbortError';
+      setDashboardError(
+        isTimeout
+          ? 'Dashboard refresh timed out. Please check your network and retry.'
+          : 'Network error while loading your pickup dashboard. Please retry.'
+      );
     } finally {
-      setLoading(false);
-      setIsRefreshing(false);
+      clearTimeout(timeout);
       dataRequestRef.current = false;
       if (refreshAfterRequestRef.current) {
         refreshAfterRequestRef.current = false;
         window.setTimeout(() => void fetchAgentData(false), 0);
+      } else {
+        setLoading(false);
+        setIsRefreshing(false);
       }
     }
   }, []);
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await fetchAgentData(false, true);
+  }, [fetchAgentData]);
 
   useEffect(() => {
     void fetchAgentData();
@@ -320,6 +349,7 @@ export default function AgentDashboardPage() {
         try {
           const payload = JSON.parse(e.data);
           console.log('[AGENT SSE] NEW_PICKUP_AVAILABLE notification received:', payload);
+          if (activeOrderRef.current || agent?.status !== 'AVAILABLE') return;
           setNewPickupNotice(payload);
         } catch (err) {
           console.error('[AGENT SSE] Error parsing notification payload:', err);
@@ -448,11 +478,23 @@ export default function AgentDashboardPage() {
   };
 
   const handleViewPickupDetails = async (orderId: string) => {
+    if (!isOnline || agent?.status !== 'AVAILABLE') {
+      setStatusNotice('You are currently OFFLINE. Please switch status to ONLINE to view and accept available pickups.');
+      setTimeout(() => setStatusNotice(null), 5000);
+      return;
+    }
     setLoadingPickupDetails(true);
     try {
       setViewPickupModal(await fetchOrderDetails(orderId));
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Network error fetching pickup details.');
+      const message = err instanceof Error ? err.message : 'Network error fetching pickup details.';
+      if (message.includes('available agents')) {
+        setStatusNotice('You must be ONLINE and AVAILABLE to view open pickups. Please check your status toggle.');
+        setTimeout(() => setStatusNotice(null), 6000);
+      } else {
+        setStatusNotice(message);
+        setTimeout(() => setStatusNotice(null), 5000);
+      }
     } finally {
       setLoadingPickupDetails(false);
     }
@@ -685,6 +727,9 @@ export default function AgentDashboardPage() {
     // Optimistic UI state for instant response
     setIsOnline(optimisticOnline);
     setAgent((prev: any) => (prev ? { ...prev, status: targetStatus } : prev));
+    if (targetStatus === 'OFFLINE') {
+      setNewPickupNotice(null);
+    }
     setStatusUpdating(true);
     setStatusNotice(null);
 
@@ -1150,9 +1195,9 @@ export default function AgentDashboardPage() {
           <span>{dashboardError}</span>
           <button
             type="button"
-            onClick={() => void fetchAgentData(false)}
+            onClick={handleRefresh}
             disabled={isRefreshing}
-            className="shrink-0 underline disabled:opacity-50"
+            className="shrink-0 underline disabled:opacity-50 cursor-pointer"
           >
             {isRefreshing ? 'Refreshing…' : 'Retry'}
           </button>
@@ -1184,10 +1229,11 @@ export default function AgentDashboardPage() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => void fetchAgentData(false)}
+            onClick={handleRefresh}
             disabled={isRefreshing}
             aria-label="Refresh pickup assignments"
-            className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-full border border-slate-700 disabled:opacity-50"
+            title="Refresh pickup assignments"
+            className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-full border border-slate-700 disabled:opacity-50 transition-colors cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
           </button>
