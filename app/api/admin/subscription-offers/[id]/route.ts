@@ -48,7 +48,7 @@ export async function PUT(req: NextRequest, context: { params: Promise<{ id: str
         benefitsJson: JSON.stringify(benefits),
         active: body.active !== false,
         displayOrder: Number.isInteger(Number(body.displayOrder)) ? Number(body.displayOrder) : 0,
-      },
+      } as any,
     });
     return NextResponse.json({ success: true, data: { ...offer, benefits: parseBenefits(offer.benefitsJson) } });
   } catch (error) {

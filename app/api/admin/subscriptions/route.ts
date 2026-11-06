@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
     });
 
     const now = new Date();
-    const data = subscriptions.map((sub) => {
+    const data = subscriptions.map((sub: any) => {
       const isExpired = sub.expiryDate <= now;
       const computedStatus = sub.status === 'CANCELLED' ? 'CANCELLED' : isExpired ? 'EXPIRED' : sub.status;
       const remainingPickups = Math.max(0, (sub.pickupsAllowed || 0) - (sub.pickupsUsed || 0));

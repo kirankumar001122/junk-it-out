@@ -26,7 +26,7 @@ export async function GET() {
             benefitsJson: JSON.stringify(plan.benefits),
             displayOrder: plan.displayOrder,
             active: true,
-          },
+          } as any,
           update: {},
         });
       }
@@ -39,7 +39,7 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
-      data: offers.map((offer) => ({
+      data: offers.map((offer: any) => ({
         ...offer,
         billingPeriod: offer.billingPeriod || (offer.durationMonths === 0 ? 'WEEKLY' : offer.durationMonths === 3 ? 'QUARTERLY' : 'MONTHLY'),
         pickupLimit: offer.pickupLimit || (offer.durationMonths === 0 ? 1 : offer.durationMonths === 3 ? 12 : 4),

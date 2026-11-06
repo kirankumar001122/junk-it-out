@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: 'desc' },
     });
     const now = new Date();
-    const data = subscriptions.map((subscription) => {
+    const data = subscriptions.map((subscription: any) => {
       const isExpired = subscription.expiryDate <= now;
       const status = subscription.status === 'CANCELLED' ? 'CANCELLED' : isExpired ? 'EXPIRED' : subscription.status;
       const remainingPickups = Math.max(0, (subscription.pickupsAllowed || 0) - (subscription.pickupsUsed || 0));

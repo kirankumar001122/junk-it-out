@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
           gatewayPaymentId: razorpayPaymentId,
           signature: razorpaySignature,
           failureReason: null,
-        },
+        } as any,
       });
       return tx.customerSubscription.create({
         data: {
@@ -74,10 +74,10 @@ export async function POST(req: NextRequest) {
           startDate,
           expiryDate,
           status: 'ACTIVE',
-          pickupsAllowed: current.offer.pickupLimit || 4,
+          pickupsAllowed: (current.offer as any)?.pickupLimit || 4,
           pickupsUsed: 0,
           autoRenew: false,
-        },
+        } as any,
         include: { offer: true },
       });
     });
