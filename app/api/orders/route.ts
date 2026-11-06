@@ -469,9 +469,17 @@ export function POST(req: NextRequest) {
 }
 
 async function handleGet(req: NextRequest) {
+  const requestId = req.headers.get('x-request-id');
+  const requestStartedAt = monotonicNow();
   try {
-    const authUser =
-      await getAuthUser(req);
+    await measureTiming(
+      'database.connect',
+      () => db.$connect(),
+    ).catch(() => undefined);
+    const authUser = await measureTiming(
+      'auth.lookup',
+      () => getAuthUser(req),
+    );
 
     if (!authUser) {
       return errorResponse(
@@ -511,15 +519,8 @@ async function handleGet(req: NextRequest) {
     if (
       authUser.role === 'CUSTOMER'
     ) {
-      const customerIdentityConditions = [
-        ...(authUser.customerId ? [{ customerId: authUser.customerId }] : []),
-        ...(authUser.userId ? [{ customer: { userId: authUser.userId } }] : []),
-      ];
-
       whereClause = {
-        ...(customerIdentityConditions.length > 0
-          ? { OR: customerIdentityConditions }
-          : { customerId: 'unmatched' }),
+        customerId: authUser.customerId || 'unmatched',
 
         AND: [
           {
@@ -749,24 +750,108 @@ async function handleGet(req: NextRequest) {
       orders = [...activeOrders, ...limitedNonActive];
       total = countResult || orders.length;
     } else {
-      const [fetchedOrders, countResult] = await Promise.all([
-        db.order.findMany({
-          where: whereClause,
+      const customerSelect = {
+        id: true,
+        orderNumber: true,
+        pickupType: true,
+        scheduledSlot: true,
+        status: true,
+        financialDirection: true,
+        estimatedTotal: true,
+        finalAmount: true,
+        paymentStatus: true,
+        wastePhotos: true,
+        cancellationReason: true,
+        createdAt: true,
+        address: {
+          select: {
+            houseNo: true,
+            street: true,
+            area: true,
+          },
+        },
+        agent: {
+          select: {
+            vehicleType: true,
+            user: {
+              select: {
+                name: true,
+                phone: true,
+              },
+            },
+          },
+        },
+        items: {
+          select: {
+            estimatedWeight: true,
+            category: { select: { name: true } },
+          },
+        },
+      };
 
-          include: {
-            customer: {
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    name: true,
-                    phone: true,
-                    email: true,
+      if (authUser.role === 'CUSTOMER') {
+        const findManyStartedAt = monotonicNow();
+        let findManySettledAt: number | null = null;
+        const customerFindMany = db.order.findMany({
+          where: whereClause,
+          select: customerSelect,
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take: limit,
+        }).finally(() => {
+          findManySettledAt = monotonicNow();
+        });
+        const [ordersResult, countResult] = await Promise.allSettled([
+          customerFindMany,
+          measureTiming(
+            'orders.customer.count',
+            () => db.order.count({ where: whereClause }),
+          ).catch(() => null),
+        ]);
+        console.info(JSON.stringify({
+          event: 'request_timing',
+          requestId,
+          checkoutFlowId: null,
+          route: 'GET /api/orders',
+          phase: 'orders.customer.findMany',
+          elapsedMs: Number((monotonicNow() - requestStartedAt).toFixed(2)),
+          durationMs: Number((
+            (findManySettledAt ?? monotonicNow()) - findManyStartedAt
+          ).toFixed(2)),
+          outcome: ordersResult.status === 'fulfilled' ? 'success' : 'error',
+          ...(ordersResult.status === 'rejected'
+            ? {
+                errorType: ordersResult.reason instanceof Error
+                  ? ordersResult.reason.name
+                  : 'UnknownError',
+              }
+            : {}),
+        }));
+        if (ordersResult.status === 'rejected') {
+          throw ordersResult.reason;
+        }
+        orders = ordersResult.value;
+        total = countResult.status === 'fulfilled' && countResult.value !== null
+          ? countResult.value
+          : orders.length;
+      } else {
+        const [fetchedOrders, countResult] = await Promise.all([
+          db.order.findMany({
+            where: whereClause,
+
+            include: {
+              customer: {
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      name: true,
+                      phone: true,
+                      email: true,
+                    },
                   },
                 },
               },
-            },
-
             agent: {
               select: {
                 id: true,
@@ -778,7 +863,6 @@ async function handleGet(req: NextRequest) {
                 currentLng: true,
                 rating: true,
                 serviceAreas: true,
-
                 user: {
                   select: {
                     id: true,
@@ -788,10 +872,8 @@ async function handleGet(req: NextRequest) {
                 },
               },
             },
-
             address: true,
-
-            ...(authUser.role === 'CUSTOMER' || searchParams.get('includeItems') === 'true'
+            ...(searchParams.get('includeItems') === 'true'
               ? {
                   items: {
                     select: {
@@ -804,7 +886,6 @@ async function handleGet(req: NextRequest) {
                   },
                 }
               : {}),
-
             ...(searchParams.get('includeHistory') === 'true'
               ? {
                   statusHistory: {
@@ -815,17 +896,15 @@ async function handleGet(req: NextRequest) {
                 }
               : {}),
           },
-
-          orderBy: {
-            createdAt: 'desc',
-          },
+          orderBy: { createdAt: 'desc' },
           skip,
           take: limit,
         }),
-        db.order.count({ where: whereClause }).catch(() => 0),
+        db.order.count({ where: whereClause }).catch(() => null),
       ]);
       orders = fetchedOrders;
-      total = countResult || orders.length;
+      total = countResult ?? orders.length;
+      }
     }
 
     const isAdmin = authUser.role === 'ADMIN' || authUser.role === 'SUPER_ADMIN';
@@ -848,16 +927,22 @@ async function handleGet(req: NextRequest) {
         })
       : orders;
 
-    return successResponse(
+    const responseStartedAt = monotonicNow();
+    const response = successResponse(
       sanitizedOrders,
       200,
       {
         page,
         limit,
-        total: Math.max(total, orders.length),
-        totalPages: Math.max(1, Math.ceil(Math.max(total, orders.length) / limit)),
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
       }
     );
+    recordTiming('response.serialization', {
+      durationMs: Number((monotonicNow() - responseStartedAt).toFixed(2)),
+      outcome: 'success',
+    });
+    return response;
   } catch (err: any) {
     console.error(
       'Fetch orders error:',

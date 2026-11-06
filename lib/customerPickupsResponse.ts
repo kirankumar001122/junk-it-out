@@ -1,5 +1,5 @@
 export type CustomerPickupsResult =
-  | { kind: 'orders'; orders: any[] }
+  | { kind: 'orders'; orders: any[]; meta?: { page?: number; totalPages?: number; total?: number } }
   | { kind: 'unauthenticated' }
   | { kind: 'error'; message: string };
 
@@ -40,7 +40,11 @@ export async function readCustomerPickupsResponse(
   }
 
   if (body?.success === true && Array.isArray(body.data)) {
-    return { kind: 'orders', orders: body.data };
+    return {
+      kind: 'orders',
+      orders: body.data,
+      ...(body.meta && typeof body.meta === 'object' ? { meta: body.meta } : {}),
+    };
   }
 
   return {

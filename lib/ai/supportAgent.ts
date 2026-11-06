@@ -1,4 +1,6 @@
 import { db } from '@/lib/db';
+import { notifySupportEscalation } from '@/lib/ai/supportEscalation';
+import { retrievePublicKnowledge } from '@/lib/ai/publicKnowledge';
 import { calculatePickupSummary, calculateMaterialItemAmount, SPECIAL_MATERIAL_THRESHOLD_KG, SPECIAL_MATERIAL_OFFER_PRICE, PICKUP_SERVICE_CHARGE, ORIGINAL_PICKUP_SERVICE_CHARGE } from '@/lib/pricing';
 
 export interface ChatMessage {
@@ -197,13 +199,6 @@ export async function getAuthenticatedCustomerOrders(
         settlement: {
           select: { amount: true, status: true, utr: true },
         },
-        agent: {
-          select: {
-            vehicleType: true,
-            rating: true,
-            user: { select: { name: true, phone: true } },
-          },
-        },
         address: {
           select: { area: true, city: true, formattedAddress: true },
         },
@@ -216,7 +211,6 @@ export async function getAuthenticatedCustomerOrders(
       success: true,
       authenticated: true,
       orders: orders.map((o) => {
-        const isCompleted = o.status === 'COMPLETED' || o.status === 'SETTLEMENT_COMPLETED' || o.status === 'CANCELLED';
         return {
           orderNumber: o.orderNumber,
           status: o.status,
@@ -241,15 +235,6 @@ export async function getAuthenticatedCustomerOrders(
           })),
           settlement: o.settlement
             ? { amount: o.settlement.amount, status: o.settlement.status, utr: o.settlement.utr }
-            : null,
-          agent: o.agent
-            ? {
-                name: o.agent.user.name,
-                // Redact agent phone after completion for customer privacy
-                phone: isCompleted ? '[Hidden after completion]' : o.agent.user.phone,
-                vehicleType: o.agent.vehicleType,
-                rating: o.agent.rating,
-              }
             : null,
         };
       }),
@@ -303,6 +288,14 @@ export async function createLiveSupportComplaint(
           status: 'OPEN',
         },
       });
+      await notifySupportEscalation({
+        customerName: context.name || 'Authenticated customer',
+        customerPhone: context.phone || 'Unavailable',
+        orderId,
+        question: description,
+        summary: `Customer support escalation for ${data.category || 'general support'}.`,
+        ticketId: complaint.id,
+      });
 
       return {
         success: true,
@@ -322,6 +315,13 @@ export async function createLiveSupportComplaint(
           message: description,
           status: 'OPEN',
         },
+      });
+      await notifySupportEscalation({
+        customerName: context.name || 'Website visitor',
+        customerPhone: context.phone || 'Unavailable',
+        question: description,
+        summary: `Website support escalation for ${data.category || 'general support'}.`,
+        ticketId: enquiry.id,
       });
 
       return {
@@ -625,6 +625,14 @@ export async function generateFallbackSupportResponse(
   }
 
   // 8. General Greetings / Default Fallback
+  const publicKnowledge = await retrievePublicKnowledge(userQuery);
+  if (publicKnowledge) {
+    return {
+      text: `Here is the relevant information currently published by Junk It Out:\n\n${publicKnowledge}\n\nIf this does not answer your question, I can help raise a support ticket for the operations team.`,
+      suggestedQuestions: ['Contact human support', 'How do I book a pickup?', 'What materials do you accept?'],
+    };
+  }
+
   return {
     text: isKannada
       ? `ನಮಸ್ಕಾರ! ನಾನು Junk It Out ನ ಅಧಿಕೃತ AI ಗ್ರಾಹಕ ಬೆಂಬಲ ಸಹಾಯಕ. ನಾನು ತ್ಯಾಜ್ಯ ಸಂಗ್ರಹಣೆ ದರಗಳು, ಬುಕಿಂಗ್, ಆರ್ಡರ್ ಟ್ರ್ಯಾಕಿಂಗ್, ಮತ್ತು ದೂರುಗಳಿಗೆ ಸಂಬಂಧಿಸಿದ ಪ್ರಶ್ನೆಗಳಿಗೆ 24/7 ಸಹಾಯ ಮಾಡಬಲ್ಲೆ. ಇಂದು ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?`
@@ -734,6 +742,10 @@ export async function handleSupportChat(
     return generateFallbackSupportResponse(userMessage, context);
   }
 
+  const publicKnowledge = await retrievePublicKnowledge(userMessage);
+  const knowledgeContext = publicKnowledge
+    ? `\n\nApproved public website knowledge (use only when relevant; do not override authenticated database tools):\n${publicKnowledge}`
+    : '';
   const systemPrompt = `You are the friendly, professional, 24/7 AI Customer Support Representative for "Junk It Out", Bengaluru's trusted doorstep scrap and waste pickup platform.
 
 Rules you MUST ALWAYS follow:
@@ -755,7 +767,7 @@ Rules you MUST ALWAYS follow:
 6. Escalation:
    - If the customer is facing a weight dispute, payment delay, or agent issue, offer to create an official complaint using the 'create_support_complaint' tool.
    - Always return the real ticket reference number returned by the tool.
-7. Tone: Courteous, concise, helpful, and transparent. Avoid boilerplate or robotic greetings.`;
+7. Tone: Courteous, concise, helpful, and transparent. Avoid boilerplate or robotic greetings.${knowledgeContext}`;
 
   const messages: any[] = [
     { role: 'system', content: systemPrompt },

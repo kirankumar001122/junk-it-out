@@ -30,9 +30,9 @@ const DEFAULT_SUGGESTIONS = [
   'What locations are supported?',
 ];
 
-export default function CustomerSupportChatWidget() {
+export default function CustomerSupportChatWidget({ initiallyOpen = false }: { initiallyOpen?: boolean }) {
   const pathname = usePathname();
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(initiallyOpen);
   const [isMinimized, setIsMinimized] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {

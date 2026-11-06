@@ -84,6 +84,27 @@ async function main() {
     include: { customer: true, addresses: true },
   });
 
+  if (customerUser.customer) {
+    await prisma.customerWallet.upsert({
+      where: { customerId: customerUser.customer.id },
+      update: {},
+      create: { customerId: customerUser.customer.id },
+    });
+  }
+
+  const subscriptionOffers = [
+    { name: 'Quarterly', description: 'Three months of subscription benefits.', durationMonths: 3, price: 299, benefitsJson: JSON.stringify(['Priority support', 'Exclusive pickup offers']) },
+    { name: 'Six Months', description: 'Six months of subscription benefits.', durationMonths: 6, price: 399, benefitsJson: JSON.stringify(['Priority support', 'Exclusive pickup offers', 'Extended member savings']) },
+    { name: 'Annual', description: 'Twelve months of subscription benefits.', durationMonths: 12, price: 599, benefitsJson: JSON.stringify(['Priority support', 'Exclusive pickup offers', 'Extended member savings', 'Annual member rewards']) },
+  ];
+  for (const [displayOrder, offer] of subscriptionOffers.entries()) {
+    await prisma.subscriptionOffer.upsert({
+      where: { name_durationMonths: { name: offer.name, durationMonths: offer.durationMonths } },
+      update: offer,
+      create: { ...offer, displayOrder },
+    });
+  }
+
   // 4. Create Bengaluru-Wide Service Areas with Boundary Polygons
   const serviceAreasData = [
     // SOUTH BENGALURU

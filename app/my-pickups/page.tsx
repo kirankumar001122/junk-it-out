@@ -29,6 +29,7 @@ import CustomerOtpLogin from '@/components/CustomerOtpLogin';
 import { readCustomerPickupsResponse } from '@/lib/customerPickupsResponse';
 import { getApiErrorMessage } from '@/lib/utils/apiErrorMessage';
 import { canCustomerContactAgent } from '@/lib/orders/lifecycle';
+import { MyPickupsRequestLifecycle } from '@/lib/myPickupsRequestLifecycle';
 
 const isCustomerCancellable = (status?: string): boolean => {
   return [
@@ -48,6 +49,9 @@ export default function MyPickupsPage() {
 
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [activeTab, setActiveTab] = useState<'ALL' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED'>('ALL');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [unauthenticated, setUnauthenticated] = useState(false);
@@ -82,52 +86,94 @@ export default function MyPickupsPage() {
     };
   }, [cancellingOrder, cancelLoading]);
 
-  const requestInFlight = useRef(false);
   const mounted = useRef(false);
+  const currentPageRef = useRef(1);
+  const requestLifecycleRef = useRef(new MyPickupsRequestLifecycle());
 
-  const fetchOrders = async () => {
-    if (requestInFlight.current) return;
-    requestInFlight.current = true;
-    if (!mounted.current) setLoading(true);
-    try {
-      const res = await fetch('/api/orders', { credentials: 'same-origin' });
-      const result = await readCustomerPickupsResponse(res);
-      if (!mounted.current) return;
+  const fetchOrders = async (page = 1, append = false) => {
+    const request = requestLifecycleRef.current.begin(append ? 'pagination' : 'refresh');
+    if (!request) return;
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      if (mounted.current) setLoadingMore(false);
+      if (mounted.current) setRefreshing(true);
+      else setLoading(true);
+    }
 
-      if (result.kind === 'unauthenticated') {
-        setSessionReady(true);
-        setUnauthenticated(true);
-        setOrders([]);
-        setErrorMsg(null);
-      } else if (result.kind === 'orders') {
-        setSessionReady(true);
-        setUnauthenticated(false);
-        setOrders(result.orders);
-        setErrorMsg(null);
-        try {
-          if (typeof window !== 'undefined') {
-            const raw = sessionStorage.getItem('jio_pending_order');
-            if (raw) {
-              const parsed = JSON.parse(raw);
-              if (parsed?.id && result.orders.some((o: any) => o.id === parsed.id)) {
-                sessionStorage.removeItem('jio_pending_order');
-                setPendingNotice(null);
+    const requestPromise = (async () => {
+      try {
+        const res = await fetch(`/api/orders?page=${page}&limit=10`, {
+          credentials: 'same-origin',
+          signal: request.controller.signal,
+        });
+        const result = await readCustomerPickupsResponse(res);
+        if (!requestLifecycleRef.current.isCurrent(request)) return;
+
+        if (result.kind === 'unauthenticated') {
+          setSessionReady(true);
+          setUnauthenticated(true);
+          currentPageRef.current = 1;
+          setOrders([]);
+          setErrorMsg(null);
+        } else if (result.kind === 'orders') {
+          setSessionReady(true);
+          setUnauthenticated(false);
+          const responsePage =
+            typeof result.meta?.page === 'number' && result.meta.page >= 1
+              ? result.meta.page
+              : page;
+          const totalPages =
+            typeof result.meta?.totalPages === 'number' && result.meta.totalPages >= responsePage
+              ? result.meta.totalPages
+              : responsePage;
+          currentPageRef.current = responsePage;
+          setOrders((current) => {
+            if (!append) return result.orders;
+            const existingIds = new Set(current.map((order) => order.id));
+            return [
+              ...current,
+              ...result.orders.filter((order) => !existingIds.has(order.id)),
+            ];
+          });
+          setHasMore(
+            responsePage < totalPages,
+          );
+          setErrorMsg(null);
+          try {
+            if (typeof window !== 'undefined') {
+              const raw = sessionStorage.getItem('jio_pending_order');
+              if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed?.id && result.orders.some((o: any) => o.id === parsed.id)) {
+                  sessionStorage.removeItem('jio_pending_order');
+                  setPendingNotice(null);
+                }
               }
             }
+          } catch {}
+        } else {
+          setErrorMsg(result.message);
+        }
+      } catch (e: any) {
+        if (e?.name === 'AbortError') return;
+        console.error('Fetch orders error:', e);
+        if (mounted.current) {
+          setErrorMsg('Network error loading pickup history. Please check your connection.');
+        }
+      } finally {
+        if (mounted.current) {
+          if (append && requestLifecycleRef.current.isCurrent(request)) {
+            setLoadingMore(false);
+          } else if (!append && requestLifecycleRef.current.isCurrent(request)) {
+            setLoading(false);
+            setRefreshing(false);
           }
-        } catch {}
-      } else {
-        setErrorMsg(result.message);
+        }
+        requestLifecycleRef.current.complete(request);
       }
-    } catch (e: any) {
-      console.error('Fetch orders error:', e);
-      if (mounted.current) {
-        setErrorMsg('Network error loading pickup history. Please check your connection.');
-      }
-    } finally {
-      requestInFlight.current = false;
-      if (mounted.current) setLoading(false);
-    }
+    })();
+    return requestPromise;
   };
 
   const handleCancelOrder = async () => {
@@ -198,7 +244,12 @@ export default function MyPickupsPage() {
   };
 
   useEffect(() => {
+    requestLifecycleRef.current = new MyPickupsRequestLifecycle();
     mounted.current = true;
+    let active = true;
+    const initialFetchTimer = window.setTimeout(() => {
+      if (active) void fetchOrders();
+    }, 0);
     try {
       if (typeof window !== 'undefined') {
         const raw = sessionStorage.getItem('jio_pending_order');
@@ -210,10 +261,11 @@ export default function MyPickupsPage() {
         }
       }
     } catch {}
-    void fetchOrders();
-
     return () => {
+      active = false;
+      window.clearTimeout(initialFetchTimer);
       mounted.current = false;
+      requestLifecycleRef.current.dispose();
     };
   }, []);
 
@@ -221,8 +273,22 @@ export default function MyPickupsPage() {
     if (!sessionReady || unauthenticated) return;
 
     let eventSource: EventSource | null = null;
+    let pollInterval: number | null = null;
+    const stopPolling = () => {
+      if (pollInterval !== null) {
+        window.clearInterval(pollInterval);
+        pollInterval = null;
+      }
+    };
+    const startPolling = () => {
+      if (pollInterval !== null) return;
+      pollInterval = window.setInterval(() => {
+        fetchOrders();
+      }, 30000);
+    };
     try {
       eventSource = new EventSource('/api/customer/stream');
+      eventSource.onopen = stopPolling;
 
       eventSource.addEventListener('AGENT_ASSIGNED', (e: MessageEvent) => {
         try {
@@ -240,22 +306,18 @@ export default function MyPickupsPage() {
       });
 
       eventSource.onerror = () => {
-        // EventSource will automatically handle reconnection safely
+        startPolling();
       };
     } catch (err) {
       console.error('[CUSTOMER SSE] Init notice:', err);
+      startPolling();
     }
-
-    // Polling fallback to keep pickups fresh if stream drops
-    const pollInterval = window.setInterval(() => {
-      fetchOrders();
-    }, 15000);
 
     return () => {
       if (eventSource) {
         eventSource.close();
       }
-      window.clearInterval(pollInterval);
+      stopPolling();
     };
   }, [sessionReady, unauthenticated]);
 
@@ -374,11 +436,11 @@ export default function MyPickupsPage() {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={fetchOrders}
+            onClick={() => void fetchOrders()}
             className="customer-action grid h-11 w-11 place-items-center rounded-xl bg-slate-100 text-slate-700 transition-colors hover:bg-slate-200"
             title="Refresh Orders"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${loading || refreshing ? 'animate-spin' : ''}`} />
           </button>
 
           <Link
@@ -538,7 +600,7 @@ export default function MyPickupsPage() {
             <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
             <span>{errorMsg}</span>
           </div>
-          <button onClick={fetchOrders} className="text-rose-600 hover:underline font-bold">
+          <button onClick={() => void fetchOrders()} className="text-rose-600 hover:underline font-bold">
             Retry
           </button>
         </div>
@@ -728,6 +790,17 @@ export default function MyPickupsPage() {
               </div>
             );
           })}
+          {activeTab === 'ALL' && hasMore && (
+            <button
+              type="button"
+              onClick={() => void fetchOrders(currentPageRef.current + 1, true)}
+              disabled={loadingMore || refreshing}
+              className="mx-auto flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-xs font-extrabold uppercase tracking-wider text-slate-700 shadow-sm transition-colors hover:border-emerald-300 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loadingMore && <RefreshCw className="h-4 w-4 animate-spin" />}
+              {loadingMore ? 'Loading older pickups...' : 'Load older pickups'}
+            </button>
+          )}
         </div>
       )}
 
