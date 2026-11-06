@@ -472,10 +472,6 @@ async function handleGet(req: NextRequest) {
   const requestId = req.headers.get('x-request-id');
   const requestStartedAt = monotonicNow();
   try {
-    await measureTiming(
-      'database.connect',
-      () => db.$connect(),
-    ).catch(() => undefined);
     const authUser = await measureTiming(
       'auth.lookup',
       () => getAuthUser(req),
