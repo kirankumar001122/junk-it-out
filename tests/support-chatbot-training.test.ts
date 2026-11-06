@@ -102,6 +102,39 @@ describe('FEATURE 04: Support Chatbot — Placement, Grounded Training & Unresol
         ],
       });
     }
+
+    // Ensure active waste categories exist for testing
+    const countMaterials = await db.wasteCategory.count({ where: { active: true } });
+    if (countMaterials === 0) {
+      await db.wasteCategory.createMany({
+        data: [
+          {
+            name: 'Plastic Waste',
+            description: 'Bottles, containers, packaging',
+            category: 'Recyclable Plastics',
+            pricePerKg: 15,
+            active: true,
+            displayOrder: 1,
+          },
+          {
+            name: 'Paper & Cardboard',
+            description: 'Newspapers, boxes, cartons',
+            category: 'Paper & Fibers',
+            pricePerKg: 12,
+            active: true,
+            displayOrder: 2,
+          },
+          {
+            name: 'Metal Scrap',
+            description: 'Iron, steel, copper, aluminium',
+            category: 'Metals',
+            pricePerKg: 28,
+            active: true,
+            displayOrder: 3,
+          },
+        ],
+      });
+    }
   });
 
   afterAll(async () => {

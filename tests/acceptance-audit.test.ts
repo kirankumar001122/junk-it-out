@@ -133,6 +133,75 @@ describe('FINAL ACCEPTANCE AUDIT: Support Chatbot (F04) & Dispute Management (F0
       create: { customerId: customerUser.customer.id, balance: 150 },
       update: { balance: 150 },
     });
+
+    // 6. Ensure sample subscription offers exist for testing
+    const countOffers = await db.subscriptionOffer.count({ where: { active: true } });
+    if (countOffers < 3) {
+      await db.subscriptionOffer.createMany({
+        data: [
+          {
+            name: 'Quarterly Scrap Saver',
+            description: '3 months regular pickup plan',
+            durationMonths: 3,
+            price: 299,
+            benefitsJson: JSON.stringify(['Free doorstep pickups', 'Dedicated pickup agent']),
+            active: true,
+            displayOrder: 1,
+          },
+          {
+            name: 'Six Months Green Champion',
+            description: '6 months priority pickup plan',
+            durationMonths: 6,
+            price: 399,
+            benefitsJson: JSON.stringify(['Free doorstep pickups', 'Dedicated agent', 'Priority scheduling']),
+            active: true,
+            displayOrder: 2,
+          },
+          {
+            name: 'Annual Zero Waste Hero',
+            description: '12 months ultimate recycling plan',
+            durationMonths: 12,
+            price: 599,
+            benefitsJson: JSON.stringify(['Unlimited pickups', 'Maximum scrap rates', 'VIP concierge']),
+            active: true,
+            displayOrder: 3,
+          },
+        ],
+      });
+    }
+
+    // 7. Ensure active waste categories exist for testing
+    const countMaterials = await db.wasteCategory.count({ where: { active: true } });
+    if (countMaterials === 0) {
+      await db.wasteCategory.createMany({
+        data: [
+          {
+            name: 'Plastic Waste',
+            description: 'Bottles, containers, packaging',
+            category: 'Recyclable Plastics',
+            pricePerKg: 15,
+            active: true,
+            displayOrder: 1,
+          },
+          {
+            name: 'Paper & Cardboard',
+            description: 'Newspapers, boxes, cartons',
+            category: 'Paper & Fibers',
+            pricePerKg: 12,
+            active: true,
+            displayOrder: 2,
+          },
+          {
+            name: 'Metal Scrap',
+            description: 'Iron, steel, copper, aluminium',
+            category: 'Metals',
+            pricePerKg: 28,
+            active: true,
+            displayOrder: 3,
+          },
+        ],
+      });
+    }
   });
 
   afterAll(async () => {
