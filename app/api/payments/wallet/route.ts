@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { db } from '@/lib/db';
+import { spendWalletPaise, toPaise } from '@/lib/wallet';
+import { dispatchCustomerWalletNotification } from '@/lib/services/walletNotification';
 import { roundCurrency } from '@/lib/wallet';
 
 export const runtime = 'nodejs';
@@ -53,46 +55,21 @@ export async function POST(req: NextRequest) {
         return { status: 200, body: { success: true, alreadyPaid: true, data: { orderId: order.id, paymentStatus: 'CAPTURED' } } };
       }
 
-      const wallet = await tx.customerWallet.upsert({
-        where: { customerId: authUser.customerId! },
-        update: {},
-        create: { customerId: authUser.customerId! },
-      });
-      await tx.$queryRaw`SELECT "id" FROM "CustomerWallet" WHERE "id" = ${wallet.id} FOR UPDATE`;
-      const lockedWallet = await tx.customerWallet.findUnique({ where: { id: wallet.id } });
-      if (!lockedWallet || lockedWallet.balance < amount) {
-        return { status: 400, body: { success: false, message: 'Insufficient wallet balance for this payment.' } };
-      }
-
       const payment = order.payments[0] ?? await tx.payment.create({
         data: { orderId: order.id, amount: payableAmount, direction: 'CUSTOMER_PAYS', gateway: 'WALLET', status: 'PENDING' },
       });
       if (payment.amount !== payableAmount) {
         return { status: 409, body: { success: false, message: 'Order payment amount changed. Please restart checkout.' } };
       }
-      const existingDebit = await tx.walletTransaction.findFirst({
-        where: { customerId: authUser.customerId!, referenceId: `order:${order.id}`, type: 'WALLET_DEBIT', status: 'SUCCESS' },
+      const debit = await spendWalletPaise(tx, {
+        customerId: authUser.customerId!,
+        amountPaise: toPaise(payableAmount),
+        referenceId: `order:${order.id}`,
+        reason: `Wallet payment for order #${order.orderNumber}`,
       });
-      if (existingDebit) {
+      if (debit.alreadyProcessed) {
         return { status: 200, body: { success: true, alreadyPaid: true, data: { orderId: order.id, paymentStatus: 'CAPTURED' } } };
       }
-      const nextBalance = roundCurrency(lockedWallet.balance - payableAmount);
-      const updatedWallet = await tx.customerWallet.update({
-        where: { id: lockedWallet.id },
-        data: { balance: nextBalance },
-      });
-      await tx.walletTransaction.create({
-        data: {
-          walletId: updatedWallet.id,
-          customerId: authUser.customerId!,
-          type: 'WALLET_DEBIT',
-          amount: payableAmount,
-          balanceAfter: nextBalance,
-          status: 'SUCCESS',
-          referenceId: `order:${order.id}`,
-          reason: `Wallet payment for order #${order.orderNumber}`,
-        },
-      });
       await tx.payment.update({
         where: { id: payment.id },
         data: { gateway: 'WALLET', status: 'SUCCESS', paymentId: `wallet:${order.id}` },
@@ -101,6 +78,18 @@ export async function POST(req: NextRequest) {
         where: { id: order.id },
         data: { paymentStatus: 'CAPTURED' },
       });
+
+      if (debit.transaction) {
+        await dispatchCustomerWalletNotification(tx, {
+          customerId: authUser.customerId!,
+          type: 'WALLET_DEBIT',
+          amount: payableAmount,
+          balanceAfter: debit.transaction.balanceAfter,
+          reason: `Payment for order #${order.orderNumber}`,
+          referenceId: `order:${order.id}`,
+        });
+      }
+
       return { status: 200, body: { success: true, data: updatedOrder } };
     });
 

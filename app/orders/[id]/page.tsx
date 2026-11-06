@@ -39,6 +39,7 @@ import {
 import {
   isReceiptEligible,
   downloadReceiptPdf,
+  getOrderTaxBreakdown,
 } from "@/lib/receiptPdf";
 
 // If the last location is older than this, show "location unavailable".
@@ -1615,6 +1616,19 @@ export default function OrderTrackingPage() {
                   ? "Payment Failed"
                   : "Payment Required"}
             </p>
+
+            {(() => {
+              const tax = getOrderTaxBreakdown(order);
+              if (tax && (tax.serviceFee > 0 || tax.pickupFee > 0)) {
+                return (
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Pickup Fee: ₹{tax.pickupFee.toFixed(2)} | Service Fee: ₹{tax.serviceFee.toFixed(2)}
+                    {tax.gstAmount > 0 ? ` + GST (${tax.gstRatePercent}%): ₹${tax.gstAmount.toFixed(2)}` : ''}
+                  </p>
+                );
+              }
+              return null;
+            })()}
           </div>
 
           <div className="flex items-center gap-3">

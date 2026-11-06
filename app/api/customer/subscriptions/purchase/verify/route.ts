@@ -2,14 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { fetchRazorpayPayment, verifyRazorpayPaymentSignature } from '@/lib/payments/razorpay';
+import { calculateSubscriptionExpiry } from '@/lib/subscriptions';
+import { dispatchSubscriptionNotification } from '@/lib/services/walletNotification';
 
 export const runtime = 'nodejs';
-
-function addMonths(date: Date, months: number) {
-  const result = new Date(date);
-  result.setMonth(result.getMonth() + months);
-  return result;
-}
 
 export async function POST(req: NextRequest) {
   const authUser = await getAuthUser(req);
@@ -60,15 +56,42 @@ export async function POST(req: NextRequest) {
         orderBy: { expiryDate: 'desc' },
       });
       const startDate = latest ? latest.expiryDate : new Date();
-      const expiryDate = addMonths(startDate, current.offer.durationMonths);
+      const expiryDate = calculateSubscriptionExpiry(startDate, current.offer);
       await tx.subscriptionPayment.update({
         where: { id: current.id },
-        data: { status: 'SUCCESS', gatewayPaymentId: razorpayPaymentId, signature: razorpaySignature, failureReason: null },
+        data: {
+          status: 'SUCCESS',
+          paymentMethod: 'RAZORPAY',
+          gatewayPaymentId: razorpayPaymentId,
+          signature: razorpaySignature,
+          failureReason: null,
+        },
       });
-      return tx.customerSubscription.create({
-        data: { customerId: authUser.customerId!, offerId: current.offerId, paymentId: current.id, startDate, expiryDate, status: 'ACTIVE' },
+      const createdSub = await tx.customerSubscription.create({
+        data: {
+          customerId: authUser.customerId!,
+          offerId: current.offerId,
+          paymentId: current.id,
+          startDate,
+          expiryDate,
+          status: 'ACTIVE',
+          pickupsAllowed: current.offer.pickupLimit || 4,
+          pickupsUsed: 0,
+          autoRenew: false,
+        },
         include: { offer: true },
       });
+
+      await dispatchSubscriptionNotification(tx, {
+        customerId: authUser.customerId!,
+        type: 'SUBSCRIPTION_PURCHASE',
+        planName: current.offer.name,
+        price: current.amount,
+        expiryDate,
+        pickupsAllowed: current.offer.pickupLimit || 4,
+      });
+
+      return createdSub;
     });
     return NextResponse.json({ success: true, data: subscription });
   } catch (error) {

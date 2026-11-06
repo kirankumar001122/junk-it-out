@@ -15,10 +15,24 @@ export async function PUT(req: NextRequest, context: { params: Promise<{ id: str
     const body = await req.json();
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     const description = typeof body.description === 'string' ? body.description.trim() : '';
-    const durationMonths = Number(body.durationMonths);
+    const billingPeriod =
+      typeof body.billingPeriod === 'string' && ['WEEKLY', 'MONTHLY', 'QUARTERLY'].includes(body.billingPeriod.toUpperCase())
+        ? body.billingPeriod.toUpperCase()
+        : 'MONTHLY';
+    const durationMonths = Number.isInteger(Number(body.durationMonths)) ? Number(body.durationMonths) : (billingPeriod === 'WEEKLY' ? 0 : billingPeriod === 'QUARTERLY' ? 3 : 1);
+    const durationDays = Number.isInteger(Number(body.durationDays)) && Number(body.durationDays) > 0
+      ? Number(body.durationDays)
+      : (billingPeriod === 'WEEKLY' ? 7 : billingPeriod === 'QUARTERLY' ? 90 : 30);
+    const pickupLimit = Number.isInteger(Number(body.pickupLimit)) && Number(body.pickupLimit) >= 0
+      ? Number(body.pickupLimit)
+      : (billingPeriod === 'WEEKLY' ? 1 : billingPeriod === 'QUARTERLY' ? 12 : 4);
     const price = Number(body.price);
-    const benefits = Array.isArray(body.benefits) ? body.benefits.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map((item) => item.trim()) : [];
-    if (!name || !description || !Number.isInteger(durationMonths) || durationMonths <= 0 || durationMonths > 120 || !Number.isFinite(price) || price <= 0 || price > 1000000) {
+    const benefits = Array.isArray(body.benefits)
+      ? body.benefits.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map((item) => item.trim())
+      : typeof body.benefits === 'string'
+        ? body.benefits.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)
+        : [];
+    if (!name || !description || durationDays <= 0 || durationDays > 3650 || !Number.isFinite(price) || price <= 0 || price > 1000000) {
       return NextResponse.json({ success: false, message: 'Valid name, description, positive price, and duration are required.' }, { status: 400 });
     }
     const offer = await db.subscriptionOffer.update({
@@ -26,7 +40,10 @@ export async function PUT(req: NextRequest, context: { params: Promise<{ id: str
       data: {
         name,
         description,
+        billingPeriod,
         durationMonths,
+        durationDays,
+        pickupLimit,
         price,
         benefitsJson: JSON.stringify(benefits),
         active: body.active !== false,

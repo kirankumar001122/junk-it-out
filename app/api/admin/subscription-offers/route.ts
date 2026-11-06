@@ -10,7 +10,17 @@ function isAdmin(role?: string) {
 function validateOffer(body: Record<string, unknown>) {
   const name = typeof body.name === 'string' ? body.name.trim() : '';
   const description = typeof body.description === 'string' ? body.description.trim() : '';
-  const durationMonths = Number(body.durationMonths);
+  const billingPeriod =
+    typeof body.billingPeriod === 'string' && ['WEEKLY', 'MONTHLY', 'QUARTERLY'].includes(body.billingPeriod.toUpperCase())
+      ? body.billingPeriod.toUpperCase()
+      : 'MONTHLY';
+  const durationMonths = Number.isInteger(Number(body.durationMonths)) ? Number(body.durationMonths) : (billingPeriod === 'WEEKLY' ? 0 : billingPeriod === 'QUARTERLY' ? 3 : 1);
+  const durationDays = Number.isInteger(Number(body.durationDays)) && Number(body.durationDays) > 0
+    ? Number(body.durationDays)
+    : (billingPeriod === 'WEEKLY' ? 7 : billingPeriod === 'QUARTERLY' ? 90 : 30);
+  const pickupLimit = Number.isInteger(Number(body.pickupLimit)) && Number(body.pickupLimit) >= 0
+    ? Number(body.pickupLimit)
+    : (billingPeriod === 'WEEKLY' ? 1 : billingPeriod === 'QUARTERLY' ? 12 : 4);
   const price = Number(body.price);
   const displayOrder = Number.isInteger(Number(body.displayOrder)) ? Number(body.displayOrder) : 0;
   const benefits = Array.isArray(body.benefits)
@@ -18,10 +28,21 @@ function validateOffer(body: Record<string, unknown>) {
     : typeof body.benefits === 'string'
       ? body.benefits.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)
       : [];
-  if (!name || !description || !Number.isInteger(durationMonths) || durationMonths <= 0 || durationMonths > 120 || !Number.isFinite(price) || price <= 0 || price > 1000000) {
+  if (!name || !description || durationDays <= 0 || durationDays > 3650 || !Number.isFinite(price) || price <= 0 || price > 1000000) {
     return null;
   }
-  return { name, description, durationMonths, price, displayOrder, benefitsJson: JSON.stringify(benefits), active: body.active !== false };
+  return {
+    name,
+    description,
+    billingPeriod,
+    durationMonths,
+    durationDays,
+    pickupLimit,
+    price,
+    displayOrder,
+    benefitsJson: JSON.stringify(benefits),
+    active: body.active !== false,
+  };
 }
 
 export async function GET(req: NextRequest) {

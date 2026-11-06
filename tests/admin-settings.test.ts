@@ -13,7 +13,7 @@ import {
   getAuthoritativeSettings,
   validateSettingsConfig,
   DEFAULT_SETTINGS,
-} from '../lib/admin/settingsConfig';
+} from '../lib/admin/settings';
 
 process.env.JWT_SECRET = 'admin-settings-test-secret-at-least-32-bytes!';
 

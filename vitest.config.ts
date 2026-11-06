@@ -72,6 +72,11 @@ export default defineConfig({
       'tests/acceptance-audit.test.ts',
       'tests/database-configuration.test.ts',
       'tests/wallet-payment.test.ts',
+      'tests/invoice-gst-calculation.test.ts',
+      'tests/agent-wallet.test.ts',
+      'tests/customer-subscriptions.test.ts',
+      'tests/wallet-bonus-lifecycle.test.ts',
+      'tests/wallet-bonus-scheduler.test.ts',
     ],
   },
 });

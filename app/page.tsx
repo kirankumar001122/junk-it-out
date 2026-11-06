@@ -33,6 +33,7 @@ import {
 } from '@/lib/pickupCart';
 
 import CustomerReviews from '@/components/CustomerReviews';
+import CustomerSupportChatWidget from '@/components/CustomerSupportChatWidget';
 import WeightQuantityInput from '@/components/WeightQuantityInput';
 import ScrollReveal from '@/components/ScrollReveal';
 import { getCachedClientJson, invalidateCachedClientJson } from '@/lib/clientRequestCache';
@@ -50,6 +51,7 @@ function resolveCustomerCardImage(category: any): string {
   if (custom && !custom.startsWith('/categories/')) {
     return custom;
   }
+
   return categoryImages[category?.name] || custom || getMaterialImageUrl(category);
 }
 
@@ -111,7 +113,8 @@ export default function HomePage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50/60 pb-20">
+    <>
+      <div className="min-h-screen bg-slate-50/60 pb-20">
 
       {/* Toast Notification */}
       {notice && (
@@ -586,6 +589,8 @@ export default function HomePage() {
         </section>
 
       </main>
-    </div>
+      </div>
+      <CustomerSupportChatWidget />
+    </>
   );
 }

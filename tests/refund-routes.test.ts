@@ -105,6 +105,8 @@ refundRequestDelegate.findUnique = async () => null;
 refundRequestDelegate.findMany = async () => [];
 refundRequestDelegate.create = async () => ({ id: 'mock-refund-request' });
 refundRequestDelegate.update = async () => ({ id: 'mock-refund-request' });
+const walletTxDelegate = (db as any).walletTransaction || ((db as any).walletTransaction = {});
+walletTxDelegate.findFirst = async () => null;
 
 paymentDelegate.findUnique = async ({ where }: any) => {
   const p = paymentsStore.get(where.id);

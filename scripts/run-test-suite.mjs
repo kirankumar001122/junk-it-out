@@ -15,6 +15,10 @@ const vitestStages = [
     'tests/payment-idempotency.test.ts',
     'tests/razorpay-order-creation.test.ts',
   ]],
+  ['test:billing', [
+    'tests/invoice-gst-calculation.test.ts',
+    'tests/receipt-pdf-download.test.ts',
+  ]],
   ['test:observability', [
     'tests/health-routes.test.ts',
     'tests/structured-logger.test.ts',

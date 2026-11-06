@@ -1,6 +1,9 @@
 import { formatPickupAddress } from './address';
 import { DEFAULT_SERVICE_CHARGE } from './geofence';
 import { isPickupCompletedStatus } from './orders/lifecycle';
+import { getOrderTaxBreakdown } from './pricing/tax';
+
+export { getOrderTaxBreakdown };
 
 /**
  * Escapes characters for PDF literal strings (WinAnsiEncoding / ASCII).
@@ -286,9 +289,7 @@ export function generateReceiptPdfBytes(order: any): Uint8Array {
     ? order.actualTotal
     : (typeof order.totalValuation === 'number' ? order.totalValuation : (typeof order.estimatedTotal === 'number' ? order.estimatedTotal : 0));
 
-  const pickupCharge = typeof order.pickupCharge === 'number'
-    ? order.pickupCharge
-    : (typeof order.pickupFee === 'number' ? order.pickupFee : DEFAULT_SERVICE_CHARGE);
+  const tax = getOrderTaxBreakdown(order);
 
   const isBookingPaid = order.paymentStatus === 'CAPTURED' || order.paymentStatus === 'SUCCESS';
   const isJunkItOutPays = order.financialDirection === 'JUNKITOUT_PAYS';
@@ -297,31 +298,45 @@ export function generateReceiptPdfBytes(order: any): Uint8Array {
     ? order.finalAmount
     : (typeof order.settlement?.amount === 'number' ? order.settlement.amount : 0);
 
-  const finBoxHeight = 100;
+  const finBoxHeight = 124;
   stream.push(`0.97 0.98 0.99 rg ${marginX} ${currentY - finBoxHeight} ${contentWidth} ${finBoxHeight} re f`);
   stream.push(`0.89 0.91 0.94 RG 1 w ${marginX} ${currentY - finBoxHeight} ${contentWidth} ${finBoxHeight} re S`);
 
   // Financial Header Banner
   stream.push(`0.92 0.98 0.95 rg ${marginX} ${currentY - 18} ${contentWidth} 18 re f`);
-  stream.push(`0.02 0.59 0.41 rg BT /F2 8.5 Tf ${marginX + 12} ${currentY - 13} Td (FINANCIAL VALUATION & SETTLEMENT BREAKDOWN) Tj ET`);
+  stream.push(`0.02 0.59 0.41 rg BT /F2 8.5 Tf ${marginX + 12} ${currentY - 13} Td (FINANCIAL VALUATION, TAX & SETTLEMENT BREAKDOWN) Tj ET`);
 
   // Left Sub-column (Valuation Breakdown)
   stream.push('0.39 0.45 0.55 rg');
-  stream.push(`BT /F1 8.5 Tf ${marginX + 12} ${currentY - 36} Td (Scrap Material Valuation:) Tj ET`);
-  stream.push(`BT /F1 8.5 Tf ${marginX + 12} ${currentY - 54} Td (Pickup Service Charge:) Tj ET`);
-  stream.push(`BT /F1 8.5 Tf ${marginX + 12} ${currentY - 72} Td (Booking Payment Status:) Tj ET`);
+  stream.push(`BT /F1 8 Tf ${marginX + 12} ${currentY - 32} Td (Scrap Material Valuation:) Tj ET`);
+  stream.push(`BT /F1 8 Tf ${marginX + 12} ${currentY - 48} Td (Doorstep Pickup Fee (Non-taxable):) Tj ET`);
+  stream.push(`BT /F1 8 Tf ${marginX + 12} ${currentY - 64} Td (Service Fee (Taxable base):) Tj ET`);
+  const gstLabel = tax.isInterState
+    ? `GST (${tax.gstRatePercent}% IGST):`
+    : `GST (${tax.gstRatePercent}% CGST+SGST):`;
+  stream.push(`BT /F1 8 Tf ${marginX + 12} ${currentY - 80} Td (${escapePdfText(gstLabel)}) Tj ET`);
+  stream.push(`BT /F1 8 Tf ${marginX + 12} ${currentY - 96} Td (Total Fee with GST:) Tj ET`);
+  stream.push(`BT /F1 8 Tf ${marginX + 12} ${currentY - 112} Td (Booking Payment Status:) Tj ET`);
 
   stream.push('0.06 0.09 0.16 rg');
-  stream.push(`BT /F2 8.5 Tf 175 ${currentY - 36} Td (${formatPdfCurrency(scrapValuation)}) Tj ET`);
-  stream.push(`BT /F2 8.5 Tf 175 ${currentY - 54} Td (${formatPdfCurrency(pickupCharge)}) Tj ET`);
+  stream.push(`BT /F2 8 Tf 185 ${currentY - 32} Td (${formatPdfCurrency(scrapValuation)}) Tj ET`);
+  stream.push(`BT /F2 8 Tf 185 ${currentY - 48} Td (${formatPdfCurrency(tax.pickupFee)}) Tj ET`);
+  stream.push(`BT /F2 8 Tf 185 ${currentY - 64} Td (${formatPdfCurrency(tax.serviceFee)}) Tj ET`);
+  const gstValueStr = tax.gstAmount > 0
+    ? (tax.isInterState
+        ? `${formatPdfCurrency(tax.igstAmount)}`
+        : `C:${formatPdfCurrency(tax.cgstAmount)} + S:${formatPdfCurrency(tax.sgstAmount)}`)
+    : formatPdfCurrency(0);
+  stream.push(`BT /F2 8 Tf 185 ${currentY - 80} Td (${escapePdfText(gstValueStr)}) Tj ET`);
+  stream.push(`BT /F2 8 Tf 185 ${currentY - 96} Td (${formatPdfCurrency(tax.totalFeeWithGst)}) Tj ET`);
   const bookingPaymentLabel = isBookingPaid ? 'Paid at booking (Captured)' : 'Pending / Not Captured';
-  stream.push(`BT /F1 8.5 Tf 175 ${currentY - 72} Td (${escapePdfText(bookingPaymentLabel)}) Tj ET`);
+  stream.push(`BT /F1 8 Tf 185 ${currentY - 112} Td (${escapePdfText(bookingPaymentLabel)}) Tj ET`);
 
   // Right Sub-column (Final Result Card)
   const resultCardX = 300;
   const resultCardW = 210;
-  const resultCardH = 68;
-  const resultCardY = currentY - 24 - resultCardH;
+  const resultCardH = 74;
+  const resultCardY = currentY - 26 - resultCardH;
 
   if (isJunkItOutPays) {
     // Green highlight card for customer payout
@@ -329,9 +344,9 @@ export function generateReceiptPdfBytes(order: any): Uint8Array {
     stream.push(`0.02 0.59 0.41 RG 1.5 w ${resultCardX} ${resultCardY} ${resultCardW} ${resultCardH} re S`);
 
     stream.push('0.02 0.59 0.41 rg');
-    stream.push(`BT /F2 8 Tf ${resultCardX + 12} ${resultCardY + 52} Td (CUSTOMER PAYOUT AMOUNT) Tj ET`);
-    stream.push(`BT /F1 7.5 Tf ${resultCardX + 12} ${resultCardY + 41} Td (Junk It Out pays the customer) Tj ET`);
-    stream.push(`BT /F2 15 Tf ${resultCardX + 12} ${resultCardY + 22} Td (${formatPdfCurrency(finalAmount)}) Tj ET`);
+    stream.push(`BT /F2 8 Tf ${resultCardX + 12} ${resultCardY + 56} Td (CUSTOMER PAYOUT AMOUNT) Tj ET`);
+    stream.push(`BT /F1 7.5 Tf ${resultCardX + 12} ${resultCardY + 44} Td (Junk It Out pays the customer) Tj ET`);
+    stream.push(`BT /F2 15 Tf ${resultCardX + 12} ${resultCardY + 24} Td (${formatPdfCurrency(finalAmount)}) Tj ET`);
 
     const settStatus = order.settlement?.status || 'PENDING';
     const settLabel = settStatus === 'PAID' || settStatus === 'SETTLEMENT_COMPLETED'
@@ -346,9 +361,9 @@ export function generateReceiptPdfBytes(order: any): Uint8Array {
     stream.push(`0.12 0.16 0.24 RG 1.5 w ${resultCardX} ${resultCardY} ${resultCardW} ${resultCardH} re S`);
 
     stream.push('0.12 0.16 0.24 rg');
-    stream.push(`BT /F2 8 Tf ${resultCardX + 12} ${resultCardY + 52} Td (CUSTOMER AMOUNT PAYABLE) Tj ET`);
-    stream.push(`BT /F1 7.5 Tf ${resultCardX + 12} ${resultCardY + 41} Td (Customer pays Junk It Out) Tj ET`);
-    stream.push(`BT /F2 15 Tf ${resultCardX + 12} ${resultCardY + 22} Td (${formatPdfCurrency(finalAmount)}) Tj ET`);
+    stream.push(`BT /F2 8 Tf ${resultCardX + 12} ${resultCardY + 56} Td (CUSTOMER AMOUNT PAYABLE) Tj ET`);
+    stream.push(`BT /F1 7.5 Tf ${resultCardX + 12} ${resultCardY + 44} Td (Customer pays Junk It Out) Tj ET`);
+    stream.push(`BT /F2 15 Tf ${resultCardX + 12} ${resultCardY + 24} Td (${formatPdfCurrency(finalAmount)}) Tj ET`);
 
     const pmtStatus = order.paymentStatus || 'CAPTURED';
     stream.push(`0.39 0.45 0.55 rg BT /F1 7.5 Tf ${resultCardX + 12} ${resultCardY + 9} Td (Payment Status: ${escapePdfText(pmtStatus)}) Tj ET`);

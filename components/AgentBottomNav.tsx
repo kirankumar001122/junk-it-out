@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard } from 'lucide-react';
+import { LayoutDashboard, Wallet } from 'lucide-react';
 
 export default function AgentBottomNav() {
   const pathname = usePathname();
@@ -10,7 +10,10 @@ export default function AgentBottomNav() {
   // Only render inside /agent paths
   if (!pathname.startsWith('/agent')) return null;
 
-  const links = [{ href: '/agent', label: 'Dashboard', icon: LayoutDashboard }];
+  const links = [
+    { href: '/agent', label: 'Dashboard', icon: LayoutDashboard },
+    { href: '/agent/wallet', label: 'Wallet', icon: Wallet },
+  ];
 
   return (
     <nav

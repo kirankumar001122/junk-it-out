@@ -28,6 +28,8 @@ model User {
   refundRequests     RefundRequest[]       @relation("RefundRequestedBy")
   refundReviews      RefundRequest[]       @relation("RefundReviewedBy")
   walletAdjustments  WalletTransaction[]   @relation("WalletAdjustmentAdmin")
+  agentWalletAdjustments AgentWalletTransaction[] @relation("AgentWalletAdjustmentAdmin")
+  walletBonusCampaigns WalletBonusCampaign[] @relation("WalletBonusCampaignCreator")
   weightRecords      WeightRecord[]
 }
 
@@ -61,16 +63,20 @@ model Customer {
   subscriptions CustomerSubscription[]
   walletTransactions WalletTransaction[]
   subscriptionPayments SubscriptionPayment[]
+  walletBonusGrants WalletBonusGrant[]
 }
 
 model CustomerWallet {
   id           String             @id @default(uuid())
   customerId   String             @unique
   balance      Float              @default(0)
+  balancePaise Int                @default(0)
+  paidBalancePaise Int            @default(0)
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
   customer     Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
   transactions WalletTransaction[]
+  bonusGrants  WalletBonusGrant[]
 }
 
 model WalletTransaction {
@@ -80,6 +86,8 @@ model WalletTransaction {
   type             String
   amount           Float
   balanceAfter     Float          @default(0)
+  amountPaise      Int            @default(0)
+  balanceAfterPaise Int           @default(0)
   status           String         @default("PENDING")
   referenceId      String?
   gatewayOrderId   String?        @unique
@@ -87,23 +95,116 @@ model WalletTransaction {
   reason           String?
   adminId          String?
   failureReason    String?
+  campaignId       String?
+  originalRechargeAmount Float?
+  bonusAmount      Float?
+  bonusExpiryDate  DateTime?
+  idempotencyKey   String?        @unique
+  bonusGrantId     String?
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
   wallet           CustomerWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
   customer         Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
   admin            User?          @relation("WalletAdjustmentAdmin", fields: [adminId], references: [id])
+  campaign         WalletBonusCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  bonusGrant       WalletBonusGrant? @relation(fields: [bonusGrantId], references: [id], onDelete: SetNull)
+  sourceBonusGrant WalletBonusGrant? @relation("WalletBonusGrantSource")
+  rechargeBonusGrants WalletBonusGrant[] @relation("WalletBonusGrantRecharge")
+  consumptions     WalletBonusConsumption[]
 
   @@index([customerId, createdAt])
   @@index([walletId, status, createdAt])
   @@index([type, status, createdAt])
 }
 
+model WalletBonusCampaign {
+  id                    String   @id @default(uuid())
+  campaignName          String
+  description           String   @default("")
+  bonusType             String   @default("PERCENTAGE")
+  bonusPercentage       Float?
+  minimumRechargeAmount Float    @default(0)
+  maximumBonusAmount    Float?
+  campaignStartDate     DateTime
+  campaignEndDate       DateTime
+  bonusExpiryDays       Int      @default(0)
+  status                String   @default("DRAFT")
+  isActive              Boolean  @default(false)
+  priority              Int      @default(0)
+  createdBy             String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  creator               User?    @relation("WalletBonusCampaignCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  slabs                 WalletBonusSlab[]
+  transactions          WalletTransaction[]
+  grants                WalletBonusGrant[]
+
+  @@index([status, isActive, campaignStartDate, campaignEndDate])
+}
+
+model WalletBonusSlab {
+  id                    String   @id @default(uuid())
+  campaignId            String
+  minimumAmount         Float
+  maximumAmount         Float?
+  bonusPercentage       Float?
+  fixedBonusAmount      Float?
+  maximumBonusAmount    Float?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  campaign              WalletBonusCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, minimumAmount])
+}
+
+model WalletBonusGrant {
+  id                    String   @id @default(uuid())
+  walletId              String
+  customerId            String
+  sourceTransactionId   String   @unique
+  rechargeTransactionId String
+  campaignId            String?
+  grantedPaise          Int
+  remainingPaise        Int
+  status                String   @default("ACTIVE")
+  expiresAt             DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  wallet                CustomerWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  customer              Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  sourceTransaction     WalletTransaction @relation("WalletBonusGrantSource", fields: [sourceTransactionId], references: [id], onDelete: Restrict)
+  rechargeTransaction   WalletTransaction @relation("WalletBonusGrantRecharge", fields: [rechargeTransactionId], references: [id], onDelete: Restrict)
+  campaign              WalletBonusCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  transactions          WalletTransaction[]
+  consumptions          WalletBonusConsumption[]
+
+  @@index([walletId, status, expiresAt, createdAt])
+  @@index([customerId, status, expiresAt, createdAt])
+  @@index([rechargeTransactionId])
+}
+
+model WalletBonusConsumption {
+  id                    String   @id @default(uuid())
+  grantId               String
+  walletTransactionId   String
+  consumedPaise         Int
+  createdAt             DateTime @default(now())
+  grant                 WalletBonusGrant @relation(fields: [grantId], references: [id], onDelete: Restrict)
+  walletTransaction     WalletTransaction @relation(fields: [walletTransactionId], references: [id], onDelete: Cascade)
+
+  @@unique([grantId, walletTransactionId])
+  @@index([walletTransactionId])
+}
+
 model SubscriptionOffer {
   id              String                 @id @default(uuid())
   name            String
   description     String
-  durationMonths  Int
+  durationMonths  Int                    @default(1)
+  durationDays    Int                    @default(30)
+  billingPeriod   String                 @default("MONTHLY")
   price           Float
+  pickupLimit     Int                    @default(4)
   benefitsJson    String                 @default("[]")
   active          Boolean                @default(true)
   displayOrder    Int                    @default(0)
@@ -113,42 +214,52 @@ model SubscriptionOffer {
   payments        SubscriptionPayment[]
 
   @@index([active, displayOrder])
+  @@index([billingPeriod, active])
   @@unique([name, durationMonths])
 }
 
 model CustomerSubscription {
-  id          String             @id @default(uuid())
-  customerId  String
-  offerId     String
-  paymentId   String?            @unique
-  status      String             @default("ACTIVE")
-  startDate   DateTime
-  expiryDate  DateTime
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-  customer    Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  offer       SubscriptionOffer   @relation(fields: [offerId], references: [id], onDelete: Restrict)
-  payment     SubscriptionPayment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  id                 String               @id @default(uuid())
+  customerId         String
+  offerId            String
+  paymentId          String?              @unique
+  status             String               @default("ACTIVE")
+  startDate          DateTime
+  expiryDate         DateTime
+  pickupsAllowed     Int                  @default(4)
+  pickupsUsed        Int                  @default(0)
+  autoRenew          Boolean              @default(false)
+  cancelledAt        DateTime?
+  cancellationReason String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  customer           Customer             @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  offer              SubscriptionOffer    @relation(fields: [offerId], references: [id], onDelete: Restrict)
+  payment            SubscriptionPayment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  orders             Order[]
 
   @@index([customerId, status, expiryDate])
   @@index([offerId, createdAt])
+  @@index([status, expiryDate])
 }
 
 model SubscriptionPayment {
-  id               String                @id @default(uuid())
-  customerId       String
-  offerId          String
-  amount           Float
-  status           String                @default("PENDING")
-  gatewayOrderId   String?               @unique
-  gatewayPaymentId String?               @unique
-  signature        String?
-  failureReason    String?
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
-  customer         Customer              @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  offer            SubscriptionOffer     @relation(fields: [offerId], references: [id], onDelete: Restrict)
-  subscription     CustomerSubscription?
+  id                  String                @id @default(uuid())
+  customerId          String
+  offerId             String
+  amount              Float
+  paymentMethod       String                @default("RAZORPAY")
+  status              String                @default("PENDING")
+  gatewayOrderId      String?               @unique
+  gatewayPaymentId    String?               @unique
+  walletTransactionId String?
+  signature           String?
+  failureReason       String?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  customer            Customer              @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  offer               SubscriptionOffer     @relation(fields: [offerId], references: [id], onDelete: Restrict)
+  subscription        CustomerSubscription?
 
   @@index([customerId, createdAt])
   @@index([offerId, status, createdAt])
@@ -170,6 +281,44 @@ model Agent {
   locations     AgentLocation[]
   orders        Order[]
   reviews       Review[]
+  wallet        AgentWallet?
+  walletTransactions AgentWalletTransaction[]
+}
+
+model AgentWallet {
+  id           String                   @id @default(uuid())
+  agentId      String                   @unique
+  balance      Float                    @default(0)
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+  agent        Agent                    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  transactions AgentWalletTransaction[]
+}
+
+model AgentWalletTransaction {
+  id            String      @id @default(uuid())
+  walletId      String
+  agentId       String
+  type          String
+  amount        Float
+  balanceAfter  Float       @default(0)
+  status        String      @default("SUCCESS")
+  referenceId   String?     @unique
+  orderId       String?
+  reason        String?
+  adminId       String?
+  failureReason String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  wallet        AgentWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  agent         Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  admin         User?       @relation("AgentWalletAdjustmentAdmin", fields: [adminId], references: [id])
+  order         Order?      @relation("AgentWalletTransactionOrder", fields: [orderId], references: [id])
+
+  @@index([agentId, createdAt])
+  @@index([walletId, status, createdAt])
+  @@index([type, status, createdAt])
+  @@index([orderId])
 }
 
 model Admin {
@@ -265,6 +414,14 @@ model Order {
   estimatedTotal     Float                @default(0.0)
   actualTotal        Float                @default(0.0)
   pickupCharge       Float                @default(49.0)
+  pickupFee          Float?               @default(0.0)
+  serviceFee         Float?               @default(0.0)
+  taxableAmount      Float?               @default(0.0)
+  gstRate            Float?               @default(0.18)
+  gstAmount          Float?               @default(0.0)
+  cgstAmount         Float?               @default(0.0)
+  sgstAmount         Float?               @default(0.0)
+  igstAmount         Float?               @default(0.0)
   discountAmount     Float                @default(0.0)
   finalAmount        Float                @default(0.0)
   paymentStatus      String               @default("PENDING")
@@ -288,6 +445,9 @@ model Order {
   settlement         Settlement?
   weightRecords      WeightRecord[]
   orderIdempotency   OrderIdempotency?
+  agentWalletTransactions AgentWalletTransaction[] @relation("AgentWalletTransactionOrder")
+  subscriptionId     String?
+  subscription       CustomerSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
 
   @@index([customerId, createdAt])
   @@index([createdAt(sort: Desc)])
@@ -295,6 +455,7 @@ model Order {
   @@index([status, createdAt])
   @@index([paymentStatus, createdAt])
   @@index([financialDirection, status, createdAt])
+  @@index([subscriptionId])
 }
 
 model OrderIdempotency {
@@ -532,6 +693,14 @@ model Invoice {
   orderId       String
   pdfDataJson   String
   totalAmount   Float
+  pickupFee     Float    @default(0.0)
+  serviceFee    Float    @default(0.0)
+  taxableAmount Float    @default(0.0)
+  gstRate       Float    @default(0.18)
+  gstAmount     Float    @default(0.0)
+  cgstAmount    Float    @default(0.0)
+  sgstAmount    Float    @default(0.0)
+  igstAmount    Float    @default(0.0)
   createdAt     DateTime @default(now())
   order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }

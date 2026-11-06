@@ -3,11 +3,13 @@ import { db } from '@/lib/db';
 import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import {
-  SystemSettingsConfig,
+  type SystemSettingsConfig,
   DEFAULT_SETTINGS,
+  type SettingsValidationResult,
   validateSettingsConfig,
+  type AuthoritativeSettingsResult,
   getAuthoritativeSettings,
-} from '@/lib/admin/settingsConfig';
+} from '@/lib/admin/settings';
 
 export async function GET(req: NextRequest) {
   try {

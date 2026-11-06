@@ -10,6 +10,8 @@
 
 export type FinancialDirection = 'JUNKITOUT_PAYS' | 'CUSTOMER_PAYS' | 'ZERO_BALANCE';
 
+export * from './pricing/tax';
+
 export const ORIGINAL_PICKUP_SERVICE_CHARGE = 50.0;
 export const PICKUP_SERVICE_CHARGE = 0.0;
 
