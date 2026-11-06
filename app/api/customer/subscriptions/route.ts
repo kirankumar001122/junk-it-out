@@ -11,15 +11,37 @@ export async function GET(req: NextRequest) {
   try {
     const subscriptions = await db.customerSubscription.findMany({
       where: { customerId: authUser.customerId },
-      include: { offer: true, payment: { select: { amount: true, status: true, gatewayPaymentId: true, createdAt: true } } },
+      include: {
+        offer: true,
+        payment: {
+          select: {
+            amount: true,
+            status: true,
+            paymentMethod: true,
+            gatewayPaymentId: true,
+            walletTransactionId: true,
+            createdAt: true,
+          },
+        },
+      },
       orderBy: { createdAt: 'desc' },
     });
     const now = new Date();
-    const data = subscriptions.map((subscription) => ({
-      ...subscription,
-      status: subscription.expiryDate <= now ? 'EXPIRED' : subscription.status,
-      offer: { ...subscription.offer, benefits: parseBenefits(subscription.offer.benefitsJson) },
-    }));
+    const data = subscriptions.map((subscription) => {
+      const isExpired = subscription.expiryDate <= now;
+      const status = subscription.status === 'CANCELLED' ? 'CANCELLED' : isExpired ? 'EXPIRED' : subscription.status;
+      const remainingPickups = Math.max(0, (subscription.pickupsAllowed || 0) - (subscription.pickupsUsed || 0));
+
+      return {
+        ...subscription,
+        status,
+        remainingPickups,
+        offer: {
+          ...subscription.offer,
+          benefits: parseBenefits(subscription.offer.benefitsJson),
+        },
+      };
+    });
     return NextResponse.json({ success: true, data });
   } catch (error) {
     console.error('Customer subscriptions lookup failed:', error);

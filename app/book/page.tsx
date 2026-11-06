@@ -134,6 +134,8 @@ export default function BookingPage() {
   const [bookingStatusText, setBookingStatusText] = useState('Opening secure payment...');
   const [paymentMethod, setPaymentMethod] = useState<'RAZORPAY' | 'WALLET'>('RAZORPAY');
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [activeSubscription, setActiveSubscription] = useState<{ id: string; planName: string; remainingPickups: number } | null>(null);
+  const [useSubscription, setUseSubscription] = useState<boolean>(true);
 
   // Idempotency Protection Ref
   const idempotencyKeyRef = useRef<string>('');
@@ -218,11 +220,31 @@ export default function BookingPage() {
         setPhone(data.data.user.phone || '');
         setName(getDisplayName(data.data.user));
         try {
-          const walletResponse = await fetch('/api/customer/wallet', { cache: 'no-store' });
+          const [walletResponse, subResponse] = await Promise.all([
+            fetch('/api/customer/wallet', { cache: 'no-store' }),
+            fetch('/api/customer/subscriptions', { cache: 'no-store' }),
+          ]);
           const walletData = await walletResponse.json();
           setWalletBalance(walletData.success ? Number(walletData.data?.balance || 0) : null);
+
+          const subData = await subResponse.json();
+          if (subData.success && Array.isArray(subData.data)) {
+            const active = subData.data.find(
+              (s: any) => (s.computedStatus || s.status) === 'ACTIVE' && s.remainingPickups > 0,
+            );
+            setActiveSubscription(
+              active
+                ? {
+                    id: active.id,
+                    planName: active.offer?.name || 'Active Pass',
+                    remainingPickups: active.remainingPickups,
+                  }
+                : null,
+            );
+          }
         } catch {
           setWalletBalance(null);
+          setActiveSubscription(null);
         }
       } else {
         setIsCustomer(false);
@@ -477,17 +499,24 @@ export default function BookingPage() {
       PICKUP_SERVICE_CHARGE
     );
 
+    const isSubscriptionApplied = Boolean(activeSubscription && useSubscription);
+    const effectiveBaseCharge = isSubscriptionApplied ? 0 : summary.serviceCharge;
+    const effectiveTotal = isSubscriptionApplied
+      ? Math.max(0, summary.totalAmountPayable - summary.serviceCharge)
+      : summary.totalAmountPayable;
+
     return {
       items: summary.items,
       materialCount: summary.materialCount,
       totalWeightKg: summary.totalWeightKg,
       totalWasteItemsValue: summary.pickupValue,
-      baseCharge: summary.serviceCharge,
+      baseCharge: effectiveBaseCharge,
       totalWasteCharge: 0,
-      subtotal: summary.totalAmountPayable,
+      subtotal: effectiveTotal,
       discountAmount: 0,
-      netAmount: summary.totalAmountPayable,
+      netAmount: effectiveTotal,
       direction: 'CUSTOMER_PAYS' as const,
+      isSubscriptionApplied,
     };
   };
 
@@ -818,6 +847,7 @@ export default function BookingPage() {
       photos: [], // Photo upload removed per user requirement
       notes: instructions,
       financialDirection: "CUSTOMER_PAYS" as const,
+      useSubscription: Boolean(activeSubscription && useSubscription),
     };
 
     const currentPayloadSignature = JSON.stringify({
@@ -834,6 +864,7 @@ export default function BookingPage() {
         .sort((a, b) => a.categoryId.localeCompare(b.categoryId)),
       pickupType,
       scheduledSlot: pickupType === "SCHEDULED" ? formattedScheduledSlot : null,
+      useSubscription: Boolean(activeSubscription && useSubscription),
       notes: instructions.trim(),
     });
 
@@ -1802,6 +1833,27 @@ export default function BookingPage() {
               <span className="text-lg text-emerald-400 font-extrabold">₹{estimate.netAmount.toFixed(2)}</span>
             </div>
           </div>
+
+          {activeSubscription && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-emerald-600 shrink-0" />
+                <div>
+                  <p className="font-black text-emerald-950">{activeSubscription.planName} Active</p>
+                  <p className="text-emerald-700">{activeSubscription.remainingPickups} doorstep pickups remaining</p>
+                </div>
+              </div>
+              <label className="flex items-center gap-1.5 font-bold text-emerald-900 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useSubscription}
+                  onChange={(e) => setUseSubscription(e.target.checked)}
+                  className="rounded text-emerald-600"
+                />
+                <span>Apply Pass</span>
+              </label>
+            </div>
+          )}
 
           <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
             <span className="text-slate-600 font-medium">Payment Method:</span>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { fetchRazorpayPayment, verifyRazorpayPaymentSignature } from '@/lib/payments/razorpay';
+import { calculateSubscriptionExpiry } from '@/lib/subscriptions';
 
 export const runtime = 'nodejs';
 
@@ -60,13 +61,29 @@ export async function POST(req: NextRequest) {
         orderBy: { expiryDate: 'desc' },
       });
       const startDate = latest ? latest.expiryDate : new Date();
-      const expiryDate = addMonths(startDate, current.offer.durationMonths);
+      const expiryDate = calculateSubscriptionExpiry(startDate, current.offer);
       await tx.subscriptionPayment.update({
         where: { id: current.id },
-        data: { status: 'SUCCESS', gatewayPaymentId: razorpayPaymentId, signature: razorpaySignature, failureReason: null },
+        data: {
+          status: 'SUCCESS',
+          paymentMethod: 'RAZORPAY',
+          gatewayPaymentId: razorpayPaymentId,
+          signature: razorpaySignature,
+          failureReason: null,
+        },
       });
       return tx.customerSubscription.create({
-        data: { customerId: authUser.customerId!, offerId: current.offerId, paymentId: current.id, startDate, expiryDate, status: 'ACTIVE' },
+        data: {
+          customerId: authUser.customerId!,
+          offerId: current.offerId,
+          paymentId: current.id,
+          startDate,
+          expiryDate,
+          status: 'ACTIVE',
+          pickupsAllowed: current.offer.pickupLimit || 4,
+          pickupsUsed: 0,
+          autoRenew: false,
+        },
         include: { offer: true },
       });
     });

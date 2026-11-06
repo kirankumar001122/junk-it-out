@@ -22,6 +22,7 @@ import {
   type CalculationItemInput,
   type FinancialDirection,
 } from '../pricing';
+import { consumeSubscriptionPickupEntitlement } from '../subscriptions';
 import {
   measureTiming,
   monotonicNow,
@@ -89,6 +90,7 @@ export function createOrderPayloadHash(input: any): string {
     scheduledSlot: input.scheduledSlot || null,
     notes: String(input.notes || '').trim(),
     financialDirection: input.financialDirection || 'CUSTOMER_PAYS',
+    useSubscription: Boolean(input.useSubscription),
   };
 
   return JSON.stringify(canonical);
@@ -156,6 +158,7 @@ export async function createOrder(
     financialDirection?:
       | 'CUSTOMER_PAYS'
       | 'JUNKITOUT_PAYS';
+    useSubscription?: boolean;
   },
 
   idempotencyKey?: string | null,
@@ -437,7 +440,29 @@ export async function createOrder(
     }
   }
 
-  const basePickupCharge = PICKUP_SERVICE_CHARGE;
+  let activeSub: any = null;
+  if (input.useSubscription) {
+    if (!user?.customer?.id) {
+      throw new Error('Customer profile required to use subscription plan.');
+    }
+    activeSub = await db.customerSubscription.findFirst({
+      where: {
+        customerId: user.customer.id,
+        status: 'ACTIVE',
+        expiryDate: { gt: new Date() },
+      },
+      include: { offer: true },
+      orderBy: { expiryDate: 'asc' },
+    });
+    if (!activeSub) {
+      throw new Error('No active subscription found. Please subscribe or book without subscription.');
+    }
+    if (activeSub.pickupsAllowed > 0 && activeSub.pickupsUsed >= activeSub.pickupsAllowed) {
+      throw new Error('Subscription pickup allowance reached for this cycle. Please renew your subscription.');
+    }
+  }
+
+  const basePickupCharge = input.useSubscription && activeSub ? 0.0 : PICKUP_SERVICE_CHARGE;
   const urgentSurcharge = (input.pickupType as string) === 'URGENT' ? 29.0 : 0.0;
 
   const calculationItems: CalculationItemInput[] = input.items.map((item) => {
@@ -511,6 +536,21 @@ export async function createOrder(
           durationMs: Number((monotonicNow() - transactionStartedAt).toFixed(2)),
           outcome: 'success',
         });
+
+        let appliedSubscriptionId: string | null = null;
+        if (input.useSubscription && activeSub) {
+          const entitlement = await consumeSubscriptionPickupEntitlement(tx, {
+            customerId: user.customer!.id,
+          });
+          if (!entitlement.eligible) {
+            if (entitlement.reason === 'LIMIT_EXCEEDED') {
+              throw new Error('Subscription pickup allowance reached for this cycle. Please renew your subscription.');
+            }
+            throw new Error('Subscription is no longer active or has expired.');
+          }
+          appliedSubscriptionId = entitlement.subscription.id;
+        }
+
         const createdOrder = await tx.order.create({
           data: {
             orderNumber,
@@ -566,10 +606,13 @@ export async function createOrder(
 
             finalAmount,
 
+            subscriptionId:
+              appliedSubscriptionId,
+
             // IMPORTANT:
-            // Order starts unpaid.
+            // Order starts unpaid unless finalAmount is 0
             paymentStatus:
-              'PENDING',
+              finalAmount === 0 ? 'PAID' : 'PENDING',
 
             ...(financialDirection === 'CUSTOMER_PAYS' && finalAmount > 0
               ? {
@@ -608,7 +651,11 @@ export async function createOrder(
                   user.id,
 
                 notes:
-                  financialDirection === 'CUSTOMER_PAYS' ? 'Order placed by customer via web platform. Payment pending.' : `Order placed by customer via web platform. Estimated scrap payout: ₹${finalAmount.toFixed(2)}.`,
+                  appliedSubscriptionId
+                    ? (financialDirection === 'CUSTOMER_PAYS' && finalAmount > 0
+                        ? `Order placed with Subscription Pass (#${appliedSubscriptionId}). Doorstep pickup fee waived. Payment pending for remaining balance.`
+                        : `Order placed with Subscription Pass (#${appliedSubscriptionId}). Doorstep pickup fee waived.`)
+                    : (financialDirection === 'CUSTOMER_PAYS' ? 'Order placed by customer via web platform. Payment pending.' : `Order placed by customer via web platform. Estimated scrap payout: ₹${finalAmount.toFixed(2)}.`),
               },
             },
           },

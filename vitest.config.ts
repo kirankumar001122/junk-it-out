@@ -71,6 +71,7 @@ export default defineConfig({
       'tests/wallet-payment.test.ts',
       'tests/invoice-gst-calculation.test.ts',
       'tests/agent-wallet.test.ts',
+      'tests/customer-subscriptions.test.ts',
     ],
   },
 });

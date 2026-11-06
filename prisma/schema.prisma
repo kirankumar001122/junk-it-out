@@ -103,8 +103,11 @@ model SubscriptionOffer {
   id              String                 @id @default(uuid())
   name            String
   description     String
-  durationMonths  Int
+  durationMonths  Int                    @default(1)
+  durationDays    Int                    @default(30)
+  billingPeriod   String                 @default("MONTHLY")
   price           Float
+  pickupLimit     Int                    @default(4)
   benefitsJson    String                 @default("[]")
   active          Boolean                @default(true)
   displayOrder    Int                    @default(0)
@@ -114,42 +117,52 @@ model SubscriptionOffer {
   payments        SubscriptionPayment[]
 
   @@index([active, displayOrder])
+  @@index([billingPeriod, active])
   @@unique([name, durationMonths])
 }
 
 model CustomerSubscription {
-  id          String             @id @default(uuid())
-  customerId  String
-  offerId     String
-  paymentId   String?            @unique
-  status      String             @default("ACTIVE")
-  startDate   DateTime
-  expiryDate  DateTime
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-  customer    Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  offer       SubscriptionOffer   @relation(fields: [offerId], references: [id], onDelete: Restrict)
-  payment     SubscriptionPayment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  id                 String               @id @default(uuid())
+  customerId         String
+  offerId            String
+  paymentId          String?              @unique
+  status             String               @default("ACTIVE")
+  startDate          DateTime
+  expiryDate         DateTime
+  pickupsAllowed     Int                  @default(4)
+  pickupsUsed        Int                  @default(0)
+  autoRenew          Boolean              @default(false)
+  cancelledAt        DateTime?
+  cancellationReason String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  customer           Customer             @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  offer              SubscriptionOffer    @relation(fields: [offerId], references: [id], onDelete: Restrict)
+  payment            SubscriptionPayment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  orders             Order[]
 
   @@index([customerId, status, expiryDate])
   @@index([offerId, createdAt])
+  @@index([status, expiryDate])
 }
 
 model SubscriptionPayment {
-  id               String                @id @default(uuid())
-  customerId       String
-  offerId          String
-  amount           Float
-  status           String                @default("PENDING")
-  gatewayOrderId   String?               @unique
-  gatewayPaymentId String?               @unique
-  signature        String?
-  failureReason    String?
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
-  customer         Customer              @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  offer            SubscriptionOffer     @relation(fields: [offerId], references: [id], onDelete: Restrict)
-  subscription     CustomerSubscription?
+  id                  String                @id @default(uuid())
+  customerId          String
+  offerId             String
+  amount              Float
+  paymentMethod       String                @default("RAZORPAY")
+  status              String                @default("PENDING")
+  gatewayOrderId      String?               @unique
+  gatewayPaymentId    String?               @unique
+  walletTransactionId String?
+  signature           String?
+  failureReason       String?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  customer            Customer              @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  offer               SubscriptionOffer     @relation(fields: [offerId], references: [id], onDelete: Restrict)
+  subscription        CustomerSubscription?
 
   @@index([customerId, createdAt])
   @@index([offerId, status, createdAt])
@@ -336,6 +349,8 @@ model Order {
   weightRecords      WeightRecord[]
   orderIdempotency   OrderIdempotency?
   agentWalletTransactions AgentWalletTransaction[] @relation("AgentWalletTransactionOrder")
+  subscriptionId     String?
+  subscription       CustomerSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
 
   @@index([customerId, createdAt])
   @@index([createdAt(sort: Desc)])
@@ -343,6 +358,7 @@ model Order {
   @@index([status, createdAt])
   @@index([paymentStatus, createdAt])
   @@index([financialDirection, status, createdAt])
+  @@index([subscriptionId])
 }
 
 model OrderIdempotency {
