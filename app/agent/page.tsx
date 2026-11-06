@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import Link from 'next/link';
 import {
   Truck,
   MapPin,
@@ -21,6 +22,7 @@ import {
   Bell,
   Eye,
   X,
+  Wallet,
 } from 'lucide-react';
 import {
   getAgentGeolocationErrorMessage,
@@ -1352,6 +1354,30 @@ export default function AgentDashboardPage() {
           <span className="text-xl font-black text-emerald-400 block">{completedCount}</span>
           <span className="text-[10px] text-slate-400 uppercase font-semibold">Completed</span>
         </div>
+      </div>
+
+      {/* AGENT WALLET PREVIEW */}
+      <div className="px-4">
+        <Link
+          href="/agent/wallet"
+          className="flex items-center justify-between bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border border-emerald-500/30 hover:border-emerald-500/60 p-4 rounded-3xl transition-all shadow-lg group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-emerald-500/20 border border-emerald-500/30 rounded-2xl text-emerald-400 group-hover:scale-105 transition-transform">
+              <Wallet className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Agent Wallet</span>
+              <p className="text-xs font-bold text-white flex items-center gap-1.5">
+                View Ledger & Payouts
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-xs">
+            <span>Open Wallet</span>
+            <ArrowRight className="w-4 h-4" />
+          </div>
+        </Link>
       </div>
 
       {/* ACTIVE ASSIGNED ORDER */}

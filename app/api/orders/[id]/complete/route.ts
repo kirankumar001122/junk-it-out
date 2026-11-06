@@ -8,6 +8,7 @@ import { invalidateAdminOperationsCaches } from '@/lib/cache/adminAgentsCache';
 import { runBackgroundTask } from '@/lib/utils/backgroundTask';
 import { calculateOrderValuation, calculateValuationAdjustment, type CalculationItemInput } from '@/lib/pricing';
 import { refundAttemptId } from '@/lib/payments/refundWorkflow';
+import { creditAgentPickupEarnings } from '@/lib/agentWallet';
 
 export async function POST(
   req: NextRequest,
@@ -363,6 +364,14 @@ export async function POST(
         await tx.agent.update({
           where: { id: currentOrder.agentId },
           data: { status: 'AVAILABLE' },
+        });
+
+        // Credit agent pickup earnings (infrastructure in place; commission calculation rule pending Kiran's business decision)
+        await creditAgentPickupEarnings(tx, {
+          agentId: currentOrder.agentId,
+          orderId: id,
+          orderNumber: currentOrder.orderNumber,
+          amount: 0,
         });
       }
 

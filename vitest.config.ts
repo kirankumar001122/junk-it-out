@@ -69,6 +69,7 @@ export default defineConfig({
       'tests/support-integration.test.ts',
       'tests/database-configuration.test.ts',
       'tests/wallet-payment.test.ts',
+      'tests/agent-wallet.test.ts',
     ],
   },
 });
