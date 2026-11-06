@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Phone, Mail, MapPin, ShieldCheck, Award, ExternalLink } from 'lucide-react';
-import TrademarkBadge from '@/components/TrademarkBadge';
+import LogoMark from '@/components/LogoMark';
+import BrandWordmark from '@/components/BrandWordmark';
 
 export default function Footer() {
   const pathname = usePathname();
@@ -18,20 +19,8 @@ export default function Footer() {
           {/* Brand Col */}
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700/80 p-0.5 flex items-center justify-center overflow-hidden shrink-0">
-                <img
-                  src="/logo.png"
-                  alt="Junk It Out Logo"
-                  loading="lazy"
-                  decoding="async"
-                  className="w-full h-full object-contain p-0.5"
-                />
-              </div>
-
-              <span className="text-lg font-bold tracking-tight text-white">
-                JUNK IT{' '}
-                <span className="text-emerald-400 font-extrabold"><span className="relative inline-block">OUT<TrademarkBadge /></span></span>
-              </span>
+              <LogoMark className="h-9 w-9" />
+              <BrandWordmark className="text-lg [&_.text-slate-950]:text-white [&_.text-emerald-600]:text-emerald-400" />
             </div>
 
             <p className="text-xs text-slate-400 leading-relaxed">

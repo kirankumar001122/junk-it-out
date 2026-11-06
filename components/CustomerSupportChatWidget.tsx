@@ -161,7 +161,7 @@ export default function CustomerSupportChatWidget() {
           }}
           aria-label="Open 24/7 AI Customer Support"
           title="Open Junk It Out™ Support"
-          className="fixed bottom-20 md:bottom-6 right-3 md:right-6 z-50 group grid h-12 w-12 place-items-center rounded-full bg-slate-900 text-white shadow-2xl shadow-slate-950/25 ring-2 ring-emerald-500/35 transition-all duration-300 hover:scale-105 hover:bg-slate-800 hover:ring-emerald-400 active:scale-95 cursor-pointer"
+          className="fixed bottom-4 right-4 md:bottom-6 md:right-6 z-50 group grid h-12 w-12 place-items-center rounded-full bg-slate-900 text-white shadow-2xl shadow-slate-950/25 ring-2 ring-emerald-500/35 transition-all duration-300 hover:scale-105 hover:bg-slate-800 hover:ring-emerald-400 active:scale-95 cursor-pointer"
         >
           <div className="relative flex items-center justify-center w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 group-hover:bg-emerald-500 group-hover:text-slate-950 transition-colors">
             <Bot className="w-5 h-5" aria-hidden="true" />
@@ -181,8 +181,8 @@ export default function CustomerSupportChatWidget() {
           aria-label="Junk It Out Customer Support Chat"
           className={`fixed z-50 transition-all duration-300 ease-out flex flex-col shadow-2xl border border-slate-700/60 bg-white ${
             isMinimized
-              ? 'bottom-20 md:bottom-6 right-4 md:right-6 w-72 h-14 rounded-2xl overflow-hidden'
-              : 'bottom-20 md:bottom-6 right-3 md:right-6 w-[calc(100vw-24px)] max-w-[380px] h-[min(75dvh,520px)] max-h-[calc(100dvh-6.5rem)] sm:w-[370px] sm:h-[500px] rounded-3xl overflow-hidden'
+              ? 'bottom-4 right-4 md:bottom-6 md:right-6 w-72 h-14 rounded-2xl overflow-hidden'
+              : 'bottom-4 right-4 md:bottom-6 md:right-6 w-[calc(100vw-32px)] max-w-[380px] h-[min(75dvh,520px)] max-h-[calc(100dvh-5rem)] sm:w-[370px] sm:h-[500px] rounded-3xl overflow-hidden'
           }`}
         >
           {/* HEADER */}

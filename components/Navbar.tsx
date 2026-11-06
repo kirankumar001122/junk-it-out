@@ -14,7 +14,8 @@ import {
 import PickupCartDrawer from '@/components/PickupCartDrawer';
 import LocationSearchModal from '@/components/LocationSearchModal';
 import { getCachedClientJson } from '@/lib/clientRequestCache';
-import TrademarkBadge from '@/components/TrademarkBadge';
+import BrandWordmark from '@/components/BrandWordmark';
+import LogoMark from '@/components/LogoMark';
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -122,12 +123,8 @@ export default function Navbar() {
         {/* Left: Brand Identity & Location */}
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <Link href="/" prefetch className="flex shrink-0 items-center gap-2 transition-opacity hover:opacity-90" aria-label="Junk It Out home">
-            <span className="relative grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl bg-white border border-slate-200 shadow-sm overflow-hidden shrink-0">
-              <img src="/logo.png" alt="Junk It Out Logo" decoding="async" className="h-full w-full object-contain p-1" />
-            </span>
-            <span className="hidden text-base sm:text-lg font-bold tracking-tight text-slate-900 md:block">
-              JUNK IT <span className="text-emerald-600 font-extrabold"><span className="relative inline-block">OUT<TrademarkBadge /></span></span>
-            </span>
+            <LogoMark className="h-8 w-8 sm:h-9 sm:w-9" />
+            <BrandWordmark className="text-sm sm:text-lg md:text-xl" />
           </Link>
 
           {/* Pickup location indicator & modal trigger */}
