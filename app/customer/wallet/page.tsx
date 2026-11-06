@@ -65,6 +65,7 @@ export default function CustomerWalletPage() {
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
+  const [bonusQuote, setBonusQuote] = useState<{ rechargeAmount: number; bonusAmount: number; totalCredit: number; campaignName: string | null; bonusExpiryDays: number } | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const loadData = async () => {
@@ -97,6 +98,24 @@ export default function CustomerWalletPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    const parsedAmount = Number(amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount < 10) {
+      setBonusQuote(null);
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      const response = await fetch('/api/customer/wallet/bonus-quote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: parsedAmount }),
+      });
+      const result = await response.json();
+      if (result.success) setBonusQuote(result.data);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [amount]);
 
   const purchaseWithWallet = async (offerId: string) => {
     if (actionInProgress) return;
@@ -156,7 +175,7 @@ export default function CustomerWalletPage() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(kind === 'wallet' ? { amount: Number(value) } : { offerId: value }),
+          body: JSON.stringify(kind === 'wallet' ? { amount: Number(value), idempotencyKey: crypto.randomUUID() } : { offerId: value }),
         },
       );
       const created = await createRes.json();
@@ -286,6 +305,11 @@ export default function CustomerWalletPage() {
               Add money
             </button>
           </div>
+          {bonusQuote && <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
+            {bonusQuote.bonusAmount > 0
+              ? `Recharge: ₹${bonusQuote.rechargeAmount.toFixed(2)} + bonus: ₹${bonusQuote.bonusAmount.toFixed(2)} = total wallet credit: ₹${bonusQuote.totalCredit.toFixed(2)} (${bonusQuote.campaignName || 'Bonus offer'}${bonusQuote.bonusExpiryDays ? `, expires in ${bonusQuote.bonusExpiryDays} days` : ''}).`
+              : `Recharge: ₹${bonusQuote.rechargeAmount.toFixed(2)}. No active bonus campaign applies to this amount.`}
+          </p>}
         </div>
       </section>
 

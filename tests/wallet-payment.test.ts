@@ -3,7 +3,7 @@ import { applyWalletAdjustment, roundCurrency } from '@/lib/wallet';
 
 function createTransactionClient(initialBalance: number) {
   const state = {
-    wallet: { id: 'wallet-1', balance: initialBalance },
+    wallet: { id: 'wallet-1', balance: initialBalance, balancePaise: Math.round(initialBalance * 100) },
     transaction: null as Record<string, unknown> | null,
   };
   return {
@@ -11,17 +11,24 @@ function createTransactionClient(initialBalance: number) {
     customerWallet: {
       upsert: async () => state.wallet,
       findUnique: async () => state.wallet,
-      update: async ({ data }: { data: { balance: number } }) => {
+      update: async ({ data }: { data: { balance: number; balancePaise?: number } }) => {
         state.wallet = { ...state.wallet, balance: data.balance };
         return state.wallet;
       },
     },
     walletTransaction: {
+      findFirst: async () => null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
         state.transaction = data;
         return data;
       },
     },
+    walletBonusGrant: {
+      findMany: async () => [],
+      findUnique: async () => null,
+      update: async () => null,
+    },
+    walletBonusConsumption: { create: async () => null },
     $queryRaw: async () => [],
   };
 }

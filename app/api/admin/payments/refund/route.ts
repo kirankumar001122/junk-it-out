@@ -28,6 +28,7 @@ import {
   refundStatusFromProviderStatus,
   type RefundProviderResult,
 } from '@/lib/payments/refundWorkflow';
+import { reverseWalletBonusForRefund } from '@/lib/walletBonusLifecycle';
 
 const MUTABLE_REFUND_ATTEMPT_STATUSES = [
   'PENDING', 'PROCESSING', 'RECONCILIATION_REQUIRED', 'REFUND_FAILED', 'RESET_TO_CAPTURED', 'PARTIALLY_REFUNDED', ...IN_FLIGHT_REFUND_STATUSES,
@@ -627,6 +628,9 @@ async function handlePost(req: NextRequest, context: ApiRequestContext) {
           failureReason: status === 'REFUND_FAILED' ? safeFailureReason ?? 'PROVIDER_REJECTED' : undefined,
         });
         if (outcome === 'stale' || outcome === 'duplicate') throw new Error('Refund state was finalized by another authoritative event.');
+        if (status === 'REFUNDED' && typeof refund?.payment_id === 'string') {
+          await reverseWalletBonusForRefund(refund.payment_id, requestedPaise / 100, typeof refund.id === 'string' ? refund.id : undefined);
+        }
       },
       markUncertain: async (reasonCode) => {
         await persistAttemptObservation({

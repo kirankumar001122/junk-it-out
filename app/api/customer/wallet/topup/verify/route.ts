@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { fetchRazorpayPayment, verifyRazorpayPaymentSignature } from '@/lib/payments/razorpay';
-import { roundCurrency } from '@/lib/wallet';
+import { fromPaise, toPaise } from '@/lib/wallet';
 
 export const runtime = 'nodejs';
 
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
     const payment = await fetchRazorpayPayment(razorpayPaymentId);
     if (
       payment.order_id !== transaction.gatewayOrderId ||
-      payment.amount !== Math.round(transaction.amount * 100) ||
+      payment.amount !== (transaction.amountPaise || toPaise(transaction.amount)) ||
       payment.currency !== 'INR' ||
       payment.status !== 'captured'
     ) {
@@ -59,21 +59,60 @@ export async function POST(req: NextRequest) {
       await tx.$queryRaw`SELECT "id" FROM "CustomerWallet" WHERE "id" = ${currentTransaction.walletId} FOR UPDATE`;
       const wallet = await tx.customerWallet.findUnique({ where: { id: currentTransaction.walletId } });
       if (!wallet) throw new Error('Customer wallet was not found.');
-      const nextBalance = roundCurrency(wallet.balance + currentTransaction.amount);
+      const currentBalancePaise = typeof wallet.balancePaise === 'number' ? wallet.balancePaise : toPaise(wallet.balance);
+      const currentPaidBalancePaise = typeof wallet.paidBalancePaise === 'number' ? wallet.paidBalancePaise : currentBalancePaise;
+      const rechargePaise = currentTransaction.amountPaise || toPaise(currentTransaction.amount);
+      const bonusPaise = currentTransaction.bonusAmount ? toPaise(currentTransaction.bonusAmount) : 0;
+      const nextBalancePaise = currentBalancePaise + rechargePaise + bonusPaise;
       const updatedWallet = await tx.customerWallet.update({
         where: { id: wallet.id },
-        data: { balance: nextBalance },
+        data: { balance: fromPaise(nextBalancePaise), balancePaise: nextBalancePaise, paidBalancePaise: currentPaidBalancePaise + rechargePaise },
       });
       const updatedTransaction = await tx.walletTransaction.update({
         where: { id: currentTransaction.id },
         data: {
           status: 'SUCCESS',
           gatewayPaymentId: razorpayPaymentId,
+          amountPaise: rechargePaise,
           balanceAfter: updatedWallet.balance,
+          balanceAfterPaise: nextBalancePaise,
           failureReason: null,
         },
       });
-      return { wallet: updatedWallet, transaction: updatedTransaction, alreadyProcessed: false };
+      let bonusTransaction = null;
+      if ((currentTransaction.bonusAmount || 0) > 0) {
+        bonusTransaction = await tx.walletTransaction.create({
+          data: {
+            walletId: wallet.id,
+            customerId: currentTransaction.customerId,
+            type: 'BONUS',
+            amount: currentTransaction.bonusAmount || 0,
+            amountPaise: bonusPaise,
+            originalRechargeAmount: currentTransaction.amount,
+            bonusAmount: currentTransaction.bonusAmount,
+            bonusExpiryDate: currentTransaction.bonusExpiryDate,
+            campaignId: currentTransaction.campaignId,
+            status: 'SUCCESS',
+            referenceId: `wallet-bonus-${currentTransaction.id}`,
+            balanceAfter: updatedWallet.balance,
+            balanceAfterPaise: nextBalancePaise,
+          },
+        });
+        await tx.walletBonusGrant.create({
+          data: {
+            walletId: wallet.id,
+            customerId: currentTransaction.customerId,
+            sourceTransactionId: bonusTransaction.id,
+            rechargeTransactionId: currentTransaction.id,
+            campaignId: currentTransaction.campaignId,
+            grantedPaise: bonusPaise,
+            remainingPaise: bonusPaise,
+            status: 'ACTIVE',
+            expiresAt: currentTransaction.bonusExpiryDate,
+          },
+        });
+      }
+      return { wallet: updatedWallet, transaction: updatedTransaction, bonusTransaction, alreadyProcessed: false };
     });
     return NextResponse.json({ success: true, alreadyProcessed: result.alreadyProcessed, data: result });
   } catch (error) {

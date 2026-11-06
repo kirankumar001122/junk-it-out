@@ -72,6 +72,8 @@ export default defineConfig({
       'tests/invoice-gst-calculation.test.ts',
       'tests/agent-wallet.test.ts',
       'tests/customer-subscriptions.test.ts',
+      'tests/wallet-bonus-lifecycle.test.ts',
+      'tests/wallet-bonus-scheduler.test.ts',
     ],
   },
 });
