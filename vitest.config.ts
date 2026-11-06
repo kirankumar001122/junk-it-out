@@ -69,6 +69,8 @@ export default defineConfig({
       'tests/support-integration.test.ts',
       'tests/database-configuration.test.ts',
       'tests/wallet-payment.test.ts',
+      'tests/wallet-bonus-lifecycle.test.ts',
+      'tests/wallet-bonus-scheduler.test.ts',
     ],
   },
 });

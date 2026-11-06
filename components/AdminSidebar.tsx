@@ -80,6 +80,7 @@ export default function AdminSidebar() {
     { href: '/admin/service-areas', label: 'Service Areas', icon: Globe },
     { href: '/admin/payments', label: 'Payments & Settlement', icon: CreditCard },
     { href: '/admin/wallets', label: 'Customer Wallets', icon: WalletCards },
+    { href: '/admin/wallet-bonus-campaigns', label: 'Wallet Bonus Campaigns', icon: WalletCards },
     { href: '/admin/subscription-offers', label: 'Subscription Offers', icon: CreditCard },
     { href: '/admin/complaints', label: 'Support & Complaints', icon: AlertCircle },
     { href: '/admin/coupons', label: 'Coupons & Promos', icon: Ticket },

@@ -14,6 +14,7 @@ export default function CustomerWalletPage() {
   const [amount, setAmount] = useState('500');
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
+  const [bonusQuote, setBonusQuote] = useState<{ rechargeAmount: number; bonusAmount: number; totalCredit: number; campaignName: string | null; bonusExpiryDays: number } | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const loadData = async () => {
@@ -37,6 +38,23 @@ export default function CustomerWalletPage() {
   };
 
   useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    const parsedAmount = Number(amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount < 10) {
+      setBonusQuote(null);
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      const response = await fetch('/api/customer/wallet/bonus-quote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: parsedAmount }),
+      });
+      const result = await response.json();
+      if (result.success) setBonusQuote(result.data);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [amount]);
 
   const beginPayment = async (kind: 'wallet' | 'subscription', value: string) => {
     if (paying) return;
@@ -46,7 +64,7 @@ export default function CustomerWalletPage() {
       const createRes = await fetch(kind === 'wallet' ? '/api/customer/wallet/topup/create' : '/api/customer/subscriptions/purchase/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(kind === 'wallet' ? { amount: Number(value) } : { offerId: value }),
+        body: JSON.stringify(kind === 'wallet' ? { amount: Number(value), idempotencyKey: crypto.randomUUID() } : { offerId: value }),
       });
       const created = await createRes.json();
       if (!createRes.ok || !created.success) throw new Error(created.message || 'Unable to start payment.');
@@ -109,6 +127,11 @@ export default function CustomerWalletPage() {
             <input value={amount} onChange={(event) => setAmount(event.target.value)} type="number" min="10" step="0.01" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-bold" />
             <button type="button" disabled={paying} onClick={() => beginPayment('wallet', amount)} className="whitespace-nowrap rounded-xl bg-emerald-600 px-4 py-3 text-xs font-black text-white disabled:opacity-50"><CreditCard className="mr-1 inline h-4 w-4" />Add money</button>
           </div>
+          {bonusQuote && <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
+            {bonusQuote.bonusAmount > 0
+              ? `Recharge: ₹${bonusQuote.rechargeAmount.toFixed(2)} + bonus: ₹${bonusQuote.bonusAmount.toFixed(2)} = total wallet credit: ₹${bonusQuote.totalCredit.toFixed(2)} (${bonusQuote.campaignName || 'Bonus offer'}${bonusQuote.bonusExpiryDays ? `, expires in ${bonusQuote.bonusExpiryDays} days` : ''}).`
+              : `Recharge: ₹${bonusQuote.rechargeAmount.toFixed(2)}. No active bonus campaign applies to this amount.`}
+          </p>}
         </div>
       </section>
 
