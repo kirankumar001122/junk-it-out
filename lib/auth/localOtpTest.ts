@@ -1,25 +1,27 @@
 import 'server-only';
 
-/** Development-only OTP test support for one explicitly configured phone. */
+/** Development-only OTP test support for explicitly configured phone(s). */
 export function isLocalOtpTestPhone(phone: string): boolean {
   if (
-    process.env.NODE_ENV !== 'development' ||
+    process.env.NODE_ENV === 'production' ||
     process.env.OTP_TEST_MODE?.trim().toLowerCase() !== 'true'
   ) {
     return false;
   }
 
-  const configuredDigits = process.env.OTP_TEST_PHONE?.replace(/\D/g, '') || '';
-  const configuredPhone = configuredDigits.slice(-10);
   const requestedPhone = phone.replace(/\D/g, '').slice(-10);
+  if (requestedPhone.length !== 10) return false;
 
-  return (
-    configuredPhone.length === 10 &&
-    requestedPhone.length === 10 &&
-    configuredPhone === requestedPhone
-  );
+  const rawConfigured = process.env.OTP_TEST_PHONE || '';
+  const configuredList = rawConfigured
+    .split(',')
+    .map((p) => p.replace(/\D/g, '').slice(-10))
+    .filter((p) => p.length === 10);
+
+  return configuredList.includes(requestedPhone);
 }
 
 export function isValidLocalOtpTestCode(code: string): boolean {
   return /^\d{6}$/.test(code.trim());
 }
+

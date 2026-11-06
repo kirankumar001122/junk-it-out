@@ -8,6 +8,7 @@ import {
   hasTrustedOrigin,
   addCorsHeaders,
 } from '@/lib/auth/requestSecurity';
+import { isLocalOtpTestPhone } from '@/lib/auth/localOtpTest';
 
 export async function OPTIONS(req: NextRequest) {
   const res = new NextResponse(null, { status: 204 });
@@ -56,25 +57,7 @@ export async function POST(req: NextRequest) {
      * ------------------------------------------------------------
      */
 
-    const isProduction = process.env.NODE_ENV === 'production';
-    const testModeEnabled =
-      !isProduction && process.env.OTP_TEST_MODE?.trim().toLowerCase() === 'true';
-
-    const configuredTestPhone =
-      process.env.OTP_TEST_PHONE?.replace(/\D/g, '') || '';
-
-    const normalizedDigits = normalized.replace(/\D/g, '');
-
-    // Compare only the final 10 digits so +91XXXXXXXXXX,
-    // 91XXXXXXXXXX and XXXXXXXXXX work consistently.
-    const normalizedTestPhone = configuredTestPhone.slice(-10);
-    const normalizedUserPhone = normalizedDigits.slice(-10);
-
-    const isTestPhone =
-      testModeEnabled &&
-      normalizedTestPhone.length === 10 &&
-      normalizedUserPhone.length === 10 &&
-      normalizedTestPhone === normalizedUserPhone;
+    const isTestPhone = isLocalOtpTestPhone(normalized);
 
     let cooldownSeconds = 30;
 

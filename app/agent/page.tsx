@@ -81,20 +81,29 @@ export default function AgentDashboardPage() {
   const locationUpdateRequestRef = useRef(false);
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  const fetchAgentData = useCallback(async (showLoading = true) => {
+  const fetchAgentData = useCallback(async (showLoading = true, isManual = false) => {
     if (dataRequestRef.current) {
       refreshAfterRequestRef.current = true;
+      if (!showLoading) {
+        setIsRefreshing(true);
+      }
       return;
     }
     dataRequestRef.current = true;
     setDashboardError(null);
     if (showLoading) setLoading(true);
     else setIsRefreshing(true);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
     try {
       const [profileRes, ordersRes] = await Promise.all([
-        fetch('/api/auth/me', { cache: 'no-store' }),
-        fetch('/api/orders?limit=20', { cache: 'no-store' }),
+        fetch('/api/auth/me', { cache: 'no-store', signal: controller.signal }),
+        fetch('/api/orders?limit=20', { cache: 'no-store', signal: controller.signal }),
       ]);
+      clearTimeout(timeout);
+
       const profileData = await profileRes.json().catch(() => ({ success: false }));
 
       if (!profileData.success || !profileData.data?.user || profileData.data.user.role !== 'AGENT') {
@@ -162,7 +171,7 @@ export default function AgentDashboardPage() {
           (sum: number, it: any) => sum + (Number(it.estimatedWeight) || 0),
           0
         );
-        setNewPickupNotice((current: any) => current || {
+        setNewPickupNotice({
           type: 'NEW_PICKUP_AVAILABLE',
           orderId: topUnassigned.id,
           orderNumber: topUnassigned.orderNumber,
@@ -171,7 +180,7 @@ export default function AgentDashboardPage() {
           itemsSummary: `${topUnassigned.items?.length || 0} category item(s)`,
           createdAt: topUnassigned.createdAt,
         });
-      } else if (!isAgentAvailable || assigned) {
+      } else {
         setNewPickupNotice(null);
       }
       setActualWeightsInput(
@@ -188,19 +197,36 @@ export default function AgentDashboardPage() {
             }))
           : [],
       );
+
+      if (isManual) {
+        setStatusNotice('Pickup assignments refreshed.');
+        setTimeout(() => setStatusNotice(null), 3000);
+      }
     } catch (error) {
       console.error('Agent dashboard refresh failed:', error);
-      setDashboardError('Network error while loading your pickup dashboard.');
+      const isTimeout = error instanceof DOMException && error.name === 'AbortError';
+      setDashboardError(
+        isTimeout
+          ? 'Dashboard refresh timed out. Please check your network and retry.'
+          : 'Network error while loading your pickup dashboard. Please retry.'
+      );
     } finally {
-      setLoading(false);
-      setIsRefreshing(false);
+      clearTimeout(timeout);
       dataRequestRef.current = false;
       if (refreshAfterRequestRef.current) {
         refreshAfterRequestRef.current = false;
         window.setTimeout(() => void fetchAgentData(false), 0);
+      } else {
+        setLoading(false);
+        setIsRefreshing(false);
       }
     }
   }, []);
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await fetchAgentData(false, true);
+  }, [fetchAgentData]);
 
   useEffect(() => {
     void fetchAgentData();
@@ -1169,9 +1195,9 @@ export default function AgentDashboardPage() {
           <span>{dashboardError}</span>
           <button
             type="button"
-            onClick={() => void fetchAgentData(false)}
+            onClick={handleRefresh}
             disabled={isRefreshing}
-            className="shrink-0 underline disabled:opacity-50"
+            className="shrink-0 underline disabled:opacity-50 cursor-pointer"
           >
             {isRefreshing ? 'Refreshing…' : 'Retry'}
           </button>
@@ -1203,10 +1229,11 @@ export default function AgentDashboardPage() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => void fetchAgentData(false)}
+            onClick={handleRefresh}
             disabled={isRefreshing}
             aria-label="Refresh pickup assignments"
-            className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-full border border-slate-700 disabled:opacity-50"
+            title="Refresh pickup assignments"
+            className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-full border border-slate-700 disabled:opacity-50 transition-colors cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
           </button>

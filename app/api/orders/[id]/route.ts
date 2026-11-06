@@ -123,22 +123,21 @@ export async function GET(
         return errorResponse('FORBIDDEN', 'You are not authorized to view details for this order.', 403);
       }
     } else if (authUser.role === 'AGENT') {
-      const isAssignedAgent = isAgentOrderAssigned(order, authUser);
+      const targetAgentId = authUser.agentId ?? (
+        authUser.userId
+          ? (await db.agent.findUnique({
+              where: { userId: authUser.userId },
+              select: { id: true },
+            }))?.id
+          : null
+      );
+      const isAssignedAgent = Boolean(targetAgentId && order.agentId === targetAgentId);
       const isUnassignedOpen = isOrderOpenForAssignment(order);
       if (!isAssignedAgent && !isUnassignedOpen) {
         return errorResponse('FORBIDDEN', 'Order is not assigned to your agent profile.', 403);
       }
 
       if (!isAssignedAgent) {
-        const targetAgentId = authUser.agentId ?? (
-          authUser.userId
-            ? (await db.agent.findUnique({
-                where: { userId: authUser.userId },
-                select: { id: true },
-              }))?.id
-            : null
-        );
-
         const [agent, activeOrder] = await Promise.all([
           targetAgentId
             ? db.agent.findUnique({

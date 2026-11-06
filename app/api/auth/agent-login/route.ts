@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Lookup & Provision Agent User (Authorized Agents: 9353276638, 7842259582)
+    // 2. Lookup & Provision Agent User (Authorized Agents: 9353276638, 7842259582, 7479895482)
     const rawDigits = normalized.replace(/\D/g, '').slice(-10);
     const isAuthorizedAgentNumber =
       rawDigits === '9353276638' ||
