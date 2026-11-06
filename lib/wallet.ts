@@ -1,5 +1,6 @@
 import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
+import { dispatchCustomerWalletNotification } from '@/lib/services/walletNotification';
 
 export const walletTransactionTypes = {
   topup: 'TOPUP',
@@ -169,6 +170,14 @@ export async function applyWalletAdjustment(
       where: { id: debit.transaction.id },
       data: { adminId: input.adminId, type: input.type },
     });
+    await dispatchCustomerWalletNotification(tx, {
+      customerId: input.customerId,
+      type: input.type,
+      amount,
+      balanceAfter: transaction.balanceAfter,
+      reason: input.reason,
+      referenceId: input.referenceId,
+    });
     return { wallet: debit.wallet, transaction };
   }
 
@@ -203,6 +212,14 @@ export async function applyWalletAdjustment(
       reason: input.reason,
       adminId: input.adminId,
     },
+  });
+  await dispatchCustomerWalletNotification(tx, {
+    customerId: input.customerId,
+    type: input.type,
+    amount,
+    balanceAfter: nextBalance,
+    reason: input.reason,
+    referenceId: input.referenceId,
   });
   return { wallet: updatedWallet, transaction };
 }

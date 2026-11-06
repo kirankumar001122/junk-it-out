@@ -1,5 +1,6 @@
 import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
+import { dispatchAgentWalletNotification } from '@/lib/services/walletNotification';
 
 export const agentWalletTransactionTypes = {
   credit: 'CREDIT',
@@ -114,6 +115,15 @@ export async function applyAgentWalletAdjustment(
       reason,
       adminId: input.adminId || null,
     },
+  });
+
+  await dispatchAgentWalletNotification(tx, {
+    agentId: input.agentId,
+    type: input.type,
+    amount,
+    balanceAfter: nextBalance,
+    reason,
+    referenceId: input.referenceId || null,
   });
 
   return { wallet: updatedWallet, transaction };

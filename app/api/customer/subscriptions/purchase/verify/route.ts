@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { fetchRazorpayPayment, verifyRazorpayPaymentSignature } from '@/lib/payments/razorpay';
 import { calculateSubscriptionExpiry } from '@/lib/subscriptions';
+import { dispatchSubscriptionNotification } from '@/lib/services/walletNotification';
 
 export const runtime = 'nodejs';
 
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest) {
           failureReason: null,
         },
       });
-      return tx.customerSubscription.create({
+      const createdSub = await tx.customerSubscription.create({
         data: {
           customerId: authUser.customerId!,
           offerId: current.offerId,
@@ -80,6 +81,17 @@ export async function POST(req: NextRequest) {
         },
         include: { offer: true },
       });
+
+      await dispatchSubscriptionNotification(tx, {
+        customerId: authUser.customerId!,
+        type: 'SUBSCRIPTION_PURCHASE',
+        planName: current.offer.name,
+        price: current.amount,
+        expiryDate,
+        pickupsAllowed: current.offer.pickupLimit || 4,
+      });
+
+      return createdSub;
     });
     return NextResponse.json({ success: true, data: subscription });
   } catch (error) {

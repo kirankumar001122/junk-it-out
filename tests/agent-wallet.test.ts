@@ -20,10 +20,23 @@ function createMockTx(initialBalance: number = 0) {
   const state = {
     wallet: { id: 'wallet-agent-1', agentId: 'agent-1', balance: initialBalance },
     transactions: [] as Array<Record<string, unknown>>,
+    notifications: [] as Array<Record<string, unknown>>,
   };
 
   return {
     state,
+    agent: {
+      findUnique: async () => ({
+        id: 'agent-1',
+        user: { id: 'user-agent-1', name: 'Field Agent', phone: '+919876543210' },
+      }),
+    },
+    notification: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        state.notifications.push(data);
+        return data;
+      },
+    },
     agentWallet: {
       upsert: async () => state.wallet,
       findUnique: async () => state.wallet,
@@ -71,6 +84,40 @@ describe('Agent Wallet Domain Service', () => {
     expect(result.transaction.referenceId).toBe('ref-bonus-1');
     expect(result.transaction.status).toBe('SUCCESS');
     expect(tx.state.transactions).toHaveLength(1);
+    expect(tx.state.notifications).toHaveLength(1);
+    expect(tx.state.notifications[0].type).toBe('AGENT_WALLET_TRANSACTION');
+  });
+
+  it('strictly reconciles mathematical formula: previousBalance + credits - debits === newBalance', async () => {
+    const tx = createMockTx(100.0);
+    // Credit 50
+    const credResult = await applyAgentWalletAdjustment(tx as never, {
+      agentId: 'agent-1',
+      amount: 50.0,
+      type: agentWalletTransactionTypes.credit,
+      direction: 'CREDIT',
+      reason: 'Incentive bonus',
+      referenceId: 'ref-rec-cred',
+    });
+    expect(credResult.wallet.balance).toBe(150.0);
+
+    // Debit 30
+    const debResult = await applyAgentWalletAdjustment(tx as never, {
+      agentId: 'agent-1',
+      amount: 30.0,
+      type: agentWalletTransactionTypes.debit,
+      direction: 'DEBIT',
+      reason: 'Fuel advance recovery',
+      referenceId: 'ref-rec-deb',
+    });
+    expect(debResult.wallet.balance).toBe(120.0);
+
+    // Verify mathematical reconciliation
+    const previous = 100.0;
+    const credits = 50.0;
+    const debits = 30.0;
+    expect(previous + credits - debits).toBe(debResult.wallet.balance);
+    expect(debResult.transaction.balanceAfter).toBe(debResult.wallet.balance);
   });
 
   it('applies a DEBIT adjustment and decrements the balance', async () => {

@@ -30,11 +30,25 @@ function createMockPrismaClient(initialState: {
     subscription: initialState.subscription ?? null,
     payments: [] as any[],
     transactions: [] as any[],
+    notifications: [] as any[],
     orders: initialState.orders ?? [],
   };
 
   return {
     state,
+    customer: {
+      findUnique: async () => ({
+        id: 'cust-1',
+        user: { id: 'user-1', name: 'Test Customer', phone: '+919999999999' },
+      }),
+    },
+    notification: {
+      create: async ({ data }: any) => {
+        const item = { id: `notif-${Date.now()}`, ...data };
+        state.notifications.push(item);
+        return item;
+      },
+    },
     customerWallet: {
       upsert: async () => state.wallet,
       findUnique: async () => state.wallet,
@@ -271,6 +285,7 @@ describe('Customer Subscriptions Domain Logic (Task 01)', () => {
       expect(cancelled.status).toBe('CANCELLED');
       expect(cancelled.cancellationReason).toBe('Customer relocation');
       expect(cancelled.cancelledAt).toBeInstanceOf(Date);
+      expect(client.state.notifications.some((n) => n.type === 'SUBSCRIPTION')).toBe(true);
     });
 
     it('rejects cancellation attempt by unauthorized customer', async () => {
@@ -288,6 +303,90 @@ describe('Customer Subscriptions Domain Logic (Task 01)', () => {
           customerId: 'cust-different',
         }),
       ).rejects.toThrow('Unauthorized to cancel this subscription');
+    });
+  });
+
+  describe('Multi-Tier Plan Offerings & Plan Change Transitions', () => {
+    it('supports Weekly Green Pass purchase with 1 pickup and 7-day duration', async () => {
+      const weeklyPlan = DEFAULT_SUBSCRIPTION_PLANS.find((p) => p.billingPeriod === 'WEEKLY')!;
+      const client = createMockPrismaClient({
+        walletBalance: 200,
+        offer: {
+          id: 'offer-weekly',
+          ...weeklyPlan,
+          active: true,
+        },
+      });
+
+      const result = await purchaseSubscriptionWithWallet(client as any, {
+        customerId: 'cust-1',
+        offerId: 'offer-weekly',
+      });
+
+      expect(result.subscription.pickupsAllowed).toBe(1);
+      expect(result.subscription.status).toBe('ACTIVE');
+      expect(result.wallet.balance).toBe(101); // 200 - 99
+      expect(client.state.notifications.length).toBeGreaterThan(0);
+    });
+
+    it('supports Quarterly Premium purchase with 12 pickups and 90-day duration', async () => {
+      const quarterlyPlan = DEFAULT_SUBSCRIPTION_PLANS.find((p) => p.billingPeriod === 'QUARTERLY')!;
+      const client = createMockPrismaClient({
+        walletBalance: 500,
+        offer: {
+          id: 'offer-quarterly',
+          ...quarterlyPlan,
+          active: true,
+        },
+      });
+
+      const result = await purchaseSubscriptionWithWallet(client as any, {
+        customerId: 'cust-1',
+        offerId: 'offer-quarterly',
+      });
+
+      expect(result.subscription.pickupsAllowed).toBe(12);
+      expect(result.subscription.status).toBe('ACTIVE');
+      expect(result.wallet.balance).toBe(201); // 500 - 299
+    });
+
+    it('chains plan change transition seamlessly at current expiry without loss of active period', async () => {
+      const currentExpiry = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
+      const monthlyOffer = {
+        id: 'offer-monthly',
+        name: 'Monthly Standard',
+        price: 199,
+        durationDays: 30,
+        durationMonths: 1,
+        billingPeriod: 'MONTHLY',
+        pickupLimit: 4,
+        active: true,
+      };
+
+      const client = createMockPrismaClient({
+        walletBalance: 400,
+        offer: monthlyOffer,
+        subscription: {
+          id: 'sub-weekly-active',
+          customerId: 'cust-1',
+          status: 'ACTIVE',
+          expiryDate: currentExpiry,
+          pickupsAllowed: 1,
+          pickupsUsed: 0,
+        },
+      });
+
+      // Customer upgrades from active weekly to monthly
+      const result = await purchaseSubscriptionWithWallet(client as any, {
+        customerId: 'cust-1',
+        offerId: 'offer-monthly',
+      });
+
+      // New subscription starts exactly when the current one expires
+      expect(result.subscription.startDate.getTime()).toBe(currentExpiry.getTime());
+      expect(result.subscription.pickupsAllowed).toBe(4);
+      expect(result.wallet.balance).toBe(201); // 400 - 199
+      expect(client.state.transactions).toHaveLength(1);
     });
   });
 });

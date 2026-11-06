@@ -3,12 +3,14 @@
 import { useEffect, useState } from 'react';
 import {
   AlertCircle,
+  ArrowRightLeft,
   Calendar,
   CheckCircle2,
   Clock,
   CreditCard,
   LoaderCircle,
   Package,
+  RefreshCw,
   RotateCcw,
   Sparkles,
   Wallet as WalletIcon,
@@ -43,6 +45,7 @@ type Offer = {
 
 type CustomerSubscription = {
   id: string;
+  offerId: string;
   status: string;
   computedStatus?: string;
   startDate: string;
@@ -66,6 +69,8 @@ export default function CustomerWalletPage() {
   const [paying, setPaying] = useState(false);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [bonusQuote, setBonusQuote] = useState<{ rechargeAmount: number; bonusAmount: number; totalCredit: number; campaignName: string | null; bonusExpiryDays: number } | null>(null);
+  const [changePlanSubId, setChangePlanSubId] = useState<string | null>(null);
+  const [targetOfferId, setTargetOfferId] = useState<string>('');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const loadData = async () => {
@@ -165,19 +170,81 @@ export default function CustomerWalletPage() {
     }
   };
 
-  const beginRazorpayPayment = async (kind: 'wallet' | 'subscription', value: string) => {
+  const handleRenewWithWallet = async (subscriptionId: string) => {
+    if (actionInProgress) return;
+    setActionInProgress(`renew-${subscriptionId}`);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/customer/subscriptions/${subscriptionId}/renew`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentMethod: 'WALLET' }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Unable to renew subscription.');
+      }
+      setMessage({ type: 'success', text: 'Subscription renewed successfully using your wallet balance!' });
+      await loadData();
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Renewal failed.' });
+    } finally {
+      setActionInProgress(null);
+    }
+  };
+
+  const handleChangePlanWithWallet = async (subscriptionId: string, offerId: string) => {
+    if (!offerId || actionInProgress) return;
+    setActionInProgress(`change-${subscriptionId}`);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/customer/subscriptions/${subscriptionId}/change`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetOfferId: offerId, paymentMethod: 'WALLET' }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Unable to change subscription plan.');
+      }
+      setMessage({ type: 'success', text: data.message || 'Subscription plan changed successfully!' });
+      setChangePlanSubId(null);
+      await loadData();
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Plan change failed.' });
+    } finally {
+      setActionInProgress(null);
+    }
+  };
+
+  const beginRazorpayPayment = async (
+    kind: 'wallet' | 'subscription' | 'renew' | 'change',
+    value: string,
+    extraOfferId?: string,
+  ) => {
     if (paying || actionInProgress) return;
     setPaying(true);
     setMessage(null);
     try {
-      const createRes = await fetch(
-        kind === 'wallet' ? '/api/customer/wallet/topup/create' : '/api/customer/subscriptions/purchase/create',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(kind === 'wallet' ? { amount: Number(value), idempotencyKey: crypto.randomUUID() } : { offerId: value }),
-        },
-      );
+      let endpoint = '/api/customer/subscriptions/purchase/create';
+      let payload: Record<string, unknown> = { offerId: value };
+
+      if (kind === 'wallet') {
+        endpoint = '/api/customer/wallet/topup/create';
+        payload = { amount: Number(value), idempotencyKey: crypto.randomUUID() };
+      } else if (kind === 'renew') {
+        endpoint = `/api/customer/subscriptions/${value}/renew`;
+        payload = { paymentMethod: 'RAZORPAY' };
+      } else if (kind === 'change') {
+        endpoint = `/api/customer/subscriptions/${value}/change`;
+        payload = { targetOfferId: extraOfferId, paymentMethod: 'RAZORPAY' };
+      }
+
+      const createRes = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
       const created = await createRes.json();
       if (!createRes.ok || !created.success) throw new Error(created.message || 'Unable to start payment.');
 
@@ -186,12 +253,21 @@ export default function CustomerWalletPage() {
         throw new Error('Payment checkout is unavailable.');
       }
 
+      const description =
+        kind === 'wallet'
+          ? 'Customer wallet top-up'
+          : kind === 'renew'
+          ? 'Subscription plan renewal'
+          : kind === 'change'
+          ? 'Subscription plan change'
+          : 'Subscription plan purchase';
+
       const options = {
         key: created.data.key,
         amount: created.data.amount,
         currency: created.data.currency,
         name: 'Junk It Out',
-        description: kind === 'wallet' ? 'Customer wallet top-up' : 'Subscription plan purchase',
+        description,
         order_id: created.data.gatewayOrderId,
         handler: async (response: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
           const verifyRes = await fetch(
@@ -210,8 +286,12 @@ export default function CustomerWalletPage() {
           if (!verifyRes.ok || !verified.success) throw new Error(verified.message || 'Payment verification failed.');
           setMessage({
             type: 'success',
-            text: kind === 'wallet' ? 'Wallet balance updated successfully.' : 'Subscription activated successfully.',
+            text:
+              kind === 'wallet'
+                ? 'Wallet balance updated successfully.'
+                : 'Subscription payment processed successfully.',
           });
+          setChangePlanSubId(null);
           await loadData();
         },
         modal: { ondismiss: () => setPaying(false) },
@@ -418,54 +498,140 @@ export default function CustomerWalletPage() {
               const isActive = status === 'ACTIVE';
 
               return (
-                <div
-                  key={subscription.id}
-                  className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <p className="font-black text-slate-900">{subscription.offer.name}</p>
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-black ${
-                          isActive
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : status === 'CANCELLED'
-                            ? 'bg-rose-100 text-rose-800'
-                            : 'bg-slate-200 text-slate-600'
-                        }`}
-                      >
-                        {status}
-                      </span>
+                <div key={subscription.id} className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-black text-slate-900">{subscription.offer.name}</p>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-black ${
+                            isActive
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : status === 'CANCELLED'
+                              ? 'bg-rose-100 text-rose-800'
+                              : 'bg-slate-200 text-slate-600'
+                          }`}
+                        >
+                          {status}
+                        </span>
+                      </div>
+
+                      <p className="text-slate-500 flex items-center gap-1.5">
+                        <Calendar className="h-3 w-3" />
+                        {new Date(subscription.startDate).toLocaleDateString('en-IN')} –{' '}
+                        {new Date(subscription.expiryDate).toLocaleDateString('en-IN')}
+                      </p>
+
+                      <p className="font-bold text-emerald-700 flex items-center gap-1.5">
+                        <Package className="h-3 w-3" />
+                        Pickups: {subscription.pickupsUsed} / {subscription.pickupsAllowed} used ({subscription.remainingPickups} left)
+                      </p>
                     </div>
 
-                    <p className="text-slate-500 flex items-center gap-1.5">
-                      <Calendar className="h-3 w-3" />
-                      {new Date(subscription.startDate).toLocaleDateString('en-IN')} –{' '}
-                      {new Date(subscription.expiryDate).toLocaleDateString('en-IN')}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {isActive && (
+                        <>
+                          <button
+                            type="button"
+                            disabled={Boolean(actionInProgress) || paying}
+                            onClick={() => handleRenewWithWallet(subscription.id)}
+                            className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                          >
+                            {actionInProgress === `renew-${subscription.id}` ? (
+                              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <>
+                                <RefreshCw className="mr-1 inline h-3 w-3" />
+                                Renew (₹{subscription.offer.price})
+                              </>
+                            )}
+                          </button>
 
-                    <p className="font-bold text-emerald-700 flex items-center gap-1.5">
-                      <Package className="h-3 w-3" />
-                      Pickups: {subscription.pickupsUsed} / {subscription.pickupsAllowed} used ({subscription.remainingPickups} left)
-                    </p>
+                          <button
+                            type="button"
+                            disabled={Boolean(actionInProgress) || paying}
+                            onClick={() => {
+                              if (changePlanSubId === subscription.id) {
+                                setChangePlanSubId(null);
+                              } else {
+                                setChangePlanSubId(subscription.id);
+                                const alternate = offers.find((o) => o.id !== subscription.offerId);
+                                if (alternate) setTargetOfferId(alternate.id);
+                              }
+                            }}
+                            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            <ArrowRightLeft className="mr-1 inline h-3 w-3" />
+                            {changePlanSubId === subscription.id ? 'Close' : 'Change Plan'}
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={Boolean(actionInProgress) || paying}
+                            onClick={() => handleCancelSubscription(subscription.id)}
+                            className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                          >
+                            {actionInProgress === `cancel-${subscription.id}` ? (
+                              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              'Cancel Plan'
+                            )}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    {isActive && (
-                      <button
-                        type="button"
-                        disabled={Boolean(actionInProgress)}
-                        onClick={() => handleCancelSubscription(subscription.id)}
-                        className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
-                      >
-                        {actionInProgress === `cancel-${subscription.id}` ? (
-                          <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          'Cancel Plan'
+                  {/* Inline Plan Change Form */}
+                  {isActive && changePlanSubId === subscription.id && (
+                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <p className="text-xs font-black text-slate-900">Switch to a Different Subscription Plan</p>
+                      <p className="mt-0.5 text-[11px] text-slate-500">
+                        Your new plan starts seamlessly at the end of your current cycle, preserving your active days and pickups.
+                      </p>
+                      <div className="mt-3 flex flex-wrap items-center gap-3">
+                        <select
+                          value={targetOfferId}
+                          onChange={(e) => setTargetOfferId(e.target.value)}
+                          className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 focus:outline-emerald-600"
+                        >
+                          {offers
+                            .filter((o) => o.id !== subscription.offerId)
+                            .map((o) => (
+                              <option key={o.id} value={o.id}>
+                                {o.name} — ₹{o.price} ({o.pickupLimit || 4} pickups / {o.billingPeriod || 'MONTHLY'})
+                              </option>
+                            ))}
+                        </select>
+
+                        {targetOfferId && (
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              disabled={Boolean(actionInProgress) || paying}
+                              onClick={() => handleChangePlanWithWallet(subscription.id, targetOfferId)}
+                              className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white hover:bg-emerald-700 disabled:opacity-50"
+                            >
+                              {actionInProgress === `change-${subscription.id}` ? (
+                                <LoaderCircle className="mx-auto h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                'Switch via Wallet'
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={Boolean(actionInProgress) || paying}
+                              onClick={() => beginRazorpayPayment('change', subscription.id, targetOfferId)}
+                              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              Switch via Razorpay
+                            </button>
+                          </div>
                         )}
-                      </button>
-                    )}
-                  </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}

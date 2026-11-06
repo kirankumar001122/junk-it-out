@@ -1,6 +1,10 @@
 import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { roundCurrency } from '@/lib/wallet';
+import {
+  dispatchCustomerWalletNotification,
+  dispatchSubscriptionNotification,
+} from '@/lib/services/walletNotification';
 
 export const BILLING_PERIODS = {
   WEEKLY: 'WEEKLY',
@@ -189,6 +193,24 @@ export async function purchaseSubscriptionWithWallet(
     data: { walletTransactionId: walletTx.id },
   });
 
+  await dispatchSubscriptionNotification(tx, {
+    customerId: input.customerId,
+    type: 'SUBSCRIPTION_PURCHASE',
+    planName: offer.name,
+    price,
+    expiryDate,
+    pickupsAllowed: offer.pickupLimit || 4,
+  });
+
+  await dispatchCustomerWalletNotification(tx, {
+    customerId: input.customerId,
+    type: 'WALLET_DEBIT',
+    amount: price,
+    balanceAfter: nextBalance,
+    reason: `Subscription plan: ${offer.name} (${offer.billingPeriod || 'MONTHLY'})`,
+    referenceId: `sub:${subscription.id}`,
+  });
+
   return { subscription, payment, wallet: updatedWallet };
 }
 
@@ -265,6 +287,7 @@ export async function cancelCustomerSubscription(
 ) {
   const sub = await tx.customerSubscription.findUnique({
     where: { id: input.subscriptionId },
+    include: { offer: true },
   });
 
   if (!sub) {
@@ -279,7 +302,7 @@ export async function cancelCustomerSubscription(
     return sub;
   }
 
-  return tx.customerSubscription.update({
+  const updatedSub = await tx.customerSubscription.update({
     where: { id: input.subscriptionId },
     data: {
       status: 'CANCELLED',
@@ -289,5 +312,14 @@ export async function cancelCustomerSubscription(
     },
     include: { offer: true },
   });
+
+  await dispatchSubscriptionNotification(tx, {
+    customerId: sub.customerId,
+    type: 'SUBSCRIPTION_CANCEL',
+    planName: sub.offer?.name || updatedSub.offer?.name || 'Subscription Plan',
+    reason: input.reason || 'Customer requested cancellation.',
+  });
+
+  return updatedSub;
 }
 

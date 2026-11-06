@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { fetchRazorpayPayment, verifyRazorpayPaymentSignature } from '@/lib/payments/razorpay';
 import { fromPaise, toPaise } from '@/lib/wallet';
+import { dispatchCustomerWalletNotification } from '@/lib/services/walletNotification';
 
 export const runtime = 'nodejs';
 
@@ -112,6 +113,15 @@ export async function POST(req: NextRequest) {
           },
         });
       }
+
+      await dispatchCustomerWalletNotification(tx, {
+        customerId: currentTransaction.customerId,
+        type: 'TOPUP',
+        amount: currentTransaction.amount,
+        balanceAfter: updatedWallet.balance,
+        referenceId: updatedTransaction.referenceId,
+      });
+
       return { wallet: updatedWallet, transaction: updatedTransaction, bonusTransaction, alreadyProcessed: false };
     });
     return NextResponse.json({ success: true, alreadyProcessed: result.alreadyProcessed, data: result });
