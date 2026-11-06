@@ -658,7 +658,7 @@ export async function createOrder(
                     : (financialDirection === 'CUSTOMER_PAYS' ? 'Order placed by customer via web platform. Payment pending.' : `Order placed by customer via web platform. Estimated scrap payout: ₹${finalAmount.toFixed(2)}.`),
               },
             },
-          } as any,
+          },
 
           include: {
             items: true,

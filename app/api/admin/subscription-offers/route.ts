@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
   try {
     const data = validateOffer(await req.json());
     if (!data) return NextResponse.json({ success: false, message: 'Valid name, description, positive price, and duration are required.' }, { status: 400 });
-    const offer = await db.subscriptionOffer.create({ data: data as any });
+    const offer = await db.subscriptionOffer.create({ data });
     return NextResponse.json({ success: true, data: { ...offer, benefits: parseBenefits(offer.benefitsJson) } }, { status: 201 });
   } catch (error) {
     console.error('Subscription offer creation failed:', error);

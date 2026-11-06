@@ -65,7 +65,7 @@ export async function POST(
         amount: sub.offer.price,
         paymentMethod: 'RAZORPAY',
         status: 'PENDING',
-      } as any,
+      },
     });
 
     try {

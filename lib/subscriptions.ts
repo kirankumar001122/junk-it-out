@@ -147,7 +147,7 @@ export async function purchaseSubscriptionWithWallet(
       amount: price,
       paymentMethod: 'WALLET',
       status: 'SUCCESS',
-    } as any,
+    },
   });
 
   const subscription = await tx.customerSubscription.create({
@@ -158,10 +158,10 @@ export async function purchaseSubscriptionWithWallet(
       startDate,
       expiryDate,
       status: 'ACTIVE',
-      pickupsAllowed: (offer as any)?.pickupLimit || 4,
+      pickupsAllowed: offer.pickupLimit || 4,
       pickupsUsed: 0,
       autoRenew: false,
-    } as any,
+    },
     include: { offer: true },
   });
 
@@ -229,8 +229,8 @@ export async function consumeSubscriptionPickupEntitlement(
     return { eligible: false, reason: 'SUBSCRIPTION_EXPIRED' };
   }
 
-  const limit = (lockedSub as any).pickupsAllowed ?? 4;
-  if (limit > 0 && ((lockedSub as any).pickupsUsed ?? 0) >= limit) {
+  const limit = lockedSub.pickupsAllowed;
+  if (limit > 0 && lockedSub.pickupsUsed >= limit) {
     return {
       eligible: false,
       reason: 'LIMIT_EXCEEDED',
@@ -241,13 +241,13 @@ export async function consumeSubscriptionPickupEntitlement(
 
   const updatedSub = await tx.customerSubscription.update({
     where: { id: lockedSub.id },
-    data: { pickupsUsed: { increment: 1 } } as any,
+    data: { pickupsUsed: { increment: 1 } },
   });
 
   if (input.orderId) {
     await tx.order.update({
       where: { id: input.orderId },
-      data: { subscriptionId: lockedSub.id } as any,
+      data: { subscriptionId: lockedSub.id },
     });
   }
 
@@ -286,7 +286,7 @@ export async function cancelCustomerSubscription(
       autoRenew: false,
       cancelledAt: new Date(),
       cancellationReason: input.reason || 'Customer requested cancellation.',
-    } as any,
+    },
     include: { offer: true },
   });
 }

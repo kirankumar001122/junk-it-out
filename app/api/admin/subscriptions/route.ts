@@ -33,14 +33,14 @@ export async function GET(req: NextRequest) {
         },
         customer: search
           ? {
-              user: {
-                OR: [
-                  { name: { contains: search, mode: 'insensitive' } },
-                  { phone: { contains: search, mode: 'insensitive' } },
-                  { email: { contains: search, mode: 'insensitive' } },
-                ],
-              },
-            }
+            user: {
+              OR: [
+                { name: { contains: search, mode: 'insensitive' } },
+                { phone: { contains: search, mode: 'insensitive' } },
+                { email: { contains: search, mode: 'insensitive' } },
+              ],
+            },
+          }
           : undefined,
       },
       include: {
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
     });
 
     const now = new Date();
-    const data = subscriptions.map((sub: any) => {
+    const data = subscriptions.map((sub) => {
       const isExpired = sub.expiryDate <= now;
       const computedStatus = sub.status === 'CANCELLED' ? 'CANCELLED' : isExpired ? 'EXPIRED' : sub.status;
       const remainingPickups = Math.max(0, (sub.pickupsAllowed || 0) - (sub.pickupsUsed || 0));
