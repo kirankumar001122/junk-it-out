@@ -29,6 +29,8 @@ import {
 
 export default function AgentDashboardPage() {
   const [agent, setAgent] = useState<any>(null);
+  const agentRef = useRef<any>(null);
+  agentRef.current = agent;
   const [orders, setOrders] = useState<any[]>([]);
   const [activeOrder, setActiveOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -96,14 +98,10 @@ export default function AgentDashboardPage() {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
+    let isAuthenticated = false;
 
     try {
-      const [profileRes, ordersRes] = await Promise.all([
-        fetch('/api/auth/me', { cache: 'no-store', signal: controller.signal }),
-        fetch('/api/orders?limit=20', { cache: 'no-store', signal: controller.signal }),
-      ]);
-      clearTimeout(timeout);
-
+      const profileRes = await fetch('/api/auth/me', { cache: 'no-store', signal: controller.signal });
       const profileData = await profileRes.json().catch(() => ({ success: false }));
 
       if (!profileData.success || !profileData.data?.user || profileData.data.user.role !== 'AGENT') {
@@ -111,9 +109,7 @@ export default function AgentDashboardPage() {
         setOrders([]);
         setActiveOrder(null);
         setMultipleActiveWarning(null);
-        if (!profileRes.ok && profileRes.status !== 401) {
-          setDashboardError('Unable to verify your agent session. Please retry.');
-        }
+        setDashboardError(null);
         return;
       }
 
@@ -129,6 +125,7 @@ export default function AgentDashboardPage() {
         return;
       }
 
+      isAuthenticated = true;
       setAgent({
         ...agentProfile,
         name: agentUser.name,
@@ -137,6 +134,7 @@ export default function AgentDashboardPage() {
       });
       setIsOnline(agentProfile.status !== 'OFFLINE');
 
+      const ordersRes = await fetch('/api/orders?limit=20', { cache: 'no-store', signal: controller.signal });
       const data = await ordersRes.json().catch(() => ({ success: false }));
       if (!ordersRes.ok || !data.success || !Array.isArray(data.data)) {
         setDashboardError(data.error?.message || data.message || 'Unable to load pickups. Retry to refresh your assignments.');
@@ -204,12 +202,16 @@ export default function AgentDashboardPage() {
       }
     } catch (error) {
       console.error('Agent dashboard refresh failed:', error);
-      const isTimeout = error instanceof DOMException && error.name === 'AbortError';
-      setDashboardError(
-        isTimeout
-          ? 'Dashboard refresh timed out. Please check your network and retry.'
-          : 'Network error while loading your pickup dashboard. Please retry.'
-      );
+      if (isAuthenticated || agentRef.current) {
+        const isTimeout = error instanceof DOMException && error.name === 'AbortError';
+        setDashboardError(
+          isTimeout
+            ? 'Dashboard refresh timed out. Please check your network and retry.'
+            : 'Network error while loading your pickup dashboard. Please retry.'
+        );
+      } else {
+        setDashboardError(null);
+      }
     } finally {
       clearTimeout(timeout);
       dataRequestRef.current = false;
@@ -703,6 +705,7 @@ export default function AgentDashboardPage() {
       setAgent(null);
       setOrders([]);
       setActiveOrder(null);
+      setDashboardError(null);
       setOtpSent(false);
       setLoginOtp('');
     } catch (e) {
@@ -1096,14 +1099,6 @@ export default function AgentDashboardPage() {
             <div role="alert" className="p-3 bg-rose-950/60 border border-rose-800/80 text-rose-300 rounded-2xl text-xs font-bold flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
               <span>{loginError}</span>
-            </div>
-          )}
-          {dashboardError && (
-            <div role="alert" className="p-3 bg-amber-950/60 border border-amber-800/80 text-amber-200 rounded-2xl text-xs font-bold">
-              {dashboardError}
-              <button type="button" onClick={() => void fetchAgentData()} className="ml-2 underline">
-                Retry
-              </button>
             </div>
           )}
 

@@ -43,6 +43,7 @@ const standaloneTests = [
   'tests/agent-portal-performance.test.ts',
   'tests/agent-portal-availability-scenarios.test.ts',
   'tests/agent-refresh-action.test.ts',
+  'tests/agent-login-screen-background-error.test.ts',
   'tests/customer-pickups-response.test.ts',
   'tests/dispatch-recovery.test.ts',
   'tests/order-cancellation.test.ts',
