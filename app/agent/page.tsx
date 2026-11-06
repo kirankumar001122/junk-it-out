@@ -96,49 +96,73 @@ export default function AgentDashboardPage() {
     if (showLoading) setLoading(true);
     else setIsRefreshing(true);
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-    let isAuthenticated = false;
+    let isAuthenticated = Boolean(agentRef.current);
 
     try {
-      const profileRes = await fetch('/api/auth/me', { cache: 'no-store', signal: controller.signal });
-      const profileData = await profileRes.json().catch(() => ({ success: false }));
+      let agentProfile = agentRef.current;
 
-      if (!profileData.success || !profileData.data?.user || profileData.data.user.role !== 'AGENT') {
-        setAgent(null);
-        setOrders([]);
-        setActiveOrder(null);
-        setMultipleActiveWarning(null);
-        setDashboardError(null);
-        return;
+      // On initial load, verify authentication session via /api/auth/me
+      if (!agentProfile) {
+        const authController = new AbortController();
+        const authTimeout = setTimeout(() => authController.abort(), 12000);
+        let profileData: any = { success: false };
+        try {
+          const profileRes = await fetch('/api/auth/me', { cache: 'no-store', signal: authController.signal });
+          profileData = await profileRes.json().catch(() => ({ success: false }));
+        } finally {
+          clearTimeout(authTimeout);
+        }
+
+        if (!profileData.success || !profileData.data?.user || profileData.data.user.role !== 'AGENT') {
+          setAgent(null);
+          setOrders([]);
+          setActiveOrder(null);
+          setMultipleActiveWarning(null);
+          setDashboardError(null);
+          return;
+        }
+
+        const agentUser = profileData.data.user;
+        agentProfile = agentUser.agent || null;
+
+        if (!agentProfile || !agentProfile.id) {
+          setAgent(null);
+          setOrders([]);
+          setActiveOrder(null);
+          setMultipleActiveWarning(null);
+          setDashboardError('Your account does not have an active agent profile. Contact an administrator.');
+          return;
+        }
+
+        isAuthenticated = true;
+        setAgent({
+          ...agentProfile,
+          name: agentUser.name,
+          phone: agentUser.phone,
+          email: agentUser.email,
+        });
+        setIsOnline(agentProfile.status !== 'OFFLINE');
       }
 
-      const agentUser = profileData.data.user;
-      const agentProfile = agentUser.agent || null;
-
-      if (!agentProfile || !agentProfile.id) {
-        setAgent(null);
-        setOrders([]);
-        setActiveOrder(null);
-        setMultipleActiveWarning(null);
-        setDashboardError('Your account does not have an active agent profile. Contact an administrator.');
-        return;
-      }
-
-      isAuthenticated = true;
-      setAgent({
-        ...agentProfile,
-        name: agentUser.name,
-        phone: agentUser.phone,
-        email: agentUser.email,
-      });
-      setIsOnline(agentProfile.status !== 'OFFLINE');
-
-      const ordersRes = await fetch('/api/orders?limit=20', { cache: 'no-store', signal: controller.signal });
-      const data = await ordersRes.json().catch(() => ({ success: false }));
-      if (!ordersRes.ok || !data.success || !Array.isArray(data.data)) {
-        setDashboardError(data.error?.message || data.message || 'Unable to load pickups. Retry to refresh your assignments.');
-        return;
+      const ordersController = new AbortController();
+      const ordersTimeout = setTimeout(() => ordersController.abort(), 15000);
+      let data: any = { success: false };
+      try {
+        const ordersRes = await fetch('/api/orders?limit=20', { cache: 'no-store', signal: ordersController.signal });
+        if (ordersRes.status === 401) {
+          setAgent(null);
+          setOrders([]);
+          setActiveOrder(null);
+          setDashboardError(null);
+          return;
+        }
+        data = await ordersRes.json().catch(() => ({ success: false }));
+        if (!ordersRes.ok || !data.success || !Array.isArray(data.data)) {
+          setDashboardError(data.error?.message || data.message || 'Unable to load pickups. Retry to refresh your assignments.');
+          return;
+        }
+      } finally {
+        clearTimeout(ordersTimeout);
       }
 
       const agentOrders = data.data.filter((o: any) => o.agentId === agentProfile.id);
@@ -213,7 +237,6 @@ export default function AgentDashboardPage() {
         setDashboardError(null);
       }
     } finally {
-      clearTimeout(timeout);
       dataRequestRef.current = false;
       if (refreshAfterRequestRef.current) {
         refreshAfterRequestRef.current = false;
@@ -329,13 +352,14 @@ export default function AgentDashboardPage() {
     }
   }, [isOnline, activeOrder?.status]);
 
-  // Polling fallback: periodically sync agent data when online to recover from dropped SSE
+  // Polling fallback: periodically sync agent data when online to recover from dropped SSE.
+  // 60-second interval is sufficient since SSE delivers real-time events; polling is a safety net only.
   useEffect(() => {
     if (!agent?.id || !isOnline) return;
     const interval = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) return;
       void fetchAgentData(false);
-    }, 30_000);
+    }, 60_000);
     return () => clearInterval(interval);
   }, [agent?.id, isOnline, fetchAgentData]);
 
@@ -755,9 +779,8 @@ export default function AgentDashboardPage() {
         setAgent((prev: any) => (prev ? { ...prev, status: newStatus } : prev));
         setStatusNotice(`Status updated to ${newStatus}`);
         setTimeout(() => setStatusNotice(null), 3000);
-        if (nowOnline) {
-          void fetchAgentData(false);
-        }
+        // Status response already confirms the update — no need for a full dashboard refetch.
+        // SSE will notify of any new pickups when going AVAILABLE.
       } else {
         // Rollback optimistic update on server error
         setIsOnline(previousOnline);

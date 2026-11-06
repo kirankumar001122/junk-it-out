@@ -26,13 +26,21 @@ export async function POST(
 
     const order = await db.order.findUnique({
       where: { id },
-      include: {
-        agent: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
-        customer: { include: { user: { select: { id: true, name: true, phone: true, email: true, role: true } } } },
-        address: true,
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        agentId: true,
+        customerId: true,
+        financialDirection: true,
+        paymentStatus: true,
+        finalAmount: true,
+        actualTotal: true,
+        pickupCharge: true,
+        discountAmount: true,
         items: { include: { category: true } },
-        weightRecords: { orderBy: { createdAt: 'desc' }, take: 1 },
-        invoices: { take: 1 },
+        weightRecords: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true } },
+        invoices: { take: 1, select: { id: true } },
       },
     });
     logTiming('order lookup complete');
@@ -222,7 +230,7 @@ export async function POST(
         await tx.weightRecord.create({
           data: {
             orderId: id,
-            recordedByUserId: authUser?.userId || order.agent?.userId || order.customer?.userId,
+            recordedByUserId: authUser?.userId || null,
             scalePhotoUrl: typeof scalePhotoUrl === 'string' && scalePhotoUrl.trim()
               ? scalePhotoUrl.trim()
               : null,
