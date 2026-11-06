@@ -96,55 +96,66 @@ export default function AgentDashboardPage() {
     if (showLoading) setLoading(true);
     else setIsRefreshing(true);
 
-    let isAuthenticated = false;
+    let isAuthenticated = Boolean(agentRef.current);
 
     try {
-      // Use separate abort controllers per call so a slow auth doesn't exhaust the budget for orders.
-      const authController = new AbortController();
-      const authTimeout = setTimeout(() => authController.abort(), 12000);
-      let profileData: any = { success: false };
-      try {
-        const profileRes = await fetch('/api/auth/me', { cache: 'no-store', signal: authController.signal });
-        profileData = await profileRes.json().catch(() => ({ success: false }));
-      } finally {
-        clearTimeout(authTimeout);
+      let agentProfile = agentRef.current;
+
+      // On initial load, verify authentication session via /api/auth/me
+      if (!agentProfile) {
+        const authController = new AbortController();
+        const authTimeout = setTimeout(() => authController.abort(), 12000);
+        let profileData: any = { success: false };
+        try {
+          const profileRes = await fetch('/api/auth/me', { cache: 'no-store', signal: authController.signal });
+          profileData = await profileRes.json().catch(() => ({ success: false }));
+        } finally {
+          clearTimeout(authTimeout);
+        }
+
+        if (!profileData.success || !profileData.data?.user || profileData.data.user.role !== 'AGENT') {
+          setAgent(null);
+          setOrders([]);
+          setActiveOrder(null);
+          setMultipleActiveWarning(null);
+          setDashboardError(null);
+          return;
+        }
+
+        const agentUser = profileData.data.user;
+        agentProfile = agentUser.agent || null;
+
+        if (!agentProfile || !agentProfile.id) {
+          setAgent(null);
+          setOrders([]);
+          setActiveOrder(null);
+          setMultipleActiveWarning(null);
+          setDashboardError('Your account does not have an active agent profile. Contact an administrator.');
+          return;
+        }
+
+        isAuthenticated = true;
+        setAgent({
+          ...agentProfile,
+          name: agentUser.name,
+          phone: agentUser.phone,
+          email: agentUser.email,
+        });
+        setIsOnline(agentProfile.status !== 'OFFLINE');
       }
-
-      if (!profileData.success || !profileData.data?.user || profileData.data.user.role !== 'AGENT') {
-        setAgent(null);
-        setOrders([]);
-        setActiveOrder(null);
-        setMultipleActiveWarning(null);
-        setDashboardError(null);
-        return;
-      }
-
-      const agentUser = profileData.data.user;
-      const agentProfile = agentUser.agent || null;
-
-      if (!agentProfile || !agentProfile.id) {
-        setAgent(null);
-        setOrders([]);
-        setActiveOrder(null);
-        setMultipleActiveWarning(null);
-        setDashboardError('Your account does not have an active agent profile. Contact an administrator.');
-        return;
-      }
-
-      isAuthenticated = true;
-      setAgent({
-        ...agentProfile,
-        name: agentUser.name,
-        phone: agentUser.phone,
-        email: agentUser.email,
-      });
-      setIsOnline(agentProfile.status !== 'OFFLINE');
 
       const ordersController = new AbortController();
       const ordersTimeout = setTimeout(() => ordersController.abort(), 15000);
       let data: any = { success: false };
       try {
         const ordersRes = await fetch('/api/orders?limit=20', { cache: 'no-store', signal: ordersController.signal });
+        if (ordersRes.status === 401) {
+          setAgent(null);
+          setOrders([]);
+          setActiveOrder(null);
+          setDashboardError(null);
+          return;
+        }
         data = await ordersRes.json().catch(() => ({ success: false }));
         if (!ordersRes.ok || !data.success || !Array.isArray(data.data)) {
           setDashboardError(data.error?.message || data.message || 'Unable to load pickups. Retry to refresh your assignments.');

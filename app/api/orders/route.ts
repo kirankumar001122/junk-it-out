@@ -704,14 +704,14 @@ async function handleGet(req: NextRequest) {
         );
       }
 
-      // 3. Concurrently fetch unassigned orders (if eligible), historical orders, and total count
+      // 3. Concurrently fetch unassigned orders (if eligible) and historical orders
       const activeIds = activeOrders.map((o) => o.id);
       const shouldFetchUnassigned = Boolean(
         agentProfile && agentProfile.status === 'AVAILABLE'
       );
       const remainingLimit = Math.max(0, limit - activeOrders.length);
 
-      const [rawUnassigned, historicalOrders, countResult] = await Promise.all([
+      const [rawUnassigned, historicalOrders] = await Promise.all([
         shouldFetchUnassigned
           ? db.order.findMany({
               where: {
@@ -724,7 +724,7 @@ async function handleGet(req: NextRequest) {
               },
               select: agentOrderSelect,
               orderBy: { createdAt: 'desc' },
-              take: 20,
+              take: 5,
             })
           : Promise.resolve([]),
         remainingLimit > 0
@@ -732,13 +732,13 @@ async function handleGet(req: NextRequest) {
               where: {
                 ...whereClause,
                 ...(activeIds.length > 0 ? { id: { notIn: activeIds } } : {}),
+                status: { notIn: AGENT_ACTIVE_STATUSES },
               },
               select: agentOrderSelect,
               orderBy: { createdAt: 'desc' },
               take: remainingLimit,
             })
           : Promise.resolve([]),
-        db.order.count({ where: whereClause }).catch(() => 0),
       ]);
 
       const unassignedOrders = agentProfile
@@ -753,7 +753,7 @@ async function handleGet(req: NextRequest) {
       const limitedNonActive = nonActiveOrders.slice(0, maxNonActiveToTake);
 
       orders = [...activeOrders, ...limitedNonActive];
-      total = countResult || orders.length;
+      total = orders.length;
     } else {
       const customerSelect = {
         id: true,
