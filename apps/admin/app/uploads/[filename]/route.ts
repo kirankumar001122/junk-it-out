@@ -16,4 +16,3 @@ export async function GET(
   );
   return NextResponse.redirect(targetUrl, { status: 307 });
 }
-
