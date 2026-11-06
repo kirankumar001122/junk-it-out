@@ -18,6 +18,7 @@ import {
   Sparkles,
   ShieldCheck,
   CreditCard,
+  WalletCards,
   Plus,
   Minus,
   Ticket,
@@ -131,6 +132,8 @@ export default function BookingPage() {
   const [successOrder, setSuccessOrder] = useState<any>(null);
   const [pendingOrder, setPendingOrder] = useState<any | null>(null);
   const [bookingStatusText, setBookingStatusText] = useState('Opening secure payment...');
+  const [paymentMethod, setPaymentMethod] = useState<'RAZORPAY' | 'WALLET'>('RAZORPAY');
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
 
   // Idempotency Protection Ref
   const idempotencyKeyRef = useRef<string>('');
@@ -214,6 +217,13 @@ export default function BookingPage() {
         setIsCustomer(true);
         setPhone(data.data.user.phone || '');
         setName(getDisplayName(data.data.user));
+        try {
+          const walletResponse = await fetch('/api/customer/wallet', { cache: 'no-store' });
+          const walletData = await walletResponse.json();
+          setWalletBalance(walletData.success ? Number(walletData.data?.balance || 0) : null);
+        } catch {
+          setWalletBalance(null);
+        }
       } else {
         setIsCustomer(false);
         setPhone('');
@@ -910,6 +920,33 @@ export default function BookingPage() {
           paymentStatus: "NOT_APPLICABLE",
           status: "BOOKING_RECEIVED",
         });
+        return;
+      }
+
+      if (paymentMethod === "WALLET") {
+        setBookingStatusText("Applying wallet balance...");
+        const walletResponse = await fetch("/api/payments/wallet", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Checkout-Flow-ID": checkoutFlowId },
+          body: JSON.stringify({ orderId: orderData.id }),
+        });
+        const walletParsed = await safeParseJsonResponse(walletResponse);
+        if (!walletResponse.ok || !walletParsed.data?.success) {
+          setLoading(false);
+          isSubmittingRef.current = false;
+          setPendingOrder(orderData);
+          savePendingOrderToStorage(orderData, area, checkoutFlowId);
+          setErrorMsg(getFriendlyApiErrorMessage(walletParsed, "Wallet payment failed. Your booking is saved and can be paid later."));
+          return;
+        }
+        idempotencyKeyRef.current = "";
+        lastPayloadSignatureRef.current = "";
+        setPendingOrder(null);
+        if (typeof window !== "undefined") sessionStorage.removeItem("jio_pending_order");
+        setWalletBalance((current) => Math.max(0, (current ?? Number(orderData.finalAmount)) - Number(orderData.finalAmount)));
+        setLoading(false);
+        isSubmittingRef.current = false;
+        setSuccessOrder({ ...orderData, paymentStatus: "CAPTURED", status: "BOOKING_RECEIVED" });
         return;
       }
 
@@ -1768,10 +1805,23 @@ export default function BookingPage() {
 
           <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
             <span className="text-slate-600 font-medium">Payment Method:</span>
-            <span className="font-bold text-slate-900 flex items-center gap-1.5">
-              <CreditCard className="w-4 h-4 text-emerald-600" />
-              Razorpay Checkout (UPI / Cards / NetBanking)
-            </span>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPaymentMethod('RAZORPAY')}
+                className={`rounded-lg px-3 py-2 font-bold ${paymentMethod === 'RAZORPAY' ? 'bg-emerald-600 text-white' : 'bg-white text-slate-600 border border-slate-200'}`}
+              >
+                <CreditCard className="mr-1 inline h-4 w-4" /> Razorpay
+              </button>
+              <button
+                type="button"
+                disabled={walletBalance === null || walletBalance < estimate.netAmount}
+                onClick={() => setPaymentMethod('WALLET')}
+                className={`rounded-lg px-3 py-2 font-bold disabled:cursor-not-allowed disabled:opacity-50 ${paymentMethod === 'WALLET' ? 'bg-emerald-600 text-white' : 'bg-white text-slate-600 border border-slate-200'}`}
+              >
+                <WalletCards className="mr-1 inline h-4 w-4" /> Wallet ₹{(walletBalance ?? 0).toFixed(2)}
+              </button>
+            </div>
           </div>
 
           {/* PENDING / FAILED PAYMENT RETRY BANNER */}
@@ -1855,7 +1905,7 @@ export default function BookingPage() {
                     </>
                   ) : (
                     <>
-                      Pay ₹{estimate.netAmount.toFixed(2)} & Confirm Pickup
+                      {paymentMethod === 'WALLET' ? `Use Wallet ₹${estimate.netAmount.toFixed(2)} & Confirm Pickup` : `Pay ₹${estimate.netAmount.toFixed(2)} & Confirm Pickup`}
                       <ArrowRight className="w-4 h-4 text-emerald-200" />
                     </>
                   )}

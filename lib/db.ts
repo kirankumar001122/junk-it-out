@@ -1,6 +1,16 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { logStructured, withDatabaseErrorLogging } from './observability/structuredLogger';
 
+export function isDatabaseConfigurationError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return (
+    message.includes('P1012') ||
+    message.includes('Error validating datasource') ||
+    message.includes('must start with the protocol') ||
+    message.includes('Environment variable not found')
+  );
+}
+
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
   observabilityAttached?: boolean;

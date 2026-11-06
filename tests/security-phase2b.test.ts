@@ -296,6 +296,17 @@ describe('SEC-05: Session Revocation for All Roles', () => {
 });
 
 describe('SEC-06: Remove GET Endpoint Side Effects in GET /api/auth/me', () => {
+  test('GET /api/auth/me returns an anonymous response when no session cookie exists', async () => {
+    const res = await getMe(makeReq('/api/auth/me', 'GET'));
+    const json = await res.json();
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(json.data, {
+      authenticated: false,
+      user: null,
+    });
+  });
+
   test('GET /api/auth/me does not create an Agent record when missing; returns agentProfileComplete: false', async () => {
     const userDelegate = db.user as any;
     const agentDelegate = db.agent as any;

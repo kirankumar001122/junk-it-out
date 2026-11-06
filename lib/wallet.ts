@@ -5,7 +5,12 @@ export const walletTransactionTypes = {
   topup: 'TOPUP',
   manualCredit: 'MANUAL_CREDIT',
   manualDebit: 'MANUAL_DEBIT',
+  walletDebit: 'WALLET_DEBIT',
 } as const;
+
+export function roundCurrency(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
 
 export function parseBenefits(value: string): string[] {
   try {
@@ -35,6 +40,10 @@ export async function applyWalletAdjustment(
     referenceId?: string;
   },
 ) {
+  const amount = roundCurrency(input.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Wallet adjustment amount must be greater than zero.');
+  }
   const wallet = await tx.customerWallet.upsert({
     where: { customerId: input.customerId },
     update: {},
@@ -47,8 +56,8 @@ export async function applyWalletAdjustment(
 
   const nextBalance =
     input.type === walletTransactionTypes.manualDebit
-      ? lockedWallet.balance - input.amount
-      : lockedWallet.balance + input.amount;
+      ? roundCurrency(lockedWallet.balance - amount)
+      : roundCurrency(lockedWallet.balance + amount);
   if (nextBalance < 0) throw new Error('Wallet balance cannot become negative.');
 
   const updatedWallet = await tx.customerWallet.update({
@@ -60,7 +69,7 @@ export async function applyWalletAdjustment(
       walletId: updatedWallet.id,
       customerId: input.customerId,
       type: input.type,
-      amount: input.amount,
+      amount,
       balanceAfter: nextBalance,
       status: 'SUCCESS',
       referenceId: input.referenceId,

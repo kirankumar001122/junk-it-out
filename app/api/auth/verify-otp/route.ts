@@ -14,7 +14,7 @@ import {
   getClientIp,
   hasTrustedOrigin,
 } from '@/lib/auth/requestSecurity';
-import { db } from '@/lib/db';
+import { db, isDatabaseConfigurationError } from '@/lib/db';
 
 export async function POST(req: NextRequest) {
   try {
@@ -223,7 +223,7 @@ export async function POST(req: NextRequest) {
       name: 'jio_token',
       value: token,
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: req.nextUrl.protocol === 'https:',
       sameSite: 'lax',
       path: '/',
       maxAge: 7 * 24 * 60 * 60,
@@ -241,6 +241,7 @@ export async function POST(req: NextRequest) {
 
     const errorMessage = String(err?.message || '');
     const databaseUnavailable =
+      isDatabaseConfigurationError(err) ||
       errorMessage.includes('Can\'t reach database server') ||
       errorMessage.includes('Authentication failed against database server') ||
       errorMessage.includes('P1001') ||

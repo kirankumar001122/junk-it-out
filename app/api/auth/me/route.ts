@@ -1,12 +1,24 @@
 import { NextRequest } from 'next/server';
 import { getAuthUser } from '@/lib/auth/middleware';
-import { db } from '@/lib/db';
+import { db, isDatabaseConfigurationError } from '@/lib/db';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 
 export async function GET(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
     if (!authUser) {
+      const hasSessionCookie =
+        req.cookies.has('jio_token') ||
+        req.cookies.has('jio_admin_token') ||
+        req.cookies.has('jio_agent_token');
+
+      if (!hasSessionCookie) {
+        return successResponse({
+          authenticated: false,
+          user: null,
+        });
+      }
+
       return errorResponse('UNAUTHORIZED', 'Authentication required.', 401);
     }
 
@@ -54,6 +66,7 @@ export async function GET(req: NextRequest) {
     console.error('Auth me error:', err);
     const message = String(err?.message || '');
     const databaseUnavailable =
+      isDatabaseConfigurationError(err) ||
       message.includes('Authentication failed against database server') ||
       message.includes('Can\'t reach database server') ||
       message.includes('P1001') ||

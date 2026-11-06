@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { verifyToken, JwtPayload } from './jwt';
 import { db } from '../db';
+import { measureTiming } from '../observability/requestTiming';
 
 export async function validatePayload(
   payload: JwtPayload | null,
@@ -17,22 +18,21 @@ export async function validatePayload(
     if (payload.userId) {
       const user = actualUserFinder
         ? await actualUserFinder(payload.userId)
-        : await db.user.findUnique({
-            where: { id: payload.userId },
-            select: {
-              id: true,
-              tokenVersion: true,
-              name: true,
-              phone: true,
-              email: true,
-              role: true,
-              customer: true,
-              addresses: {
-                where: { isDefault: true },
-                take: 1,
-              },
-            } as any,
-          });
+        : await measureTiming(
+            'auth.user.findUnique',
+            () => db.user.findUnique({
+              where: { id: payload.userId },
+              select: {
+                id: true,
+                tokenVersion: true,
+                name: true,
+                phone: true,
+                email: true,
+                role: true,
+                customer: { select: { id: true } },
+              } as any,
+            }),
+          );
 
       if (!user) return null;
       const currentDbVersion = user.tokenVersion ?? 1;
@@ -41,16 +41,22 @@ export async function validatePayload(
         return null;
       }
       (payload as any).user = user;
+      if (user.customer?.id) {
+        payload.customerId = user.customer.id;
+      }
     }
 
     // 2. Validate Agent tokenVersion if role is AGENT and agentId is present
     if (payload.role === 'AGENT' && payload.agentId) {
       const agent = actualAgentFinder
         ? await actualAgentFinder(payload.agentId)
-        : await db.agent.findUnique({
-            where: { id: payload.agentId },
-            select: { tokenVersion: true } as any,
-          });
+        : await measureTiming(
+            'auth.agent.findUnique',
+            () => db.agent.findUnique({
+              where: { id: payload.agentId },
+              select: { tokenVersion: true } as any,
+            }),
+          );
 
       if (!agent) return null;
       const currentDbVersion = (agent as any).tokenVersion ?? 1;
