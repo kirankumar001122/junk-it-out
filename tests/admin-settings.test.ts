@@ -8,10 +8,12 @@ import {
   PUT as putSettings,
   POST as postSettings,
   DELETE as deleteSettings,
+} from '../app/api/admin/settings/route';
+import {
   getAuthoritativeSettings,
   validateSettingsConfig,
   DEFAULT_SETTINGS,
-} from '../app/api/admin/settings/route';
+} from '../lib/admin/settingsConfig';
 
 process.env.JWT_SECRET = 'admin-settings-test-secret-at-least-32-bytes!';
 

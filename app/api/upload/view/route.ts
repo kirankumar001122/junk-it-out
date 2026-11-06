@@ -228,7 +228,13 @@ export async function GET(req: NextRequest) {
     }
 
     // 4. Handle local filesystem uploads fallback (e.g. /uploads/waste-photo-... or /uploads/material-photo-...)
-    if (targetUrl.startsWith('/uploads/') || targetUrl.startsWith('uploads/') || filename === targetUrl) {
+    if (
+      targetUrl.startsWith('/uploads/') ||
+      targetUrl.startsWith('uploads/') ||
+      filename === targetUrl ||
+      targetUrl.includes('storage.junkitout.in') ||
+      targetUrl.includes('/disputes/')
+    ) {
       let uploadDir = path.resolve(process.cwd(), 'storage', 'uploads');
       let filePath = path.resolve(uploadDir, filename);
 
@@ -238,6 +244,14 @@ export async function GET(req: NextRequest) {
         if (legacyPath.startsWith(legacyDir) && existsSync(legacyPath)) {
           uploadDir = legacyDir;
           filePath = legacyPath;
+        } else {
+          // Check public/images fallback
+          const imagesDir = path.resolve(process.cwd(), 'public', 'images');
+          const imagesPath = path.resolve(imagesDir, filename);
+          if (imagesPath.startsWith(imagesDir) && existsSync(imagesPath)) {
+            uploadDir = imagesDir;
+            filePath = imagesPath;
+          }
         }
       }
 
