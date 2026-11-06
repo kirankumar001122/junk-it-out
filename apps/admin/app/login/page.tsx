@@ -56,7 +56,13 @@ export default function AdminLoginPage() {
 
       setSentPhone(trimmedPhone);
       setOtpSent(true);
-      setInfo('OTP sent to your registered admin phone.');
+      const isTest = Boolean(data.data?.testMode);
+      setInfo(
+        data.data?.message ||
+        (isTest
+          ? 'Development test mode active. Enter OTP 123456 to continue.'
+          : 'OTP sent to your registered admin phone.')
+      );
       setCooldown(Number(data.data?.cooldownSeconds) || 30);
     } catch {
       setError('Network error while sending OTP.');

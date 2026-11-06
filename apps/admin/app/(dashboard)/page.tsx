@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import {
   Package,
@@ -50,8 +50,11 @@ export default function AdminDashboardPage() {
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
+  const isFetchingRef = useRef(false);
 
   const loadAdminData = async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     try {
       setAgentsLoading(true);
       setAgentsError(null);
@@ -115,6 +118,7 @@ export default function AdminDashboardPage() {
       console.error(e);
       setAgentsError('Error loading operations data.');
     } finally {
+      isFetchingRef.current = false;
       setLoading(false);
       setAgentsLoading(false);
     }
@@ -140,7 +144,11 @@ export default function AdminDashboardPage() {
 
   const openAssignModal = (order: any) => {
     setSelectedOrderForAssign(order);
-    setAssignError(null);
+    if (['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED', 'CANCELLED'].includes(order.status)) {
+      setAssignError(`Cannot assign agent to an order that is already ${order.status.replace(/_/g, ' ')}.`);
+    } else {
+      setAssignError(null);
+    }
     if (order.agentId && agents.some((a) => a.id === order.agentId)) {
       setSelectedAgentId(order.agentId);
     } else if (agents.length > 0) {
@@ -152,6 +160,10 @@ export default function AdminDashboardPage() {
 
   const handleAssignAgent = async () => {
     if (!selectedOrderForAssign) return;
+    if (['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED', 'CANCELLED'].includes(selectedOrderForAssign.status)) {
+      setAssignError(`Cannot assign agent to an order that is already ${selectedOrderForAssign.status.replace(/_/g, ' ')}.`);
+      return;
+    }
     if (!selectedAgentId) {
       setAssignError('Please select a valid registered field agent from the dropdown.');
       return;
@@ -220,7 +232,7 @@ export default function AdminDashboardPage() {
 
         <div className="flex w-full items-center gap-3 sm:w-auto">
           <a
-            href={getApiUrl('/api/admin/reports')}
+            href="/api/admin/reports"
             target="_blank"
             rel="noopener noreferrer"
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-800 px-4 py-3 text-center text-xs font-bold text-white hover:bg-slate-700 sm:w-auto sm:py-2.5"
@@ -416,12 +428,14 @@ export default function AdminDashboardPage() {
                       >
                         View
                       </Link>
-                      <button
-                        onClick={() => openAssignModal(o)}
-                        className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg text-[11px] font-bold"
-                      >
-                        Assign
-                      </button>
+                      {!['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED', 'CANCELLED'].includes(o.status) && (
+                        <button
+                          onClick={() => openAssignModal(o)}
+                          className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg text-[11px] font-bold"
+                        >
+                          Assign
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -509,7 +523,7 @@ export default function AdminDashboardPage() {
               <button
                 type="button"
                 onClick={handleAssignAgent}
-                disabled={assignLoading || agents.length === 0 || !selectedAgentId}
+                disabled={assignLoading || agents.length === 0 || !selectedAgentId || ['PICKUP_COMPLETED', 'SETTLEMENT_COMPLETED', 'CANCELLED'].includes(selectedOrderForAssign.status)}
                 className="w-1/2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 rounded-xl shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {assignLoading ? 'Assigning...' : 'Confirm Assignment'}

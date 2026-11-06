@@ -3,6 +3,7 @@ import { getActiveAgents } from '@/lib/services/agentService';
 import { getAdminAuthorizationStatus, getAuthUser } from '@/lib/auth/middleware';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { db } from '@/lib/db';
+import { getCachedAdminAgents, setCachedAdminAgents, invalidateAdminAgentsCache, invalidateAdminOperationsCaches } from '@/lib/cache/adminAgentsCache';
 
 export async function GET(req: NextRequest) {
   try {
@@ -15,8 +16,21 @@ export async function GET(req: NextRequest) {
       return errorResponse('FORBIDDEN', 'Admin access required.', 403);
     }
 
+    const bypassCache = req.headers.get('cache-control') === 'no-cache' || process.env.NODE_ENV === 'test';
+    const cached = !bypassCache ? getCachedAdminAgents() : null;
+    if (cached) {
+      const res = successResponse(cached);
+      res.headers.set('Cache-Control', 'private, max-age=15');
+      res.headers.set('X-Cache', 'HIT');
+      return res;
+    }
+
     const agents = await getActiveAgents();
-    return successResponse(agents);
+    setCachedAdminAgents(agents);
+    const res = successResponse(agents);
+    res.headers.set('Cache-Control', 'private, max-age=15');
+    res.headers.set('X-Cache', 'MISS');
+    return res;
   } catch (err: any) {
     console.error('Fetch admin agents error:', err);
     return errorResponse('INTERNAL_SERVER_ERROR', 'Failed to fetch field agents.', 500);
@@ -91,6 +105,7 @@ export async function POST(req: NextRequest) {
       },
     }).catch(() => null);
 
+    invalidateAdminOperationsCaches();
     return successResponse(agent);
   } catch (err: any) {
     console.error('Create admin agent error:', err);
@@ -164,6 +179,7 @@ export async function PUT(req: NextRequest) {
       },
     }).catch(() => null);
 
+    invalidateAdminOperationsCaches();
     return successResponse(updated);
   } catch (err: any) {
     console.error('Update admin agent error:', err);

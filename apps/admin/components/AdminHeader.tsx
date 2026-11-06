@@ -2,19 +2,43 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
 import { Bell, LogOut, User } from 'lucide-react';
 import { adminFetch } from '@/lib/api';
 
+let cachedAdminProfile: { name: string; department: string } | null = null;
+
 export default function AdminHeader() {
   const router = useRouter();
+  const [adminName, setAdminName] = useState(cachedAdminProfile?.name || 'Admin User');
+  const [department, setDepartment] = useState(cachedAdminProfile?.department || 'Operations Lead');
+
+  useEffect(() => {
+    if (cachedAdminProfile) return;
+    let isMounted = true;
+    adminFetch('/api/auth/me')
+      .then((r) => r.json())
+      .then((d) => {
+        if (isMounted && d.success && d.data?.user) {
+          const name = d.data.user.name || 'Admin User';
+          const dept = d.data.user.admin?.department || d.data.user.role || 'Operations Lead';
+          cachedAdminProfile = { name, department: dept };
+          setAdminName(name);
+          setDepartment(dept);
+        }
+      })
+      .catch(() => {});
+    return () => { isMounted = false; };
+  }, []);
 
   const handleLogout = async () => {
+    cachedAdminProfile = null;
     try {
       await adminFetch('/api/auth/logout', { method: 'POST' });
-      router.push('/login');
+      window.location.href = '/login';
     } catch (e) {
       console.error('Logout error:', e);
-      router.push('/login');
+      window.location.href = '/login';
     }
   };
 
@@ -53,8 +77,8 @@ export default function AdminHeader() {
             <User className="w-4 h-4" />
           </div>
           <div className="text-left">
-            <span className="block text-xs font-extrabold text-white leading-none">DARSHAN TEJOMAYA M</span>
-            <span className="text-[10px] text-emerald-400 font-semibold">Operations Lead</span>
+            <span className="block text-xs font-extrabold text-white leading-none">{adminName}</span>
+            <span className="text-[10px] text-emerald-400 font-semibold">{department}</span>
           </div>
         </div>
 

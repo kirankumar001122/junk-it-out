@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || 'https://www.junkitout.in';
+function getTargetBackendUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+  if (configured) {
+    return configured.endsWith('/') ? configured.slice(0, -1) : configured;
+  }
+  if (process.env.NODE_ENV === 'development') {
+    throw new Error('NEXT_PUBLIC_API_BASE_URL is not configured in local development. Refusing production fallback to prevent live routing.');
+  }
+  return 'https://www.junkitout.in';
+}
 
 type Props = {
   params: Promise<{ path: string[] }>;
@@ -13,7 +22,15 @@ async function handleProxy(req: NextRequest, props: Props) {
   const subPath = pathSegments.join('/');
   const search = req.nextUrl.search || '';
 
-  const baseUrl = BACKEND_URL.endsWith('/') ? BACKEND_URL.slice(0, -1) : BACKEND_URL;
+  let baseUrl: string;
+  try {
+    baseUrl = getTargetBackendUrl();
+  } catch (err: any) {
+    return NextResponse.json(
+      { success: false, error: { message: err.message || 'Local backend URL missing' } },
+      { status: 500 }
+    );
+  }
   const targetUrl = `${baseUrl}/api/${subPath}${search}`;
 
   const cookieStore = await cookies();

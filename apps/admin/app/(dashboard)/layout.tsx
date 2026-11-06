@@ -10,7 +10,12 @@ export const metadata = {
 
 async function getAuthenticatedAdminUser(token: string) {
   try {
-    const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || 'https://www.junkitout.in';
+    const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+    if (!configured && process.env.NODE_ENV === 'development') {
+      console.error('Admin layout authentication error: NEXT_PUBLIC_API_BASE_URL is not configured in local development.');
+      return null;
+    }
+    const apiBase = configured || 'https://www.junkitout.in';
     const meUrl = apiBase.endsWith('/') ? `${apiBase}api/auth/me` : `${apiBase}/api/auth/me`;
 
     const res = await fetch(meUrl, {

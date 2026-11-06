@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth/middleware';
 import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
+import { invalidateAdminOperationsCaches } from '@/lib/cache/adminAgentsCache';
 import { runBackgroundTask } from '@/lib/utils/backgroundTask';
 import { calculateOrderValuation, calculateValuationAdjustment, type CalculationItemInput } from '@/lib/pricing';
 import { refundAttemptId } from '@/lib/payments/refundWorkflow';
@@ -430,6 +431,7 @@ export async function POST(
       }
     });
 
+    invalidateAdminOperationsCaches();
     return successResponse(completedOrder);
   } catch (err: any) {
     console.error('Complete order error:', err);
