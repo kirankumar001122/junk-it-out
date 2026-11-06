@@ -65,6 +65,7 @@ export default defineConfig({
       'tests/ai-support-agent.test.ts',
       'tests/admin-dashboard-assignment.test.ts',
       'tests/admin-settings.test.ts',
+      'tests/admin-order-details.test.ts',
     ],
   },
 });

@@ -8,12 +8,28 @@ import { adminFetch } from '@/lib/api';
 
 let cachedAdminProfile: { name: string; department: string } | null = null;
 
-export default function AdminHeader() {
+interface AdminHeaderProps {
+  initialUser?: {
+    name?: string;
+    department?: string;
+  };
+}
+
+export default function AdminHeader({ initialUser }: AdminHeaderProps = {}) {
   const router = useRouter();
-  const [adminName, setAdminName] = useState(cachedAdminProfile?.name || 'Admin User');
-  const [department, setDepartment] = useState(cachedAdminProfile?.department || 'Operations Lead');
+  const [adminName, setAdminName] = useState(initialUser?.name || cachedAdminProfile?.name || 'Admin User');
+  const [department, setDepartment] = useState(initialUser?.department || cachedAdminProfile?.department || 'Operations Lead');
 
   useEffect(() => {
+    if (initialUser?.name) {
+      cachedAdminProfile = {
+        name: initialUser.name,
+        department: initialUser.department || 'Operations Lead',
+      };
+      setAdminName(initialUser.name);
+      setDepartment(initialUser.department || 'Operations Lead');
+      return;
+    }
     if (cachedAdminProfile) return;
     let isMounted = true;
     adminFetch('/api/auth/me')
@@ -29,7 +45,7 @@ export default function AdminHeader() {
       })
       .catch(() => {});
     return () => { isMounted = false; };
-  }, []);
+  }, [initialUser]);
 
   const handleLogout = async () => {
     cachedAdminProfile = null;

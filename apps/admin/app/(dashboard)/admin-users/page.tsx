@@ -23,6 +23,7 @@ import {
   Phone,
   Lock,
 } from 'lucide-react';
+import { adminFetch } from '@/lib/api';
 
 interface AdminUserItem {
   id: string;
@@ -83,7 +84,7 @@ export default function AdminUsersPage() {
       else setLoading(true);
       setError(null);
 
-      const res = await fetch('/api/admin/admin-users?page=1&pageSize=100');
+      const res = await adminFetch('/api/admin/admin-users?page=1&pageSize=25');
       const json = await res.json();
 
       if (json.success && Array.isArray(json.data)) {

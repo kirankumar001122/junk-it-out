@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import AdminSidebar from '@/components/AdminSidebar';
 import AdminHeader from '@/components/AdminHeader';
+import { getCachedAdminSession, setCachedAdminSession } from '@/lib/authSessionCache';
 
 export const metadata = {
   title: 'Admin Operations Control Center | Junk It Out',
@@ -9,6 +10,12 @@ export const metadata = {
 };
 
 async function getAuthenticatedAdminUser(token: string) {
+  // Check short-lived validated session cache to eliminate redundant HTTP hops during navigation
+  const cachedUser = getCachedAdminSession(token);
+  if (cachedUser) {
+    return cachedUser;
+  }
+
   try {
     const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
     if (!configured && process.env.NODE_ENV === 'development') {
@@ -36,6 +43,9 @@ async function getAuthenticatedAdminUser(token: string) {
     const user = data.data.user;
     if (!['ADMIN', 'SUPER_ADMIN'].includes(user.role)) return null;
 
+    // Cache verified session bounded by token expiration (max 30s)
+    setCachedAdminSession(token, user);
+
     return user;
   } catch (err) {
     console.error('Admin layout authentication error:', err);
@@ -60,7 +70,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <div className="flex min-h-screen bg-slate-100 font-sans text-slate-900">
       <AdminSidebar />
       <main className="flex-1 p-6 overflow-x-hidden min-w-0">
-        <AdminHeader />
+        <AdminHeader initialUser={{ name: authUser.name, department: authUser.admin?.department || authUser.role }} />
         {children}
       </main>
     </div>

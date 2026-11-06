@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import {
   Package,
   Map,
@@ -14,14 +15,27 @@ import {
   Search,
   FileBarChart,
 } from 'lucide-react';
-import InteractiveMap from '@/components/InteractiveMap';
 import { SOUTH_BENGALURU_ZONES } from '@/lib/geofence';
 import { adminFetch, getApiUrl } from '@/lib/api';
+import { cachedAdminFetch, invalidateClientCache } from '@/lib/clientCache';
+
+const InteractiveMap = dynamic(() => import('@/components/InteractiveMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="h-80 w-full rounded-2xl border border-slate-200 bg-slate-100 flex items-center justify-center text-xs text-slate-400 font-bold">
+      Loading operations map...
+    </div>
+  ),
+});
 
 type AdminDataResult = { status: number | null; body: any };
 
-async function fetchAdminData(path: string): Promise<AdminDataResult> {
+async function fetchAdminData(path: string, forceRefresh = false): Promise<AdminDataResult> {
   try {
+    if (path === '/api/admin/agents') {
+      const body = await cachedAdminFetch('/api/admin/agents', { forceRefresh });
+      return { status: 200, body };
+    }
     const response = await adminFetch(path);
     let body: any = null;
     try {
@@ -52,7 +66,7 @@ export default function AdminDashboardPage() {
   const [assignError, setAssignError] = useState<string | null>(null);
   const isFetchingRef = useRef(false);
 
-  const loadAdminData = async () => {
+  const loadAdminData = async (forceRefresh = false) => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     try {
@@ -62,7 +76,7 @@ export default function AdminDashboardPage() {
       const [statsResult, ordersResult, agentsResult] = await Promise.all([
         fetchAdminData('/api/admin/stats'),
         fetchAdminData('/api/orders?limit=25'),
-        fetchAdminData('/api/admin/agents'),
+        fetchAdminData('/api/admin/agents', forceRefresh),
       ]);
 
       const results = [
@@ -187,7 +201,8 @@ export default function AdminDashboardPage() {
       if (res.ok && data.success) {
         setSelectedOrderForAssign(null);
         setSelectedAgentId('');
-        await loadAdminData();
+        invalidateClientCache('/api/admin/agents');
+        await loadAdminData(true);
       } else {
         setAssignError(data.error?.message || data.message || 'Failed to assign agent to this order.');
       }

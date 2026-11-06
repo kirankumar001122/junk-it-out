@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { getMaterialImageUrl, broadcastWasteCategoriesChanged } from '@/lib/customerWasteCategories';
+import { cachedAdminFetch, invalidateClientCache } from '@/lib/clientCache';
 
 type CategoryFormState = {
   id?: string;
@@ -76,11 +77,10 @@ export default function AdminWasteCategoriesPage() {
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const loadData = async () => {
+  const loadData = async (forceRefresh = false) => {
     setLoading(true);
     try {
-      const res = await fetch('/api/waste-categories?admin=true', { cache: 'no-store' });
-      const data = await res.json();
+      const data = await cachedAdminFetch('/api/waste-categories?admin=true', { forceRefresh });
       if (data.success && Array.isArray(data.data)) {
         setItems(data.data);
       } else {

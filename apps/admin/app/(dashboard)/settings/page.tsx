@@ -23,6 +23,8 @@ import {
   Smartphone,
   Lock,
 } from 'lucide-react';
+import { adminFetch } from '@/lib/api';
+import { cachedAdminFetch, invalidateClientCache } from '@/lib/clientCache';
 
 interface SystemSettingsConfig {
   companyName: string;
@@ -81,17 +83,12 @@ export default function AdminSettingsPage() {
       else setLoading(true);
       setErrorMessage(null);
 
-      const res = await fetch('/api/admin/settings');
-      if (!res.ok) {
-        throw new Error(`Failed to load system settings: ${res.statusText}`);
-      }
-
-      const json = await res.json();
-      if (json.success && json.data) {
+      const json = await cachedAdminFetch('/api/admin/settings', { forceRefresh: isManualRefresh });
+      if (json && json.success && json.data) {
         setSettings(json.data);
         setSavedSettings(json.data);
       } else {
-        throw new Error(json.message || 'Unable to retrieve settings');
+        throw new Error(json?.message || 'Unable to retrieve settings');
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'Failed to load settings');
@@ -125,7 +122,7 @@ export default function AdminSettingsPage() {
         throw new Error('Service radius must be between 1 and 150 km.');
       }
 
-      const res = await fetch('/api/admin/settings', {
+      const res = await adminFetch('/api/admin/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
@@ -136,6 +133,7 @@ export default function AdminSettingsPage() {
         throw new Error(json.message || 'Failed to update system settings');
       }
 
+      invalidateClientCache('/api/admin/settings');
       setSavedSettings(json.data);
       setSettings(json.data);
       setSuccessMessage('System configuration saved and committed to immutable audit ledger.');

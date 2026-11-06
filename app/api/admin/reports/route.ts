@@ -45,6 +45,8 @@ export async function GET(req: NextRequest) {
     const statusParam = searchParams.get('status');
     const startDateParam = searchParams.get('startDate') || searchParams.get('from');
     const endDateParam = searchParams.get('endDate') || searchParams.get('to');
+    const formatParam = searchParams.get('format');
+    const isJsonRequest = formatParam === 'json' || req.headers.get('accept')?.includes('application/json');
 
     let maxRows: number | null = null;
     if (limitParam !== null) {
@@ -91,6 +93,65 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // JSON report response branch for Reports page consumption
+    if (isJsonRequest) {
+      const orders = await db.order.findMany({
+        where,
+        select: {
+          id: true,
+          orderNumber: true,
+          createdAt: true,
+          status: true,
+          estimatedTotal: true,
+          finalAmount: true,
+          customer: { select: { user: { select: { name: true, phone: true } } } },
+          agent: { select: { user: { select: { name: true } } } },
+          address: { select: { area: true } },
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: maxRows !== null ? Math.min(maxRows, 500) : 100,
+      });
+
+      let totalEst = 0;
+      let totalFinal = 0;
+      let completedCount = 0;
+      let activePipeline = 0;
+      const statusCounts: Record<string, number> = {
+        BOOKING_RECEIVED: 0,
+        AGENT_ASSIGNED: 0,
+        PICKUP_COMPLETED: 0,
+        CANCELLED: 0,
+      };
+
+      for (const o of orders) {
+        totalEst += Number(o.estimatedTotal) || 0;
+        totalFinal += Number(o.finalAmount) || 0;
+        const st = o.status || 'BOOKING_RECEIVED';
+        statusCounts[st] = (statusCounts[st] || 0) + 1;
+
+        if (st === 'PICKUP_COMPLETED') {
+          completedCount++;
+        } else if (['BOOKING_RECEIVED', 'AGENT_ASSIGNED', 'COLLECTING', 'ARRIVED'].includes(st)) {
+          activePipeline++;
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          orders,
+          metrics: {
+            totalOrders: orders.length,
+            totalVolume: Math.round(totalFinal > 0 ? totalFinal : totalEst),
+            completedCount,
+            activePipeline,
+            statusCounts,
+          },
+        },
+      });
+    }
+
+    // Default CSV streaming export branch
     const csvLines: string[] = [headers.map(csvCell).join(',')];
     let cursorId: string | undefined;
     let totalExported = 0;

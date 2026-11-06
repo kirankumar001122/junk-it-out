@@ -22,6 +22,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { adminFetch } from '@/lib/api';
+import { cachedAdminFetch, invalidateClientCache } from '@/lib/clientCache';
 
 export default function AdminAgentsPage() {
   const [agents, setAgents] = useState<any[]>([]);
@@ -54,14 +55,13 @@ export default function AdminAgentsPage() {
   const [addError, setAddError] = useState<string | null>(null);
   const isFetchingRef = useRef(false);
 
-  const loadAgents = async () => {
+  const loadAgents = async (forceRefresh = false) => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     setLoading(true);
     setError(null);
     try {
-      const res = await adminFetch('/api/admin/agents');
-      const data = await res.json();
+      const data = await cachedAdminFetch('/api/admin/agents', { forceRefresh });
       if (data.success) {
         setAgents(data.data || []);
       } else {
@@ -89,7 +89,8 @@ export default function AdminAgentsPage() {
       });
       const data = await res.json();
       if (data.success) {
-        loadAgents();
+        invalidateClientCache('/api/admin/agents');
+        loadAgents(true);
       }
     } catch (e) {
       console.error(e);
@@ -111,7 +112,8 @@ export default function AdminAgentsPage() {
         setRemoveMessage({ type: 'success', text: 'Agent removed from active fleet.' });
         setTimeout(() => {
           setRemoveTarget(null);
-          loadAgents();
+          invalidateClientCache('/api/admin/agents');
+          loadAgents(true);
         }, 1200);
       } else {
         setRemoveMessage({ type: 'error', text: data.message || 'Failed to remove agent.' });
@@ -140,7 +142,8 @@ export default function AdminAgentsPage() {
         setName('');
         setPhone('');
         setVehicleNumber('');
-        loadAgents();
+        invalidateClientCache('/api/admin/agents');
+        loadAgents(true);
       } else {
         setAddError(data.message || 'Failed to register field agent.');
       }
@@ -208,7 +211,7 @@ export default function AdminAgentsPage() {
             REGISTER NEW AGENT
           </button>
           <button
-            onClick={loadAgents}
+            onClick={() => loadAgents(true)}
             className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />

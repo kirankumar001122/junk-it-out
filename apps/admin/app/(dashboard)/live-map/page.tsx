@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import InteractiveMap from '@/components/InteractiveMap';
+import dynamic from 'next/dynamic';
 import { SOUTH_BENGALURU_ZONES } from '@/lib/geofence';
 import {
   RefreshCw,
@@ -18,6 +18,16 @@ import {
   Info,
 } from 'lucide-react';
 import { adminFetch } from '@/lib/api';
+import { cachedAdminFetch } from '@/lib/clientCache';
+
+const InteractiveMap = dynamic(() => import('@/components/InteractiveMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="h-[520px] w-full rounded-2xl border border-slate-200 bg-slate-100 flex items-center justify-center text-xs text-slate-400 font-bold">
+      Loading operations map...
+    </div>
+  ),
+});
 
 export default function AdminLiveMapPage() {
   const [orders, setOrders] = useState<any[]>([]);
@@ -28,12 +38,12 @@ export default function AdminLiveMapPage() {
   const [selectedEntity, setSelectedEntity] = useState<any | null>(null);
   const [showLegend, setShowLegend] = useState(true);
 
-  const loadMapData = async () => {
+  const loadMapData = async (forceRefresh = false) => {
     setLoading(true);
     try {
       const [ordersRes, agentsRes] = await Promise.all([
         adminFetch('/api/orders').then((r) => r.json()).catch(() => ({ success: false })),
-        adminFetch('/api/admin/agents').then((r) => r.json()).catch(() => ({ success: false })),
+        cachedAdminFetch('/api/admin/agents', { forceRefresh }).catch(() => ({ success: false })),
       ]);
 
       if (ordersRes.success) setOrders(ordersRes.data || []);
@@ -153,7 +163,7 @@ export default function AdminLiveMapPage() {
             {showLegend ? 'Hide Legend' : 'Show Legend'}
           </button>
           <button
-            onClick={loadMapData}
+            onClick={() => loadMapData(true)}
             className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl border border-slate-200 flex items-center gap-2 cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />

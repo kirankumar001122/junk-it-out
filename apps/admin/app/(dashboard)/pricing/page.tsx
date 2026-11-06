@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { adminFetch } from '@/lib/api';
+import { cachedAdminFetch, invalidateClientCache } from '@/lib/clientCache';
 import {
   Tag,
   ShieldCheck,
@@ -103,7 +104,7 @@ export default function AdminPricingPage() {
   const isFetchingRef = useRef(false);
 
   // Fetch both System Fees and Scrap Rates
-  const fetchData = async () => {
+  const fetchData = async (forceRefresh = false) => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     setLoading(true);
@@ -129,19 +130,16 @@ export default function AdminPricingPage() {
         }
       }
 
-      // 2. Fetch Scrap Material Rates
-      const itemsRes = await adminFetch('/api/waste-categories');
-      if (itemsRes.ok) {
-        const itemsJson = await itemsRes.json().catch(() => ({}));
-        const raw = itemsJson.data || itemsJson;
-        if (Array.isArray(raw)) {
-          setItems(raw);
-          const initialInline: Record<string, number> = {};
-          raw.forEach((it) => {
-            initialInline[it.id] = it.pricePerKg ?? 0;
-          });
-          setInlineRates(initialInline);
-        }
+      // 2. Fetch Scrap Material Rates (using shared client-side cache)
+      const itemsJson = await cachedAdminFetch('/api/waste-categories', { forceRefresh }).catch(() => ({}));
+      const raw = itemsJson.data || itemsJson;
+      if (Array.isArray(raw)) {
+        setItems(raw);
+        const initialInline: Record<string, number> = {};
+        raw.forEach((it) => {
+          initialInline[it.id] = it.pricePerKg ?? 0;
+        });
+        setInlineRates(initialInline);
       }
     } catch (err: any) {
       console.error('Failed to load pricing data:', err);
@@ -494,7 +492,7 @@ export default function AdminPricingPage() {
             Add Pricing Rate
           </button>
           <button
-            onClick={fetchData}
+            onClick={() => fetchData(true)}
             disabled={loading}
             className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-4 py-2.5 rounded-xl transition-all disabled:opacity-50"
           >

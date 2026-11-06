@@ -23,6 +23,7 @@ import {
   Radio,
   ExternalLink,
 } from 'lucide-react';
+import { adminFetch } from '@/lib/api';
 
 interface NotificationItem {
   id: string;
@@ -78,7 +79,7 @@ export default function AdminNotificationsPage() {
       else setLoading(true);
       setError(null);
 
-      const res = await fetch('/api/admin/notifications?page=1&pageSize=100');
+      const res = await adminFetch('/api/admin/notifications?page=1&pageSize=25');
       const json = await res.json();
 
       if (json.success && Array.isArray(json.data)) {

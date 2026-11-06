@@ -13,6 +13,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { adminFetch } from '@/lib/api';
+import { cachedAdminFetch, invalidateClientCache } from '@/lib/clientCache';
 
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<any[]>([]);
@@ -67,12 +68,11 @@ export default function AdminOrdersPage() {
     }
   }, [searchTerm, filterStatus]);
 
-  const loadAgents = async () => {
+  const loadAgents = async (forceRefresh = false) => {
     try {
       setAgentsLoading(true);
       setAgentsError(null);
-      const agentsRes = await adminFetch('/api/admin/agents')
-        .then((r) => r.json())
+      const agentsRes = await cachedAdminFetch('/api/admin/agents', { forceRefresh })
         .catch(() => ({ success: false }));
 
       if (agentsRes.success) {
@@ -88,14 +88,14 @@ export default function AdminOrdersPage() {
     }
   };
 
-  const loadOrdersAndAgents = () => {
+  const loadOrdersAndAgents = (forceRefresh = false) => {
     loadOrders(page, searchTerm, filterStatus);
-    loadAgents();
+    loadAgents(forceRefresh);
   };
 
   useEffect(() => {
     loadOrders(1, '', 'ALL');
-    loadAgents();
+    loadAgents(false);
   }, []);
 
   const handleSearchChange = (val: string) => {
@@ -167,6 +167,7 @@ export default function AdminOrdersPage() {
       if (res.ok && data.success) {
         setSelectedOrderForAssign(null);
         setSelectedAgentId('');
+        invalidateClientCache('/api/admin/agents');
         loadOrdersAndAgents();
       } else {
         setAssignError(data.error?.message || data.message || 'Failed to assign agent to this order.');
@@ -192,7 +193,7 @@ export default function AdminOrdersPage() {
         </div>
 
         <button
-          onClick={loadOrdersAndAgents}
+          onClick={() => loadOrdersAndAgents(true)}
           disabled={loading}
           className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 flex items-center gap-1.5 self-start sm:self-auto disabled:opacity-50"
         >

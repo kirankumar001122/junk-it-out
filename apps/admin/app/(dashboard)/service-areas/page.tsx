@@ -1,9 +1,19 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import { ServiceZone } from '@/lib/geofence';
-import InteractiveMap from '@/components/InteractiveMap';
 import { adminFetch } from '@/lib/api';
+import { cachedAdminFetch, invalidateClientCache } from '@/lib/clientCache';
+
+const InteractiveMap = dynamic(() => import('@/components/InteractiveMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="h-[420px] w-full rounded-2xl border border-slate-200 bg-slate-100 flex items-center justify-center text-xs text-slate-400 font-bold">
+      Loading service zone map...
+    </div>
+  ),
+});
 import {
   RefreshCw,
   Power,
@@ -51,28 +61,25 @@ export default function AdminServiceAreasPage() {
 
   const isFetchingRef = useRef(false);
 
-  const fetchServiceAreas = async () => {
+  const fetchServiceAreas = async (forceRefresh = false) => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     setLoading(true);
     setErrorMsg(null);
     try {
-      const res = await adminFetch('/api/service-areas');
-      const json = await res.json().catch(() => ({}));
-      if (res.ok) {
-        const data = json.data || json;
-        if (Array.isArray(data)) {
-          const parsed = data.map((z: any) => ({
-            ...z,
-            boundaryPolygon:
-              typeof z.boundaryPolygon === 'string'
-                ? JSON.parse(z.boundaryPolygon)
-                : z.boundaryPolygon || [],
-          }));
-          setZones(parsed);
-        }
+      const json = await cachedAdminFetch('/api/service-areas', { forceRefresh }).catch(() => ({}));
+      const data = json.data || json;
+      if (Array.isArray(data)) {
+        const parsed = data.map((z: any) => ({
+          ...z,
+          boundaryPolygon:
+            typeof z.boundaryPolygon === 'string'
+              ? JSON.parse(z.boundaryPolygon)
+              : z.boundaryPolygon || [],
+        }));
+        setZones(parsed);
       } else {
-        const err = json?.error?.message || json?.message || `Failed to fetch service areas (${res.status})`;
+        const err = json?.error?.message || json?.message || 'Failed to fetch service areas';
         setErrorMsg(err);
       }
     } catch (err: any) {
@@ -326,7 +333,7 @@ export default function AdminServiceAreasPage() {
             Add Service Area
           </button>
           <button
-            onClick={fetchServiceAreas}
+            onClick={() => fetchServiceAreas(true)}
             disabled={loading}
             className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-4 py-2.5 rounded-xl transition-all disabled:opacity-50"
           >

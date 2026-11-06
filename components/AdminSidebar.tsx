@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
@@ -93,7 +94,7 @@ export default function AdminSidebar() {
       <div className="p-4 border-b border-slate-800 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-slate-800 p-0.5 flex items-center justify-center border border-slate-700 overflow-hidden shrink-0">
-            <img src="/logo.png" alt="Junk It Out Logo" decoding="async" className="w-full h-full object-contain" />
+            <Image src="/logo.png" alt="Junk It Out Logo" width={36} height={36} priority className="w-full h-full object-contain" />
           </div>
           <div>
             <h2 className="font-extrabold text-white text-sm tracking-tight">Admin Operations</h2>

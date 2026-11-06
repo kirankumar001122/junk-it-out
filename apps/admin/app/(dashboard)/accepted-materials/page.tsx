@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { getMaterialImageUrl, broadcastWasteCategoriesChanged } from '@/lib/customerWasteCategories';
+import { cachedAdminFetch, invalidateClientCache } from '@/lib/clientCache';
 
 const MATERIAL_CATEGORY_OPTIONS = [
   'E-Waste',
@@ -105,11 +106,10 @@ export default function AdminAcceptedMaterialsPage() {
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const loadCategories = async () => {
+  const loadCategories = async (forceRefresh = false) => {
     setLoading(true);
     try {
-      const res = await fetch('/api/waste-categories?admin=true', { cache: 'no-store' });
-      const data = await res.json();
+      const data = await cachedAdminFetch('/api/waste-categories?admin=true', { forceRefresh });
       if (data.success && Array.isArray(data.data)) {
         setCategories(data.data);
       } else {

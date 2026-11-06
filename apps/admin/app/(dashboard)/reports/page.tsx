@@ -51,7 +51,7 @@ export default function AdminReportsPage() {
     setLoading(true);
     setErrorMsg(null);
     try {
-      const res = await adminFetch('/api/orders?limit=100');
+      const res = await adminFetch('/api/admin/reports?format=json');
       const data = await res.json();
       if (data.success && data.data) {
         setOrders(data.data.orders || data.data || []);
