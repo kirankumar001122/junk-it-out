@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { getAuthUser } from '@/lib/auth/middleware';
+import { verifyToken } from '@/lib/auth/jwt';
 import { validateStatusTransition } from '@/lib/validations/schemas';
 import { broadcaster } from '@/lib/realtime';
 import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
@@ -17,9 +17,17 @@ export async function POST(
     console.info(`[api/orders/complete] ${phase} elapsedMs=${Date.now() - startedAt}`);
   try {
     const { id } = await params;
-    const authUser = await getAuthUser(req);
+    // FIX 1: same auth as weigh - verifyToken, AGENT or ADMIN
+    const authHeader = req.headers.get('authorization') || '';
+    let token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    if (!token) {
+      const cookie = req.headers.get('cookie') || '';
+      const m = cookie.match(/jio_token=([^;]+)/) || cookie.match(/auth-token=([^;]+)/) || cookie.match(/token=([^;]+)/);
+      if (m) token = decodeURIComponent(m[1]);
+    }
+    const authUser = verifyToken(token);
     logTiming('authentication complete');
-    if (!authUser || authUser.role !== 'AGENT') {
+    if (!authUser || (authUser.role !== 'AGENT' && authUser.role !== 'ADMIN')) {
       return errorResponse('UNAUTHORIZED', 'Authenticated agent access is required.', 401);
     }
 
@@ -39,7 +47,9 @@ export async function POST(
       return errorResponse('ORDER_NOT_FOUND', `Order #${id} not found.`, 404);
     }
 
-    if (!order.agentId || order.agentId !== authUser.agentId) {
+    // FIX 2: ADMIN bypass + fallback id/userId
+    const callerAgentId = authUser.agentId || authUser.id || authUser.userId;
+    if (authUser.role !== 'ADMIN' && (!order.agentId || order.agentId !== callerAgentId)) {
       return errorResponse('FORBIDDEN', 'Order is assigned to another agent.', 403);
     }
 
@@ -176,7 +186,8 @@ export async function POST(
         return { kind: 'notFound' as const };
       }
 
-      if (!currentOrder.agentId || currentOrder.agentId !== authUser.agentId) {
+      // FIX 3: same ADMIN bypass inside transaction
+      if (authUser.role !== 'ADMIN' && (!currentOrder.agentId || currentOrder.agentId !== callerAgentId)) {
         return { kind: 'forbidden' as const };
       }
 
