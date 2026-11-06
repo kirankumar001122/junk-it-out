@@ -13,6 +13,7 @@ import {
   LogOut,
   ChevronRight,
   ShieldCheck,
+  WalletCards,
   LoaderCircle,
   Smartphone,
   CheckCircle2,
@@ -107,6 +108,7 @@ export default function CustomerProfilePage() {
       title: 'Help & Customer Care',
       items: [
         { label: 'Disputes & Customer Support', href: '/customer/support', icon: AlertCircle },
+        { label: 'Wallet & Subscription Plans', href: '/customer/wallet', icon: WalletCards },
         { label: 'Waste Acceptance Policy', href: '/accepted-waste', icon: ShieldCheck },
         { label: 'Service Areas Map', href: '/service-areas', icon: MapPin },
       ],

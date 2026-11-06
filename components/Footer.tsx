@@ -99,6 +99,12 @@ export default function Footer() {
               </li>
 
               <li>
+                <Link href="/customer/support" className="hover:text-emerald-400 transition-colors">
+                  Customer Support
+                </Link>
+              </li>
+
+              <li>
                 <Link href="/about" className="hover:text-emerald-400 transition-colors">
                   About Us
                 </Link>

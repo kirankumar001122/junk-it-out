@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test, describe, afterAll } from 'vitest';
+import { test, describe, afterAll, beforeAll } from 'vitest';
 import { NextRequest } from 'next/server';
 import { signToken } from '../lib/auth/jwt';
 import { db } from '../lib/db';
@@ -19,7 +19,7 @@ type Role = 'CUSTOMER' | 'AGENT' | 'ADMIN' | 'SUPER_ADMIN';
 
 function makeToken(role: Role, extra: Record<string, unknown> = {}) {
   return signToken({
-    userId: role === 'ADMIN' ? '2eb19ca3-db15-4848-affd-9fef5f190726' : `${role.toLowerCase()}-user-id`,
+    userId: role === 'ADMIN' ? (testAdminUserId || '2eb19ca3-db15-4848-affd-9fef5f190726') : `${role.toLowerCase()}-user-id`,
     phone: '8123767934',
     name: `${role} Test Admin`,
     role,
@@ -40,12 +40,28 @@ function makeReq(url: string, method: string, token?: string, body?: unknown) {
 }
 
 const TEST_USER_TAG = 'Test Isolation Runner';
+const DATABASE_INTEGRATION_TIMEOUT_MS = 30_000;
+let testAdminUserId: string | null = null;
+
+beforeAll(async () => {
+  const testUser = await db.user.create({
+    data: {
+      phone: `+91998${Math.floor(1000000 + Math.random() * 9000000)}`,
+      name: TEST_USER_TAG,
+      role: 'ADMIN',
+    },
+  });
+  testAdminUserId = testUser.id;
+});
 
 afterAll(async () => {
   // Clean up any test records strictly isolated to this test run
   await db.auditLog.deleteMany({
     where: { userName: TEST_USER_TAG },
   });
+  if (testAdminUserId) {
+    await db.user.delete({ where: { id: testAdminUserId } });
+  }
 });
 
 describe('Settings API and Batched Persistence Suite', () => {
@@ -224,7 +240,7 @@ describe('Settings API and Batched Persistence Suite', () => {
     const restoredData = (await restoreRes.json()).data;
     assert.equal(restoredData.dispatchSlaMinutes, baseline.dispatchSlaMinutes);
     assert.equal(restoredData.companyName, baseline.companyName);
-  });
+  }, DATABASE_INTEGRATION_TIMEOUT_MS);
 
   test('Settings Persistence: Batched retrieval stops immediately when valid record is in first batch', async () => {
     // With batchSize 5, a valid newest record must be found in exactly 1 batch
@@ -294,7 +310,7 @@ describe('Settings API and Batched Persistence Suite', () => {
         where: { userName: TEST_USER_TAG },
       });
     }
-  });
+  }, DATABASE_INTEGRATION_TIMEOUT_MS);
 
   test('Settings Persistence: Multiple records with identical timestamps order deterministically by ID desc', async () => {
     const baseline = (await getAuthoritativeSettings()).settings!;
@@ -349,7 +365,7 @@ describe('Settings API and Batched Persistence Suite', () => {
         where: { userName: TEST_USER_TAG },
       });
     }
-  });
+  }, DATABASE_INTEGRATION_TIMEOUT_MS);
 
   test('Settings Persistence: Explicit error returned when all historical records are invalid (no silent default fallback)', async () => {
     // Test the corruption guard using an isolated action or custom query check

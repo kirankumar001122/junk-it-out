@@ -18,7 +18,7 @@ export async function PUT(req: NextRequest, context: { params: Promise<{ id: str
     const durationMonths = Number(body.durationMonths);
     const price = Number(body.price);
     const benefits = Array.isArray(body.benefits) ? body.benefits.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map((item) => item.trim()) : [];
-    if (!name || !description || !Number.isInteger(durationMonths) || durationMonths <= 0 || !Number.isFinite(price) || price <= 0) {
+    if (!name || !description || !Number.isInteger(durationMonths) || durationMonths <= 0 || durationMonths > 120 || !Number.isFinite(price) || price <= 0 || price > 1000000) {
       return NextResponse.json({ success: false, message: 'Valid name, description, positive price, and duration are required.' }, { status: 400 });
     }
     const offer = await db.subscriptionOffer.update({

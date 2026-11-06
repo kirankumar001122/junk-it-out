@@ -65,6 +65,10 @@ export default defineConfig({
       'tests/ai-support-agent.test.ts',
       'tests/admin-dashboard-assignment.test.ts',
       'tests/admin-settings.test.ts',
+      'tests/my-pickups-request-lifecycle.test.ts',
+      'tests/support-integration.test.ts',
+      'tests/database-configuration.test.ts',
+      'tests/wallet-payment.test.ts',
     ],
   },
 });

@@ -5,21 +5,116 @@ import { db } from '../lib/db';
 import { signToken } from '../lib/auth/jwt';
 import { invalidateServiceAreasCache } from '../lib/cache/serviceAreasCache';
 import { invalidateServiceAreaCache } from '../lib/services/serviceAreaService';
+import { randomUUID } from 'node:crypto';
 
-describe('Admin Service Areas Production Resilience & CRUD Suite', () => {
+function isDedicatedDatabaseConfigured(): boolean {
+  if (process.env.SERVICE_AREA_TEST_DATABASE !== 'true') return false;
+  const declaredDatabaseName = process.env.SERVICE_AREA_TEST_DATABASE_NAME || '';
+  if (!process.env.DATABASE_URL || !process.env.DIRECT_URL || !declaredDatabaseName) return false;
+
+  try {
+    const databaseUrl = new URL(process.env.DATABASE_URL);
+    const directUrl = new URL(process.env.DIRECT_URL);
+    const identity = (url: URL) => ({
+      hostname: url.hostname.toLowerCase(),
+      databaseName: decodeURIComponent(url.pathname.replace(/^\/+/, '')),
+    });
+    const databaseIdentity = identity(databaseUrl);
+    const directIdentity = identity(directUrl);
+    const isLoopback = (hostname: string) =>
+      ['localhost', '127.0.0.1', '::1', '[::1]'].includes(hostname);
+    const hasTestName = /^junk[_-]?it[_-]?out[_-]?test(?:[_-].*)?$/i.test(databaseIdentity.databaseName);
+
+    return (
+      isLoopback(databaseIdentity.hostname) &&
+      isLoopback(directIdentity.hostname) &&
+      hasTestName &&
+      databaseIdentity.databaseName === declaredDatabaseName &&
+      directIdentity.databaseName === declaredDatabaseName &&
+      databaseIdentity.databaseName === directIdentity.databaseName &&
+      !/prod|production/i.test(databaseIdentity.databaseName)
+    );
+  } catch {
+    return false;
+  }
+}
+
+describe.skipIf(!isDedicatedDatabaseConfigured()).sequential('Admin Service Areas Production Resilience & CRUD Suite', () => {
   let adminToken: string;
   let customerToken: string;
   let testAdminUserId: string | null = null;
   let testCustUserId: string | null = null;
 
-  const SEED_UUID = 'd9e2a7b1-4f3c-4a8e-9b2d-1c3e5a7f9b0d';
   const TEST_ZONE_NAME = 'JP Nagar (Phases 1 to 9)';
   let testCreatedZoneId: string | null = null;
   let testOrderId: string | null = null;
+  let testOrderUserId: string | null = null;
   let testAddressId: string | null = null;
   let testCustomerId: string | null = null;
+  let createdJpZoneId: string | null = null;
+
+  function assertDedicatedDatabase(): void {
+    const databaseUrl = process.env.DATABASE_URL || '';
+    const directUrl = process.env.DIRECT_URL || '';
+    const declaredDatabaseName = process.env.SERVICE_AREA_TEST_DATABASE_NAME || '';
+    const testDatabaseFlag = process.env.SERVICE_AREA_TEST_DATABASE;
+
+    if (testDatabaseFlag !== 'true') {
+      throw new Error(
+        'Refusing service-area database tests: SERVICE_AREA_TEST_DATABASE=true is required.',
+      );
+    }
+
+    if (!databaseUrl || !declaredDatabaseName) {
+      throw new Error(
+        'Refusing service-area database tests: DATABASE_URL and SERVICE_AREA_TEST_DATABASE_NAME are required.',
+      );
+    }
+
+    let parsedUrl: URL;
+    let parsedDirectUrl: URL;
+    try {
+      parsedUrl = new URL(databaseUrl);
+      parsedDirectUrl = new URL(directUrl);
+    } catch {
+      throw new Error(
+        'Refusing service-area database tests: DATABASE_URL and DIRECT_URL must be valid.',
+      );
+    }
+
+    const getDatabaseIdentity = (url: URL) => ({
+      hostname: url.hostname.toLowerCase(),
+      databaseName: decodeURIComponent(url.pathname.replace(/^\/+/, '')),
+    });
+    const databaseIdentity = getDatabaseIdentity(parsedUrl);
+    const directIdentity = getDatabaseIdentity(parsedDirectUrl);
+    const isLoopbackHost =
+      (hostname: string) =>
+        hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
+        hostname === '::1' ||
+        hostname === '[::1]';
+    const hasTestDatabaseName = /^junk[_-]?it[_-]?out[_-]?test(?:[_-].*)?$/i.test(
+      databaseIdentity.databaseName,
+    );
+
+    if (
+      !isLoopbackHost(databaseIdentity.hostname) ||
+      !isLoopbackHost(directIdentity.hostname) ||
+      !hasTestDatabaseName ||
+      databaseIdentity.databaseName !== declaredDatabaseName ||
+      directIdentity.databaseName !== declaredDatabaseName ||
+      databaseIdentity.databaseName !== directIdentity.databaseName ||
+      /prod|production/i.test(databaseIdentity.databaseName)
+    ) {
+      throw new Error(
+        'Refusing service-area database tests: DATABASE_URL and DIRECT_URL must point to the same loopback-only dedicated test database.',
+      );
+    }
+  }
 
   beforeAll(async () => {
+    assertDedicatedDatabase();
     invalidateServiceAreasCache();
     invalidateServiceAreaCache();
 
@@ -64,82 +159,104 @@ describe('Admin Service Areas Production Resilience & CRUD Suite', () => {
       tokenVersion: 1,
     });
 
-    // Ensure seed record exists with UUID primary key and unique name (matching production state)
-    try {
-      await db.serviceArea.upsert({
-        where: { name: 'BTM Layout (1st & 2nd Stage)' },
-        update: { status: 'ACTIVE' },
-        create: {
-          id: 'b1a2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d',
-          name: 'BTM Layout (1st & 2nd Stage)',
-          city: 'Bengaluru',
-          status: 'ACTIVE',
-          etaMinutes: 20,
-          basePickupCharge: 50,
-          boundaryPolygon: JSON.stringify([
-            [12.92, 77.6],
-            [12.92, 77.625],
-            [12.9, 77.625],
-            [12.9, 77.6],
-          ]),
-          centerLat: 12.9166,
-          centerLng: 77.6101,
-        },
-      });
-
-      await db.serviceArea.upsert({
-        where: { name: TEST_ZONE_NAME },
-        update: { status: 'ACTIVE' },
-        create: {
-          id: SEED_UUID,
-          name: TEST_ZONE_NAME,
-          city: 'Bengaluru',
-          status: 'ACTIVE',
-          etaMinutes: 20,
-          basePickupCharge: 50,
-          boundaryPolygon: JSON.stringify([
-            [12.92, 77.575],
-            [12.92, 77.6],
-            [12.885, 77.6],
-            [12.885, 77.575],
-          ]),
-          centerLat: 12.9077,
-          centerLng: 77.5854,
-        },
-      });
-    } catch (e) {
-      console.warn('Prisma seed zone setup warning:', e);
+    const existingJp = await db.serviceArea.findUnique({ where: { name: TEST_ZONE_NAME } });
+    if (existingJp) {
+      throw new Error(
+        `Refusing service-area tests: canonical fixture "${TEST_ZONE_NAME}" already exists; use a fresh disposable test database.`,
+      );
     }
+
+    const jp = await db.serviceArea.create({
+      data: {
+        id: randomUUID(),
+        name: TEST_ZONE_NAME,
+        city: 'Bengaluru',
+        status: 'ACTIVE',
+        etaMinutes: 20,
+        basePickupCharge: 50,
+        boundaryPolygon: JSON.stringify([
+          [12.92, 77.575],
+          [12.92, 77.6],
+          [12.885, 77.6],
+          [12.885, 77.575],
+        ]),
+        centerLat: 12.9077,
+        centerLng: 77.5854,
+      },
+    });
+    createdJpZoneId = jp.id;
   });
 
   afterAll(async () => {
-    // Clean up created resources safely
-    try {
-      if (testOrderId) {
-        await db.order.deleteMany({ where: { id: testOrderId } });
+    const cleanupFailures: string[] = [];
+    const attemptCleanup = async (label: string, operation: () => Promise<unknown>) => {
+      try {
+        await operation();
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        cleanupFailures.push(`${label}: ${detail}`);
+        console.error(`[SERVICE_AREA_TEST_CLEANUP_FAILED] ${label}: ${detail}`);
       }
-      if (testAddressId) {
-        await db.address.deleteMany({ where: { id: testAddressId } });
-      }
-      if (testCustomerId) {
-        await db.customer.deleteMany({ where: { id: testCustomerId } });
-      }
-      if (testCreatedZoneId) {
-        await db.pricingRule.deleteMany({ where: { serviceAreaId: testCreatedZoneId } });
-        await db.serviceArea.deleteMany({ where: { id: testCreatedZoneId } });
-      }
-      if (testAdminUserId) {
-        await db.auditLog.deleteMany({ where: { userId: testAdminUserId } });
-        await db.admin.deleteMany({ where: { userId: testAdminUserId } });
-        await db.user.deleteMany({ where: { id: testAdminUserId } });
-      }
-      if (testCustUserId) {
-        await db.user.deleteMany({ where: { id: testCustUserId } });
-      }
-      await db.serviceArea.deleteMany({ where: { name: 'Automated Test Area Bengaluru' } });
-      await db.serviceArea.deleteMany({ where: { name: 'Updated Test Area Bengaluru' } });
-    } catch (e) {
-      console.warn('Cleanup warning:', e);
+    };
+
+    if (testOrderId) {
+      await attemptCleanup('test order', () =>
+        db.order.deleteMany({ where: { id: testOrderId! } }),
+      );
+    }
+    if (testAddressId) {
+      await attemptCleanup('test address', () =>
+        db.address.deleteMany({ where: { id: testAddressId! } }),
+      );
+    }
+    if (testCustomerId) {
+      await attemptCleanup('test customer', () =>
+        db.customer.deleteMany({ where: { id: testCustomerId! } }),
+      );
+    }
+    if (testOrderUserId) {
+      await attemptCleanup('delete-scenario user', () =>
+        db.user.deleteMany({ where: { id: testOrderUserId! } }),
+      );
+    }
+    if (testCreatedZoneId) {
+      await attemptCleanup('created service-area pricing rules', () =>
+        db.pricingRule.deleteMany({ where: { serviceAreaId: testCreatedZoneId! } }),
+      );
+      await attemptCleanup('created service area', () =>
+        db.serviceArea.deleteMany({ where: { id: testCreatedZoneId! } }),
+      );
+    }
+    if (createdJpZoneId) {
+      await attemptCleanup('created JP Nagar fixture', () =>
+        db.serviceArea.deleteMany({ where: { id: createdJpZoneId! } }),
+      );
+    }
+    if (testAdminUserId) {
+      await attemptCleanup('test admin audit logs', () =>
+        db.auditLog.deleteMany({ where: { userId: testAdminUserId! } }),
+      );
+      await attemptCleanup('test admin record', () =>
+        db.admin.deleteMany({ where: { userId: testAdminUserId! } }),
+      );
+      await attemptCleanup('test admin user', () =>
+        db.user.deleteMany({ where: { id: testAdminUserId! } }),
+      );
+    }
+    if (testCustUserId) {
+      await attemptCleanup('test customer user', () =>
+        db.user.deleteMany({ where: { id: testCustUserId! } }),
+      );
+    }
+    await attemptCleanup('service-area response cache invalidation', async () => {
+      invalidateServiceAreasCache();
+      invalidateServiceAreaCache();
+    });
+
+    if (cleanupFailures.length > 0) {
+      throw new Error(
+        `Service-area test cleanup failed (${cleanupFailures.length}): ${cleanupFailures.join(' | ')}`,
+      );
     }
   });
 
@@ -357,6 +474,7 @@ describe('Admin Service Areas Production Resilience & CRUD Suite', () => {
       include: { customer: true },
     });
     testCustomerId = testUser.customer!.id;
+    testOrderUserId = testUser.id;
 
     const testAddr = await db.address.create({
       data: {

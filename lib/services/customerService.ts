@@ -47,7 +47,7 @@ export async function findOrCreateUserCustomer(phone: string, name = 'Customer',
         },
       },
     });
-  } else if (user.role !== 'CUSTOMER') {
+  } else if (!['CUSTOMER', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
     throw new CustomerRoleConflictError();
   } else if (!user.customer) {
     const customer = await db.customer.create({
@@ -58,8 +58,19 @@ export async function findOrCreateUserCustomer(phone: string, name = 'Customer',
     });
     user.customer = customer;
   } else {
-    // Update the user's name if a new name is provided and it's different from the current name
-    if (name && name !== user.name) {
+    const placeholderNames = new Set([
+      '',
+      'Customer',
+      'Valued Customer',
+      'Valued Member',
+    ]);
+
+    // Do not replace an existing real name with the OTP form's default placeholder.
+    if (
+      name &&
+      name !== user.name &&
+      (!placeholderNames.has(name) || placeholderNames.has(user.name || ''))
+    ) {
       user = await db.user.update({
         where: { id: user.id },
         data: { name },

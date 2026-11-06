@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { fetchRazorpayPayment, verifyRazorpayPaymentSignature } from '@/lib/payments/razorpay';
+import { roundCurrency } from '@/lib/wallet';
 
 export const runtime = 'nodejs';
 
@@ -43,19 +44,28 @@ export async function POST(req: NextRequest) {
     }
 
     const result = await db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "WalletTransaction" WHERE "id" = ${transaction.id} FOR UPDATE`;
+      const currentTransaction = await tx.walletTransaction.findUnique({ where: { id: transaction.id } });
+      if (!currentTransaction || currentTransaction.customerId !== authUser.customerId) {
+        throw new Error('Wallet top-up transaction was not found.');
+      }
+      if (currentTransaction.status === 'SUCCESS') {
+        return { transaction: currentTransaction, alreadyProcessed: true };
+      }
       const existingPayment = await tx.walletTransaction.findUnique({ where: { gatewayPaymentId: razorpayPaymentId } });
       if (existingPayment && existingPayment.id !== transaction.id) {
         throw new Error('This payment has already been processed.');
       }
-      await tx.$queryRaw`SELECT "id" FROM "CustomerWallet" WHERE "id" = ${transaction.walletId} FOR UPDATE`;
-      const wallet = await tx.customerWallet.findUnique({ where: { id: transaction.walletId } });
+      await tx.$queryRaw`SELECT "id" FROM "CustomerWallet" WHERE "id" = ${currentTransaction.walletId} FOR UPDATE`;
+      const wallet = await tx.customerWallet.findUnique({ where: { id: currentTransaction.walletId } });
       if (!wallet) throw new Error('Customer wallet was not found.');
+      const nextBalance = roundCurrency(wallet.balance + currentTransaction.amount);
       const updatedWallet = await tx.customerWallet.update({
         where: { id: wallet.id },
-        data: { balance: { increment: transaction.amount } },
+        data: { balance: nextBalance },
       });
       const updatedTransaction = await tx.walletTransaction.update({
-        where: { id: transaction.id },
+        where: { id: currentTransaction.id },
         data: {
           status: 'SUCCESS',
           gatewayPaymentId: razorpayPaymentId,
@@ -63,9 +73,9 @@ export async function POST(req: NextRequest) {
           failureReason: null,
         },
       });
-      return { wallet: updatedWallet, transaction: updatedTransaction };
+      return { wallet: updatedWallet, transaction: updatedTransaction, alreadyProcessed: false };
     });
-    return NextResponse.json({ success: true, data: result });
+    return NextResponse.json({ success: true, alreadyProcessed: result.alreadyProcessed, data: result });
   } catch (error) {
     console.error('Wallet top-up verification failed:', error);
     return NextResponse.json({ success: false, message: error instanceof Error ? error.message : 'Wallet top-up verification failed.' }, { status: 400 });
