@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { AlertCircle, CheckCircle, RefreshCw, Send, HelpCircle } from 'lucide-react';
+import CustomerSupportChatWidget from '@/components/CustomerSupportChatWidget';
 
 export default function CustomerSupportPage() {
   const [complaints, setComplaints] = useState<any[]>([]);
@@ -88,6 +89,24 @@ export default function CustomerSupportPage() {
         <p className="customer-eyebrow">We are here to help</p>
         <h1 className="customer-title mt-2">Customer support</h1>
         <p className="customer-subtitle mt-2">Tell us what happened and our operations desk will review the pickup details.</p>
+      </div>
+
+      <div className="customer-surface flex flex-col gap-3 p-5 sm:p-6">
+        <div>
+          <p className="customer-eyebrow">AI support assistant</p>
+          <h2 className="mt-1 text-lg font-extrabold text-slate-900">Get quick answers about your pickup</h2>
+          <p className="mt-1 text-xs leading-relaxed text-slate-600">
+            Ask about accepted materials, service areas, booking, payments, or your authenticated pickup orders.
+            The assistant uses current Junk It Out data and can help you raise a support ticket when needed.
+          </p>
+        </div>
+        <div className="relative min-h-24 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4 text-xs text-emerald-950">
+          <p className="max-w-xl leading-relaxed">
+            Open the support assistant to start a conversation. For order-specific help, stay signed in so only your
+            own pickup information can be used.
+          </p>
+          <CustomerSupportChatWidget initiallyOpen />
+        </div>
       </div>
 
       {/* NEW TICKET FORM */}

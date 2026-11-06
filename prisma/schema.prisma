@@ -27,6 +27,7 @@ model User {
   orderStatusChanges OrderStatusHistory[]
   refundRequests     RefundRequest[]       @relation("RefundRequestedBy")
   refundReviews      RefundRequest[]       @relation("RefundReviewedBy")
+  walletAdjustments  WalletTransaction[]   @relation("WalletAdjustmentAdmin")
   weightRecords      WeightRecord[]
 }
 
@@ -56,6 +57,101 @@ model Customer {
   reviews      Review[]
   settlements  Settlement[]
   orderIdempotencyRecords OrderIdempotency[]
+  wallet        CustomerWallet?
+  subscriptions CustomerSubscription[]
+  walletTransactions WalletTransaction[]
+  subscriptionPayments SubscriptionPayment[]
+}
+
+model CustomerWallet {
+  id           String             @id @default(uuid())
+  customerId   String             @unique
+  balance      Float              @default(0)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  customer     Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+}
+
+model WalletTransaction {
+  id               String         @id @default(uuid())
+  walletId         String
+  customerId       String
+  type             String
+  amount           Float
+  balanceAfter     Float          @default(0)
+  status           String         @default("PENDING")
+  referenceId      String?
+  gatewayOrderId   String?        @unique
+  gatewayPaymentId String?        @unique
+  reason           String?
+  adminId          String?
+  failureReason    String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  wallet           CustomerWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  customer         Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  admin            User?          @relation("WalletAdjustmentAdmin", fields: [adminId], references: [id])
+
+  @@index([customerId, createdAt])
+  @@index([walletId, status, createdAt])
+  @@index([type, status, createdAt])
+}
+
+model SubscriptionOffer {
+  id              String                 @id @default(uuid())
+  name            String
+  description     String
+  durationMonths  Int
+  price           Float
+  benefitsJson    String                 @default("[]")
+  active          Boolean                @default(true)
+  displayOrder    Int                    @default(0)
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  subscriptions   CustomerSubscription[]
+  payments        SubscriptionPayment[]
+
+  @@index([active, displayOrder])
+  @@unique([name, durationMonths])
+}
+
+model CustomerSubscription {
+  id          String             @id @default(uuid())
+  customerId  String
+  offerId     String
+  paymentId   String?            @unique
+  status      String             @default("ACTIVE")
+  startDate   DateTime
+  expiryDate  DateTime
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  customer    Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  offer       SubscriptionOffer   @relation(fields: [offerId], references: [id], onDelete: Restrict)
+  payment     SubscriptionPayment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([customerId, status, expiryDate])
+  @@index([offerId, createdAt])
+}
+
+model SubscriptionPayment {
+  id               String                @id @default(uuid())
+  customerId       String
+  offerId          String
+  amount           Float
+  status           String                @default("PENDING")
+  gatewayOrderId   String?               @unique
+  gatewayPaymentId String?               @unique
+  signature        String?
+  failureReason    String?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  customer         Customer              @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  offer            SubscriptionOffer     @relation(fields: [offerId], references: [id], onDelete: Restrict)
+  subscription     CustomerSubscription?
+
+  @@index([customerId, createdAt])
+  @@index([offerId, status, createdAt])
 }
 
 model Agent {
