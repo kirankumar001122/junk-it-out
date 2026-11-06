@@ -28,7 +28,13 @@ export function calculateActualWeights(
   }>,
   actualWeights: ActualWeightInput[],
   pickupCharge: number = 0,
-  discountAmount: number = 0
+  discountAmount: number = 0,
+  taxBreakdown?: {
+    pickupFee?: number;
+    serviceFee?: number;
+    gstAmount?: number;
+    totalFeeWithGst?: number;
+  }
 ): WeightCalculationResult {
   const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
   let actualTotalRecyclable = 0;
@@ -54,7 +60,11 @@ export function calculateActualWeights(
     }
   }
 
-  const netAmount = actualTotalRecyclable - (actualTotalWasteCharge + pickupCharge - discountAmount);
+  const effectiveFee = typeof taxBreakdown?.totalFeeWithGst === 'number'
+    ? taxBreakdown.totalFeeWithGst
+    : pickupCharge;
+
+  const netAmount = actualTotalRecyclable - (actualTotalWasteCharge + effectiveFee - discountAmount);
   const financialDirection: 'JUNKITOUT_PAYS' | 'CUSTOMER_PAYS' =
     netAmount >= 0 ? 'JUNKITOUT_PAYS' : 'CUSTOMER_PAYS';
   const finalAmount = round2(Math.abs(netAmount));

@@ -45,6 +45,24 @@ export async function GET(req: NextRequest) {
     const statusParam = searchParams.get('status');
     const startDateParam = searchParams.get('startDate') || searchParams.get('from');
     const endDateParam = searchParams.get('endDate') || searchParams.get('to');
+    const includeTax = searchParams.get('includeTax') === 'true' || searchParams.get('includeTaxBreakdown') === 'true';
+
+    const activeHeaders = includeTax
+      ? [
+          'Order Number',
+          'Date',
+          'Customer Name',
+          'Phone',
+          'Area',
+          'Status',
+          'Estimated Total',
+          'Final Amount',
+          'Pickup Fee',
+          'Service Fee',
+          'GST Amount',
+          'Agent Name',
+        ]
+      : headers;
 
     let maxRows: number | null = null;
     if (limitParam !== null) {
@@ -91,7 +109,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const csvLines: string[] = [headers.map(csvCell).join(',')];
+    const csvLines: string[] = [activeHeaders.map(csvCell).join(',')];
     let cursorId: string | undefined;
     let totalExported = 0;
 
@@ -111,6 +129,7 @@ export async function GET(req: NextRequest) {
           status: true,
           estimatedTotal: true,
           finalAmount: true,
+          ...(includeTax ? { pickupFee: true, pickupCharge: true, serviceFee: true, gstAmount: true } : {}),
           customer: { select: { user: { select: { name: true, phone: true } } } },
           agent: { select: { user: { select: { name: true } } } },
           address: { select: { area: true } },
@@ -123,7 +142,7 @@ export async function GET(req: NextRequest) {
       if (batch.length === 0) break;
 
       for (const order of batch) {
-        csvLines.push([
+        const rowValues = [
           order.orderNumber,
           new Date(order.createdAt).toLocaleString(),
           order.customer?.user?.name ?? 'N/A',
@@ -132,8 +151,20 @@ export async function GET(req: NextRequest) {
           order.status,
           order.estimatedTotal,
           order.finalAmount,
-          order.agent?.user?.name ?? 'Unassigned',
-        ].map(csvCell).join(','));
+        ];
+
+        if (includeTax) {
+          const ord = order as any;
+          rowValues.push(
+            ord.pickupFee ?? ord.pickupCharge ?? 0,
+            ord.serviceFee ?? 0,
+            ord.gstAmount ?? 0,
+          );
+        }
+
+        rowValues.push(order.agent?.user?.name ?? 'Unassigned');
+
+        csvLines.push(rowValues.map(csvCell).join(','));
       }
 
       totalExported += batch.length;

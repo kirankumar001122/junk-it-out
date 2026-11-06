@@ -265,6 +265,14 @@ model Order {
   estimatedTotal     Float                @default(0.0)
   actualTotal        Float                @default(0.0)
   pickupCharge       Float                @default(49.0)
+  pickupFee          Float?               @default(0.0)
+  serviceFee         Float?               @default(0.0)
+  taxableAmount      Float?               @default(0.0)
+  gstRate            Float?               @default(0.18)
+  gstAmount          Float?               @default(0.0)
+  cgstAmount         Float?               @default(0.0)
+  sgstAmount         Float?               @default(0.0)
+  igstAmount         Float?               @default(0.0)
   discountAmount     Float                @default(0.0)
   finalAmount        Float                @default(0.0)
   paymentStatus      String               @default("PENDING")
@@ -532,6 +540,14 @@ model Invoice {
   orderId       String
   pdfDataJson   String
   totalAmount   Float
+  pickupFee     Float    @default(0.0)
+  serviceFee    Float    @default(0.0)
+  taxableAmount Float    @default(0.0)
+  gstRate       Float    @default(0.18)
+  gstAmount     Float    @default(0.0)
+  cgstAmount    Float    @default(0.0)
+  sgstAmount    Float    @default(0.0)
+  igstAmount    Float    @default(0.0)
   createdAt     DateTime @default(now())
   order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }

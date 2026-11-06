@@ -17,6 +17,7 @@ import {
 import {
   calculateOrderValuation,
   calculatePickupSummary,
+  calculateTaxBreakdown,
   PICKUP_SERVICE_CHARGE,
   type CalculationItemInput,
   type FinancialDirection,
@@ -535,6 +536,30 @@ export async function createOrder(
 
             pickupCharge:
               basePickupCharge,
+
+            pickupFee:
+              basePickupCharge,
+
+            serviceFee:
+              0.0,
+
+            taxableAmount:
+              0.0,
+
+            gstRate:
+              0.18,
+
+            gstAmount:
+              0.0,
+
+            cgstAmount:
+              0.0,
+
+            sgstAmount:
+              0.0,
+
+            igstAmount:
+              0.0,
 
             discountAmount:
               0.0,

@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { formatPickupAddress } from '@/lib/address';
 import { isPickupCompletedStatus } from '@/lib/orders/lifecycle';
 import { downloadReceiptPdf } from '@/lib/receiptPdf';
+import { getOrderTaxBreakdown } from '@/lib/pricing/tax';
 import TrademarkBadge from '@/components/TrademarkBadge';
 
 export default function ReceiptPage() {
@@ -68,6 +69,7 @@ export default function ReceiptPage() {
   }
 
   const invoice = order.invoices?.[0];
+  const tax = getOrderTaxBreakdown(order);
 
   const formatStatus = (status: string) => {
     switch (status) {
@@ -295,9 +297,33 @@ export default function ReceiptPage() {
             </div>
 
             <div className="settlement-row">
-              <span>Pickup Service Charge</span>
+              <span>Doorstep Pickup Fee (Non-taxable)</span>
+              <strong>{formatAmount(tax.pickupFee)}</strong>
+            </div>
+
+            <div className="settlement-row">
+              <span>Service Fee (Taxable base)</span>
+              <strong>{formatAmount(tax.serviceFee)}</strong>
+            </div>
+
+            <div className="settlement-row">
+              <span>
+                GST ({tax.gstRatePercent}% on Service Fee)
+                {tax.gstAmount > 0 && (
+                  <span className="text-[10px] text-slate-500 font-normal ml-1">
+                    {tax.isInterState
+                      ? `(${formatAmount(tax.igstAmount)} IGST)`
+                      : `(${formatAmount(tax.cgstAmount)} CGST + ${formatAmount(tax.sgstAmount)} SGST)`}
+                  </span>
+                )}
+              </span>
+              <strong>{formatAmount(tax.gstAmount)}</strong>
+            </div>
+
+            <div className="settlement-row">
+              <span>Total Fees &amp; Taxes</span>
               <strong>
-                {formatAmount(order.pickupCharge)}
+                {formatAmount(tax.totalFeeWithGst)}
                 <span className="text-[10px] text-slate-500 font-normal ml-1">
                   ({(order.paymentStatus === 'CAPTURED' || order.paymentStatus === 'SUCCESS') ? 'Paid at booking' : 'Pending'})
                 </span>

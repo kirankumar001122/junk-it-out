@@ -7,6 +7,7 @@ import { successResponse, errorResponse } from '@/lib/utils/apiResponse';
 import { invalidateAdminOperationsCaches } from '@/lib/cache/adminAgentsCache';
 import { runBackgroundTask } from '@/lib/utils/backgroundTask';
 import { calculateOrderValuation, calculateValuationAdjustment, type CalculationItemInput } from '@/lib/pricing';
+import { getOrderTaxBreakdown } from '@/lib/pricing/tax';
 import { refundAttemptId } from '@/lib/payments/refundWorkflow';
 
 export async function POST(
@@ -37,6 +38,14 @@ export async function POST(
         finalAmount: true,
         actualTotal: true,
         pickupCharge: true,
+        pickupFee: true,
+        serviceFee: true,
+        taxableAmount: true,
+        gstRate: true,
+        gstAmount: true,
+        cgstAmount: true,
+        sgstAmount: true,
+        igstAmount: true,
         discountAmount: true,
         items: { include: { category: true } },
         weightRecords: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true } },
@@ -312,35 +321,47 @@ export async function POST(
         orderUpdateData.finalAmount = finalAmount;
       }
 
+      const tax = getOrderTaxBreakdown(currentOrder);
+
+      orderUpdateData.pickupFee = tax.pickupFee;
+      orderUpdateData.serviceFee = tax.serviceFee;
+      orderUpdateData.taxableAmount = tax.taxableAmount;
+      orderUpdateData.gstRate = tax.gstRate;
+      orderUpdateData.gstAmount = tax.gstAmount;
+      orderUpdateData.cgstAmount = tax.cgstAmount;
+      orderUpdateData.sgstAmount = tax.sgstAmount;
+      orderUpdateData.igstAmount = tax.igstAmount;
+
       if (!currentOrder.invoices || currentOrder.invoices.length === 0) {
+        const invoicePayload = {
+          orderId: id,
+          invoiceNumber,
+          totalAmount: finalAmount,
+          pickupFee: tax.pickupFee,
+          serviceFee: tax.serviceFee,
+          taxableAmount: tax.taxableAmount,
+          gstRate: tax.gstRate,
+          gstAmount: tax.gstAmount,
+          cgstAmount: tax.cgstAmount,
+          sgstAmount: tax.sgstAmount,
+          igstAmount: tax.igstAmount,
+          pdfDataJson: JSON.stringify({
+            orderNumber: order.orderNumber,
+            invoiceNumber,
+            items: invoiceItems,
+            finalAmount: finalAmount,
+            financialDirection: financialDirection,
+            taxBreakdown: tax,
+          }),
+        };
+
         if (typeof (tx as any).invoice?.create === 'function') {
           await (tx as any).invoice.create({
-            data: {
-              orderId: id,
-              invoiceNumber,
-              totalAmount: finalAmount,
-              pdfDataJson: JSON.stringify({
-                orderNumber: order.orderNumber,
-                invoiceNumber,
-                items: invoiceItems,
-                finalAmount: finalAmount,
-                financialDirection: financialDirection,
-              }),
-            },
+            data: invoicePayload,
           });
         } else {
           orderUpdateData.invoices = {
-            create: {
-              invoiceNumber,
-              totalAmount: finalAmount,
-              pdfDataJson: JSON.stringify({
-                orderNumber: order.orderNumber,
-                invoiceNumber,
-                items: invoiceItems,
-                finalAmount: finalAmount,
-                financialDirection: financialDirection,
-              }),
-            },
+            create: invoicePayload,
           };
         }
       }
