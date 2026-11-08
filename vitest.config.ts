@@ -74,6 +74,7 @@ export default defineConfig({
       'tests/customer-subscriptions.test.ts',
       'tests/wallet-bonus-lifecycle.test.ts',
       'tests/wallet-bonus-scheduler.test.ts',
+      'tests/customer-otp-test-mode.test.ts',
     ],
   },
 });

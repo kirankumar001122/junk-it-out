@@ -8,7 +8,10 @@ import {
   hasTrustedOrigin,
   addCorsHeaders,
 } from '@/lib/auth/requestSecurity';
-import { isLocalOtpTestPhone } from '@/lib/auth/localOtpTest';
+import {
+  isCustomerTestOtpPhone,
+  isLocalOtpTestPhone,
+} from '@/lib/auth/localOtpTest';
 
 export async function OPTIONS(req: NextRequest) {
   const res = new NextResponse(null, { status: 204 });
@@ -57,7 +60,10 @@ export async function POST(req: NextRequest) {
      * ------------------------------------------------------------
      */
 
-    const isTestPhone = isLocalOtpTestPhone(normalized);
+    // Keep the existing shared send endpoint compatible with admin/agent
+    // login while customer verification uses the stricter customer helper.
+    const isTestPhone =
+      isCustomerTestOtpPhone(normalized) || isLocalOtpTestPhone(normalized);
 
     let cooldownSeconds = 30;
 

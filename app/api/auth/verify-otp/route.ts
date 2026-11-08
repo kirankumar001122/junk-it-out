@@ -15,6 +15,10 @@ import {
   hasTrustedOrigin,
 } from '@/lib/auth/requestSecurity';
 import { db, isDatabaseConfigurationError } from '@/lib/db';
+import {
+  isCustomerTestOtpPhone,
+  isValidLocalOtpTestCode,
+} from '@/lib/auth/localOtpTest';
 
 export async function POST(req: NextRequest) {
   try {
@@ -70,31 +74,14 @@ export async function POST(req: NextRequest) {
      * ---------------------------------------------------------
      */
 
-    const isProduction = process.env.NODE_ENV === 'production';
-    const testModeEnabled =
-      !isProduction && process.env.OTP_TEST_MODE?.trim().toLowerCase() === 'true';
-
-    const configuredTestPhone =
-      process.env.OTP_TEST_PHONE?.replace(/\D/g, '') || '';
-
-    const normalizedUserPhone =
-      normalized.replace(/\D/g, '').slice(-10);
-
-    const normalizedTestPhone =
-      configuredTestPhone.slice(-10);
-
-    const isTestPhone =
-      testModeEnabled &&
-      normalizedTestPhone.length === 10 &&
-      normalizedUserPhone.length === 10 &&
-      normalizedTestPhone === normalizedUserPhone;
+    const isTestPhone = isCustomerTestOtpPhone(normalized);
 
     /*
      * Verify OTP
      */
     if (isTestPhone) {
       // Test number: accept any 6-digit OTP
-      if (!/^\d{6}$/.test(cleanCode)) {
+      if (!isValidLocalOtpTestCode(cleanCode)) {
         return errorResponse(
           'INVALID_OTP',
           'Please enter a valid 6-digit OTP.',
