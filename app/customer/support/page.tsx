@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { AlertCircle, CheckCircle, RefreshCw, Send, HelpCircle } from 'lucide-react';
+import Link from 'next/link';
+import { AlertCircle, CheckCircle, RefreshCw, Send, HelpCircle, ArrowRight } from 'lucide-react';
 import CustomerSupportChatWidget from '@/components/CustomerSupportChatWidget';
 
 export default function CustomerSupportPage() {
@@ -203,28 +204,45 @@ export default function CustomerSupportPage() {
           <p className="text-xs text-slate-500 text-center py-4">No support tickets filed.</p>
         ) : (
           <div className="space-y-3">
-            {complaints.map((c) => (
-              <div key={c.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-900">{c.category.replace(/_/g, ' ')}</span>
-                  <span
-                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
-                      c.status === 'OPEN'
-                        ? 'bg-amber-100 text-amber-800'
-                        : c.status === 'RESOLVED'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : 'bg-blue-100 text-blue-800'
-                    }`}
-                  >
-                    {c.status}
-                  </span>
+            {complaints.map((c) => {
+              const status = (c.status || 'OPEN').toUpperCase();
+              let badgeColor = 'bg-amber-100 text-amber-800 border-amber-200';
+              if (status === 'UNDER_REVIEW') badgeColor = 'bg-blue-100 text-blue-800 border-blue-200';
+              else if (status === 'AWAITING_CUSTOMER') badgeColor = 'bg-purple-100 text-purple-800 border-purple-200';
+              else if (status === 'RESOLVED') badgeColor = 'bg-emerald-100 text-emerald-800 border-emerald-200';
+              else if (status === 'REJECTED') badgeColor = 'bg-rose-100 text-rose-800 border-rose-200';
+
+              return (
+                <div key={c.id} className="p-4 bg-slate-50 hover:bg-white transition-all rounded-2xl border border-slate-200 hover:border-emerald-300 shadow-sm space-y-2 text-xs">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-slate-900">{c.category?.replace(/_/g, ' ') || 'General Support'}</span>
+                      {c.orderNumber && (
+                        <span className="font-mono text-[11px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                          #{c.orderNumber}
+                        </span>
+                      )}
+                    </div>
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border ${badgeColor}`}>
+                      {status.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  <p className="text-slate-600 line-clamp-2">{c.description || 'No description provided.'}</p>
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-100 flex-wrap gap-2">
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      Ticket #{c.id?.substring(0, 8)} • Filed {new Date(c.createdAt).toLocaleDateString('en-IN')}
+                    </span>
+                    <Link
+                      href={`/customer/support/${c.id}`}
+                      className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-800 hover:underline"
+                    >
+                      <span>View Live Status & Timeline</span>
+                      <ArrowRight className="w-3 h-3" />
+                    </Link>
+                  </div>
                 </div>
-                <p className="text-slate-600">{c.description}</p>
-                <span className="text-[10px] text-slate-400 block font-mono">
-                  Filed on {new Date(c.createdAt).toLocaleDateString()}
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

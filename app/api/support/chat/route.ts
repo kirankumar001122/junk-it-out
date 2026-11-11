@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthUser } from '@/lib/auth/middleware';
 import { handleSupportChat, checkSupportRateLimit, ChatMessage } from '@/lib/ai/supportAgent';
+import { logSupportConversationTurn } from '@/lib/ai/unresolvedQueries';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,7 +57,7 @@ export async function POST(req: NextRequest) {
     const authUser = await getAuthUser(req);
     const context = {
       userId: authUser?.userId,
-      customerId: authUser?.customerId,
+      customerId: authUser?.customerId || (authUser as any)?.user?.customer?.id,
       name: (authUser as any)?.user?.name,
       phone: (authUser as any)?.user?.phone || authUser?.phone,
       role: authUser?.role,
@@ -64,6 +65,14 @@ export async function POST(req: NextRequest) {
 
     // 4. Generate AI Response
     const result = await handleSupportChat(message, history, context);
+
+    // 5. Persistently log complete conversation turn (user prompt + assistant response)
+    await logSupportConversationTurn({
+      userMessage: message,
+      assistantResponse: result.text,
+      context,
+      channel: 'WEB_SUPPORT_CHAT',
+    });
 
     return NextResponse.json({
       success: true,

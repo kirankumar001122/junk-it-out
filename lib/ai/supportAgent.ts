@@ -1,7 +1,14 @@
 import { db } from '@/lib/db';
 import { notifySupportEscalation } from '@/lib/ai/supportEscalation';
 import { retrievePublicKnowledge } from '@/lib/ai/publicKnowledge';
-import { calculatePickupSummary, calculateMaterialItemAmount, SPECIAL_MATERIAL_THRESHOLD_KG, SPECIAL_MATERIAL_OFFER_PRICE, PICKUP_SERVICE_CHARGE, ORIGINAL_PICKUP_SERVICE_CHARGE } from '@/lib/pricing';
+import { logUnresolvedQuestion } from '@/lib/ai/unresolvedQueries';
+import {
+  calculatePickupSummary,
+  SPECIAL_MATERIAL_THRESHOLD_KG,
+  SPECIAL_MATERIAL_OFFER_PRICE,
+  PICKUP_SERVICE_CHARGE,
+  ORIGINAL_PICKUP_SERVICE_CHARGE,
+} from '@/lib/pricing';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -23,7 +30,11 @@ const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 30;
 
-export function checkSupportRateLimit(clientKey: string): { allowed: boolean; remaining: number; resetInSeconds: number } {
+export function checkSupportRateLimit(clientKey: string): {
+  allowed: boolean;
+  remaining: number;
+  resetInSeconds: number;
+} {
   const now = Date.now();
   const record = rateLimitMap.get(clientKey);
 
@@ -36,15 +47,27 @@ export function checkSupportRateLimit(clientKey: string): { allowed: boolean; re
 
   if (!record || record.resetTime < now) {
     rateLimitMap.set(clientKey, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
-    return { allowed: true, remaining: RATE_LIMIT_MAX_REQUESTS - 1, resetInSeconds: Math.ceil(RATE_LIMIT_WINDOW_MS / 1000) };
+    return {
+      allowed: true,
+      remaining: RATE_LIMIT_MAX_REQUESTS - 1,
+      resetInSeconds: Math.ceil(RATE_LIMIT_WINDOW_MS / 1000),
+    };
   }
 
   if (record.count >= RATE_LIMIT_MAX_REQUESTS) {
-    return { allowed: false, remaining: 0, resetInSeconds: Math.ceil((record.resetTime - now) / 1000) };
+    return {
+      allowed: false,
+      remaining: 0,
+      resetInSeconds: Math.ceil((record.resetTime - now) / 1000),
+    };
   }
 
   record.count += 1;
-  return { allowed: true, remaining: RATE_LIMIT_MAX_REQUESTS - record.count, resetInSeconds: Math.ceil((record.resetTime - now) / 1000) };
+  return {
+    allowed: true,
+    remaining: RATE_LIMIT_MAX_REQUESTS - record.count,
+    resetInSeconds: Math.ceil((record.resetTime - now) / 1000),
+  };
 }
 
 /**
@@ -89,7 +112,7 @@ export async function getLiveMaterialsAndPricing() {
         serviceChargeNotice: `Standard ₹${ORIGINAL_PICKUP_SERVICE_CHARGE} doorstep pickup charge is currently WAIVED (FREE / ₹0).`,
       },
     };
-  } catch (err: any) {
+  } catch {
     return {
       success: false,
       error: 'Unable to retrieve live waste categories at this moment.',
@@ -174,7 +197,8 @@ export async function getAuthenticatedCustomerOrders(
     return {
       success: false,
       authenticated: false,
-      message: 'You need to be logged in to view your orders. Please log in with your phone number on our website.',
+      message:
+        'You need to be logged in to view your orders. Please log in with your phone number on our website.',
       orders: [],
     };
   }
@@ -188,6 +212,12 @@ export async function getAuthenticatedCustomerOrders(
     const orders = await db.order.findMany({
       where: whereClause,
       include: {
+        agent: {
+          select: {
+            vehicleType: true,
+            user: { select: { name: true } },
+          },
+        },
         items: {
           include: {
             category: { select: { name: true, pricePerKg: true } },
@@ -222,6 +252,12 @@ export async function getAuthenticatedCustomerOrders(
           paymentStatus: o.paymentStatus,
           createdAt: o.createdAt.toISOString(),
           area: o.address?.area || 'Bengaluru',
+          agent: o.agent
+            ? {
+                name: o.agent.user.name,
+                vehicleType: o.agent.vehicleType,
+              }
+            : null,
           items: o.items.map((i) => ({
             categoryName: i.category?.name || 'Waste Item',
             estimatedWeight: i.estimatedWeight,
@@ -239,7 +275,7 @@ export async function getAuthenticatedCustomerOrders(
         };
       }),
     };
-  } catch (err: any) {
+  } catch {
     return {
       success: false,
       authenticated: true,
@@ -250,7 +286,221 @@ export async function getAuthenticatedCustomerOrders(
 }
 
 /**
- * 4. CREATE SUPPORT COMPLAINT / ESCALATION TICKET
+ * 4. AUTHORIZED CUSTOMER WALLET & TRANSACTIONS RETRIEVAL
+ */
+export async function getAuthenticatedCustomerWallet(context: SupportChatContext) {
+  if (!context.customerId) {
+    return {
+      success: false,
+      authenticated: false,
+      message: 'Please log in with your phone number to check your wallet balance and transactions.',
+      balance: 0,
+      transactions: [],
+    };
+  }
+
+  try {
+    const wallet = await db.customerWallet.findUnique({
+      where: { customerId: context.customerId },
+      include: {
+        transactions: {
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+          select: {
+            id: true,
+            type: true,
+            amount: true,
+            balanceAfter: true,
+            status: true,
+            reason: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    if (!wallet) {
+      return {
+        success: true,
+        authenticated: true,
+        balance: 0,
+        transactions: [],
+        message:
+          'Your Junk It Out wallet balance is ₹0.00. You can top up your wallet or pay via Razorpay for pickups.',
+      };
+    }
+
+    return {
+      success: true,
+      authenticated: true,
+      balance: wallet.balance,
+      transactions: wallet.transactions.map((t) => ({
+        type: t.type,
+        amount: t.amount,
+        balanceAfter: t.balanceAfter,
+        status: t.status,
+        reason: t.reason || 'General transaction',
+        date: t.createdAt.toISOString(),
+      })),
+      message: `Your current wallet balance is ₹${wallet.balance.toFixed(2)}.`,
+    };
+  } catch {
+    return {
+      success: false,
+      authenticated: true,
+      balance: 0,
+      transactions: [],
+      message: 'Unable to retrieve wallet details at this time.',
+    };
+  }
+}
+
+/**
+ * 5. RETRIEVE SUBSCRIPTION PLANS & ACTIVE MEMBERSHIP
+ */
+export async function getSubscriptionPlans(context: SupportChatContext) {
+  try {
+    const offers = await db.subscriptionOffer.findMany({
+      where: { active: true },
+      orderBy: { displayOrder: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        durationMonths: true,
+        price: true,
+        benefitsJson: true,
+      },
+    });
+
+    let activeSubscription: any = null;
+    if (context.customerId) {
+      const sub = await db.customerSubscription.findFirst({
+        where: {
+          customerId: context.customerId,
+          status: 'ACTIVE',
+        },
+        include: { offer: true },
+      });
+      if (sub) {
+        activeSubscription = {
+          planName: sub.offer?.name,
+          startDate: sub.startDate.toISOString(),
+          expiryDate: sub.expiryDate.toISOString(),
+          status: sub.status,
+        };
+      }
+    }
+
+    const plans = offers.map((o) => {
+      let benefits: string[] = [];
+      try {
+        benefits = JSON.parse(o.benefitsJson || '[]');
+      } catch {}
+      return {
+        id: o.id,
+        name: o.name,
+        price: o.price,
+        durationMonths: o.durationMonths,
+        description: o.description,
+        benefits,
+      };
+    });
+
+    return {
+      success: true,
+      plans,
+      activeSubscription,
+      summary:
+        'Junk It Out offers Quarterly (₹299/3 months), Six Months (₹399/6 months), and Annual (₹599/12 months) subscription plans with priority dispatch, exclusive pickup offers, and extended savings.',
+    };
+  } catch {
+    return {
+      success: true,
+      plans: [
+        {
+          name: 'Quarterly',
+          durationMonths: 3,
+          price: 299,
+          benefits: ['Priority support', 'Exclusive pickup offers'],
+        },
+        {
+          name: 'Six Months',
+          durationMonths: 6,
+          price: 399,
+          benefits: ['Priority support', 'Exclusive pickup offers', 'Extended member savings'],
+        },
+        {
+          name: 'Annual',
+          durationMonths: 12,
+          price: 599,
+          benefits: [
+            'Priority support',
+            'Exclusive pickup offers',
+            'Extended member savings',
+            'Annual member rewards',
+          ],
+        },
+      ],
+      activeSubscription: null,
+      summary:
+        'Junk It Out offers Quarterly (₹299), Six Months (₹399), and Annual (₹599) plans.',
+    };
+  }
+}
+
+/**
+ * 6. AUTHORIZED CUSTOMER DISPUTES RETRIEVAL
+ */
+export async function getAuthenticatedCustomerDisputes(context: SupportChatContext) {
+  if (!context.customerId) {
+    return {
+      success: false,
+      authenticated: false,
+      message: 'Please log in to view your dispute and complaint tickets.',
+      disputes: [],
+    };
+  }
+
+  try {
+    const complaints = await db.complaint.findMany({
+      where: { customerId: context.customerId },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      select: {
+        id: true,
+        category: true,
+        description: true,
+        status: true,
+        createdAt: true,
+        order: { select: { orderNumber: true } },
+      },
+    });
+
+    return {
+      success: true,
+      authenticated: true,
+      disputes: complaints.map((c) => ({
+        ticketId: c.id,
+        referenceNumber: `JIO-${c.id.slice(0, 8).toUpperCase()}`,
+        orderNumber: c.order?.orderNumber || 'General Support',
+        category: c.category,
+        status: c.status,
+        filedAt: c.createdAt.toISOString(),
+      })),
+    };
+  } catch {
+    return {
+      success: false,
+      authenticated: true,
+      message: 'Unable to retrieve disputes at this time.',
+      disputes: [],
+    };
+  }
+}
+
+/**
+ * 7. CREATE SUPPORT COMPLAINT / ESCALATION TICKET
  * Saves real complaint in the database and returns authoritative ticket reference.
  */
 export async function createLiveSupportComplaint(
@@ -302,7 +552,7 @@ export async function createLiveSupportComplaint(
         ticketId: complaint.id,
         referenceNumber: `JIO-${complaint.id.slice(0, 8).toUpperCase()}`,
         status: 'OPEN',
-        message: `Your complaint has been successfully registered under ticket reference JIO-${complaint.id.slice(0, 8).toUpperCase()}. Our support team will review it within 2 hours.`,
+        message: `Your complaint has been successfully registered under ticket reference JIO-${complaint.id.slice(0, 8).toUpperCase()}. Our support operations desk will review it within 2 hours.`,
       };
     } else {
       // Unauthenticated visitor -> store as ContactEnquiry
@@ -332,7 +582,7 @@ export async function createLiveSupportComplaint(
         message: `Your enquiry has been registered under ticket reference JIO-ENQ-${enquiry.id.slice(0, 8).toUpperCase()}. Please log in for personalized order tracking.`,
       };
     }
-  } catch (err: any) {
+  } catch {
     return {
       success: false,
       message: 'Could not create complaint record at this time.',
@@ -341,9 +591,11 @@ export async function createLiveSupportComplaint(
 }
 
 /**
- * 5. CALCULATE LIVE PICKUP ESTIMATE
+ * 8. CALCULATE LIVE PICKUP ESTIMATE
  */
-export async function calculateLiveEstimate(items: Array<{ categoryName: string; weightKg: number }>) {
+export async function calculateLiveEstimate(
+  items: Array<{ categoryName: string; weightKg: number }>
+) {
   try {
     const categories = await db.wasteCategory.findMany({ where: { active: true } });
     const summaryItems = items.map((item) => {
@@ -390,23 +642,153 @@ export async function calculateLiveEstimate(items: Array<{ categoryName: string;
 }
 
 /**
- * 6. DETERMINISTIC INTELLIGENT FALLBACK ENGINE
- * Handles English, Kannada (ಕನ್ನಡ), and Hinglish queries when OpenAI API key is unavailable or fails.
+ * 9. DETERMINISTIC INTELLIGENT FALLBACK ENGINE
+ * Covers English, Kannada (ಕನ್ನಡ), and Hinglish queries across all 6 approved knowledge domains:
+ * 1) Pickup booking and scheduling
+ * 2) Pricing and accepted materials
+ * 3) Wallets and transactions
+ * 4) Subscriptions
+ * 5) Disputes
+ * 6) Refunds
  */
 export async function generateFallbackSupportResponse(
   userQuery: string,
   context: SupportChatContext
-): Promise<{ text: string; suggestedQuestions: string[] }> {
+): Promise<{ text: string; suggestedQuestions: string[]; referenceId?: string }> {
   const q = userQuery.toLowerCase().trim();
 
   // 1. Language detection
   const isKannada = /[\u0C80-\u0CFF]/.test(userQuery);
   const isHinglish =
-    /\b(kya|hai|kitna|kaise|karo|batao|karenge|mujhe|mera|meri|paisa|rate|bhav|daam|chahiye|kab|aayega|aayegi|cancel|order|kaha|kahan)\b/i.test(
+    /\b(kya|hai|kitna|kaise|karo|batao|karenge|mujhe|mera|meri|paisa|rate|bhav|daam|chahiye|kab|aayega|aayegi|cancel|order|kaha|kahan|shikayat)\b/i.test(
       userQuery
     );
 
-  // 2. Payments, Refunds, and Razorpay (Handled prior to order tracking to prevent refund/cancellation queries routing to tracking)
+  // 2. High-Priority: Human Support Escalation Request
+  if (
+    q.includes('human') ||
+    q.includes('representative') ||
+    q.includes('support representative') ||
+    q.includes('escalate') ||
+    q.includes('speak with a person') ||
+    q.includes('talk to a person') ||
+    q.includes('human agent') ||
+    q.includes('support agent') ||
+    q.includes('talk to agent') ||
+    q.includes('speak to agent') ||
+    q.includes('executive') ||
+    q.includes('supervisor') ||
+    (isKannada && (q.includes('ಮಾನವ') || q.includes('ಪ್ರತಿನಿಧಿ')))
+  ) {
+    const complaintResult = await createLiveSupportComplaint(context, {
+      category: 'HUMAN_SUPPORT_ESCALATION',
+      description: userQuery,
+    });
+    const refId = complaintResult.success ? complaintResult.referenceNumber : undefined;
+
+    return {
+      text: isKannada
+        ? `ಖಂಡಿತ, ನಿಮ್ಮ ವಿನಂತಿಯನ್ನು ನಮ್ಮ ಕಾರ್ಯಾಚರಣೆ ತಂಡಕ್ಕೆ ಅಧಿಕೃತ ಬೆಂಬಲ ಟಿಕೆಟ್ ಆಗಿ ದಾಖಲಿಸಲಾಗಿದೆ${refId ? ` (ಟಿಕೆಟ್ ಸಂಖ್ಯೆ: ${refId})` : ''}. ನಮ್ಮ ಬೆಂಬಲ ಪ್ರತಿನಿಧಿ ಶೀಘ್ರದಲ್ಲೇ ನಿಮ್ಮನ್ನು ಸಂಪರ್ಕಿಸುತ್ತಾರೆ.`
+        : isHinglish
+        ? `Bilkul, maine aapke sawal ke liye formal support ticket create kar diya hai${refId ? ` (Ticket Reference: ${refId})` : ''}. Hamare operations team ke representative jald hi aapse contact karenge.`
+        : `I have registered an official human escalation support request for you${refId ? ` with reference ${refId}` : ''}. Our operations desk has been notified and a representative will follow up with you promptly.`,
+      suggestedQuestions: ['Where is my pickup agent?', 'Refund policy', 'Check scrap prices'],
+      referenceId: refId,
+    };
+  }
+
+  // 2. Wallets and Transactions
+  if (
+    q.includes('wallet') ||
+    q.includes('topup') ||
+    q.includes('top up') ||
+    q.includes('wallet balance') ||
+    q.includes('wallet transaction') ||
+    (isKannada && (q.includes('ವಾಲೆಟ್') || q.includes('ಖಾತೆ')))
+  ) {
+    if (!context.customerId) {
+      return {
+        text: isKannada
+          ? `Junk It Out ವಾಲೆಟ್ ವೈಶಿಷ್ಟ್ಯ:\n• ವಾಲೆಟ್ ಮೂಲಕ ಸುಲಭವಾಗಿ ಸ್ಕ್ರ್ಯಾಪ್ ಪಿಕಪ್ ಶುಲ್ಕ ಪಾವತಿಸಬಹುದು.\n• Razorpay ಮೂಲಕ ಸುರಕ್ಷಿತವಾಗಿ ಹಣ ತುಂಬಿಕೊಳ್ಳಬಹುದು (Top-up).\n• ನಿಮ್ಮ ವಾಲೆಟ್ ಬ್ಯಾಲೆನ್ಸ್ ನೋಡಲು ದಯವಿಟ್ಟು ನೋಂದಾಯಿತ ಮೊಬೈಲ್ ಸಂಖ್ಯೆಯೊಂದಿಗೆ ಲಾಗಿನ್ ಆಗಿ.`
+          : isHinglish
+          ? `Junk It Out Wallet ki jankari:\n• Wallet se doorstep pickups ke liye easily pay kar sakte hain.\n• Razorpay se wallet instant top-up kar sakte hain.\n• Apna wallet balance check karne ke liye kripya Junk It Out account me login karein.`
+          : `Junk It Out Wallet & Transactions:\n• Digital Wallet: Conveniently pay for doorstep pickups directly from your Junk It Out wallet balance.\n• Secure Top-Up: Re-charge your balance anytime via Razorpay (UPI, Cards, NetBanking).\n• Immutable Adjustments: All credit and debit transactions are recorded with audit reasons and your balance never goes negative.\n• Check Balance: Log in to view your live wallet balance and transaction statement in your profile.`,
+        suggestedQuestions: ['How do I log in?', 'What is the refund policy?', 'Check scrap rates'],
+      };
+    }
+
+    const walletData = await getAuthenticatedCustomerWallet(context);
+    return {
+      text: isKannada
+        ? `ನಿಮ್ಮ Junk It Out ವಾಲೆಟ್ ಮಾಹಿತಿ:\n• ಪ್ರಸ್ತುತ ಬ್ಯಾಲೆನ್ಸ್: ₹${walletData.balance.toFixed(2)}\n• ಇತ್ತೀಚಿನ ವಹಿವಾಟುಗಳು: ${walletData.transactions.length > 0 ? walletData.transactions.map((t) => `${t.type}: ₹${t.amount.toFixed(2)} (${t.status})`).join(', ') : 'ಯಾವುದೇ ಇತ್ತೀಚಿನ ವಹಿವಾಟುಗಳಿಲ್ಲ.'}\n• ನೀವು ಪ್ರೊಫೈಲ್ ಪುಟದಲ್ಲಿ Razorpay ಬಳಸಿ ಟಾಪ್-ಅಪ್ ಮಾಡಬಹುದು.`
+        : isHinglish
+        ? `Aapka Junk It Out Wallet:\n• Current Balance: ₹${walletData.balance.toFixed(2)}\n• Recent Transactions: ${walletData.transactions.length > 0 ? walletData.transactions.map((t) => `${t.type}: ₹${t.amount.toFixed(2)} (${t.status})`).join(', ') : 'Koi recent transaction nahi hai.'}\n• Aap profile me Wallet section se easily Razorpay se top-up kar sakte hain.`
+        : `Your Junk It Out Wallet Summary:\n• Available Balance: ₹${walletData.balance.toFixed(2)}\n• Recent Transactions: ${walletData.transactions.length > 0 ? walletData.transactions.map((t) => `\n  - ${t.type.replace(/_/g, ' ')}: ₹${t.amount.toFixed(2)} (${t.status})`).join('') : 'No recent transactions.'}\n• You can top up your wallet or pay for upcoming pickups in the Customer Wallet dashboard.`,
+      suggestedQuestions: ['How do I top up my wallet?', 'Subscription plans', 'Where is my pickup agent?'],
+    };
+  }
+
+  // 3. Subscriptions and Membership Plans
+  if (
+    q.includes('subscription') ||
+    q.includes('membership') ||
+    q.includes('plan') ||
+    q.includes('quarterly') ||
+    q.includes('annual') ||
+    (isKannada && (q.includes('ಚಂದಾದಾರಿಕೆ') || q.includes('ಯೋಜನೆ')))
+  ) {
+    const subData = await getSubscriptionPlans(context);
+    const planText = subData.plans
+      .map((p) => `• ${p.name} (${p.durationMonths} months): ₹${p.price} — ${p.benefits.join(', ')}`)
+      .join('\n');
+
+    return {
+      text: isKannada
+        ? `Junk It Out ಸದಸ್ಯತ್ವ ಯೋಜನೆಗಳು (Subscription Plans):\n${planText}\n\nಪ್ರಯೋಜನಗಳು: ಆದ್ಯತೆಯ ಪಿಕಪ್ ರವಾನೆ, ವಿಶೇಷ ಸ್ಕ್ರ್ಯಾಪ್ ಬೋನಸ್ ದರಗಳು ಮತ್ತು ಮೀಸಲಾದ ಬೆಂಬಲ ಡೆಸ್ಕ್.`
+        : isHinglish
+        ? `Junk It Out Subscription Plans:\n${planText}\n\nBenefits: Priority agent dispatch, exclusive scrap bonus offers, aur dedicated support.`
+        : `Junk It Out Subscription Plans:\n${planText}\n\nMember Benefits:\n• Priority Field Agent Dispatch in JP Nagar & BTM Layout\n• Exclusive bonus scrap rates and waiver guarantees\n• Dedicated priority customer support desk\n• Manage your subscription directly from your Customer Profile.`,
+      suggestedQuestions: ['Wallet & payments', 'Check scrap prices', 'How do I book a pickup?'],
+    };
+  }
+
+  // 4. Disputes and Complaints
+  if (
+    q.includes('dispute') ||
+    q.includes('complaint') ||
+    q.includes('shikayat') ||
+    q.includes('weight issue') ||
+    q.includes('wrong weight') ||
+    q.includes('scale mismatch') ||
+    (isKannada && (q.includes('ದೂರು') || q.includes('ವಿವಾದ') || q.includes('ತೂಕ')))
+  ) {
+    if (context.customerId) {
+      const disputesData = await getAuthenticatedCustomerDisputes(context);
+      const activeTickets = disputesData.disputes.length > 0
+        ? `\n\nYour active tickets:\n${disputesData.disputes.map((d) => `• Ticket #${d.referenceNumber} (${d.category}): Status ${d.status}`).join('\n')}`
+        : '';
+
+      return {
+        text: isKannada
+          ? `Junk It Out ವಿವಾದ ಪರಿಹಾರ ಪ್ರಕ್ರಿಯೆ:\n• ತೂಕದಲ್ಲಿ ವ್ಯತ್ಯಾಸವಿದ್ದರೆ ಸ್ಥಳದಲ್ಲೇ ಡಿಜಿಟಲ್ ತೂಕ ಮಾಪಕದಲ್ಲಿ ಮರು-ತೂಕ ಮಾಡಲು ಏಜೆಂಟ್‌ಗೆ ಕೇಳಬಹುದು.\n• ವಿವಾದ ಜೀವನಚಕ್ರ: OPEN → UNDER_REVIEW → AWAITING_CUSTOMER → RESOLVED / REJECTED.\n• ದೂರು ದಾಖಲಿಸಲು ಸಮಸ್ಯೆಯ ವಿವರವನ್ನು ನನಗೆ ತಿಳಿಸಿ, ನಾನು ಅಧಿಕೃತ ಟಿಕೆಟ್ ದಾಖಲಿಸುತ್ತೇನೆ.${activeTickets}`
+          : isHinglish
+          ? `Junk It Out Dispute Management Process:\n• Weight mismatch hone par agent ke calibrated digital scale par on-the-spot re-weighing kara sakte hain.\n• Dispute Lifecycle: OPEN → UNDER_REVIEW → AWAITING_CUSTOMER → RESOLVED / REJECTED.\n• Complaint raise karne ke liye issue details batayein, main official ticket generate kar dunga.${activeTickets}`
+          : `Junk It Out Dispute Management Lifecycle:\n• On-Spot Verification: If you suspect a weight mismatch, ask the agent to immediately re-weigh items on their calibrated digital scale.\n• Status Lifecycle: OPEN → UNDER_REVIEW → AWAITING_CUSTOMER → RESOLVED / REJECTED.\n• Live Timeline: Once logged, track your dispute's live chronological progress under Customer Support.\n• To register an official dispute, please describe your issue and I will create a ticket reference for you.${activeTickets}`,
+        suggestedQuestions: ['Request human support', 'What is the refund policy?', 'Where is my pickup agent?'],
+      };
+    }
+
+    return {
+      text: isKannada
+        ? `Junk It Out ವಿವಾದ ನಿರ್ವಹಣೆ:\n• ತೂಕ ವ್ಯತ್ಯಾಸವಿದ್ದರೆ ಸ್ಥಳದಲ್ಲೇ ಏಜೆಂಟ್‌ಗೆ ಮರು-ತೂಕ ಮಾಡಲು ಕೋರಬಹುದು.\n• ಲಾಗಿನ್ ಆದ ನಂತರ ನೀವು ಆರ್ಡರ್ ವಿವಾದವನ್ನು ದಾಖಲಿಸಬಹುದು ಮತ್ತು ಲೈವ್ ಸ್ಥಿತಿಯನ್ನು ಟ್ರ್ಯಾಕ್ ಮಾಡಬಹುದು.`
+        : isHinglish
+        ? `Junk It Out Dispute Resolution:\n• Weight issue aane par agent ke digital scale par spot re-weighing request kar sakte hain.\n• Please login to submit and track your order dispute tickets.`
+        : `Junk It Out Dispute Resolution:\n• Weight Disputes: Request immediate on-the-spot re-weighing on the agent's calibrated digital scale.\n• Formal Disputes: Support complaints follow a strict 5-stage lifecycle (OPEN → UNDER_REVIEW → AWAITING_CUSTOMER → RESOLVED / REJECTED) with full audit timeline tracking.\n• Please log in with your phone number to submit and track order disputes.`,
+      suggestedQuestions: ['Log in to track dispute', 'Check scrap rates', 'Refund policy'],
+    };
+  }
+
+  // 5. Payments, Refunds, and Razorpay
   if (
     q.includes('refund') ||
     q.includes('payment') ||
@@ -420,25 +802,24 @@ export async function generateFallbackSupportResponse(
   ) {
     return {
       text: isKannada
-        ? `ಪಾವತಿ ಮತ್ತು ಮರುಪಾವತಿ ನಿಯಮಗಳು:\n• ಗ್ರಾಹಕ ಪಾವತಿಗಳು: Razorpay ಮೂಲಕ UPI, ಕಾರ್ಡ್‌ಗಳು ಅಥವಾ ನೆಟ್‌ಬ್ಯಾಂಕಿಂಗ್ ಬಳಸಿ ಸುರಕ್ಷಿತವಾಗಿ ನಡೆಯುತ್ತವೆ.\n• ರದ್ದುಗೊಳಿಸಿದ ಆರ್ಡರ್ ಮರುಪಾವತಿ: ನೀವು ಪಿಕಪ್‌ಗೆ ಮುನ್ನ ರದ್ದುಗೊಳಿಸಿದರೆ, 100% ಮರುಪಾವತಿ 3–5 ವ್ಯವಹಾರ ದಿನಗಳಲ್ಲಿ ನಿಮ್ಮ ಬ್ಯಾಂಕ್ ಖಾತೆಗೆ ಜಮೆಯಾಗುತ್ತದೆ.\n• ಸ್ಕ್ರ್ಯಾಪ್ ಪಾವತಿಗಳು (Payouts): ನಿಜವಾದ ತೂಕದ ಆಧಾರದ ಮೇಲೆ ನಿಮ್ಮ ಖಾತೆಗೆ NEFT/UPI ಮೂಲಕ ವರ್ಗಾಯಿಸಲಾಗುತ್ತದೆ.`
+        ? `ಪಾವತಿ ಮತ್ತು ಮರುಪಾವತಿ ನಿಯಮಗಳು:\n• ಗ್ರಾಹಕ ಪಾವತಿಗಳು: Razorpay ಮೂಲಕ UPI, ಕಾರ್ಡ್‌ಗಳು ಅಥವಾ ನೆಟ್‌ಬ್ಯಾಂಕಿಂಗ್ ಬಳಸಿ ಸುರಕ್ಷಿತವಾಗಿ ನಡೆಯುತ್ತವೆ.\n• ರದ್ದುಗೊಳಿಸಿದ ಆರ್ಡರ್ ಮರುಪಾವತಿ: ನೀವು ಏಜೆಂಟ್ ಆಗಮನಕ್ಕೆ ಮುನ್ನ ರದ್ದುಗೊಳಿಸಿದರೆ, 100% ಸ್ವಯಂಚಾಲಿತ ಮರುಪಾವತಿ 3–5 ವ್ಯವಹಾರ ದಿನಗಳಲ್ಲಿ ನಿಮ್ಮ ಬ್ಯಾಂಕ್ ಖಾತೆಗೆ ಜಮೆಯಾಗುತ್ತದೆ.\n• ಸ್ಕ್ರ್ಯಾಪ್ ಪಾವತಿಗಳು (Payouts): ನಿಜವಾದ ತೂಕದ ಆಧಾರದ ಮೇಲೆ ನಿಮ್ಮ ಖಾತೆಗೆ NEFT/UPI ಮೂಲಕ ವರ್ಗಾಯಿಸಲಾಗುತ್ತದೆ.`
         : isHinglish
-        ? `Payments aur Refunds ki jankari:\n• Booking Payment: Razorpay se UPI/Cards/NetBanking ke through safely pay kar sakte hain.\n• Cancellation & Refund: Agar aap arrival se pehle cancel karte hain, toh 100% refund automatically trigger hota hai aur 3-5 days me original account me aa jata hai.\n• Doorstep Weighing: Calibrated digital scale se exact weight hone ke baad payment settle hota hai.`
-        : `Payments & Refunds at Junk It Out:\n• Booking Payments: Processed securely via Razorpay checkout supporting UPI, Credit/Debit Cards, and NetBanking.\n• Cancellation & Refunds: If you cancel before the agent arrives, a 100% automated refund is initiated and credited to your original payment method within 3–5 business days.\n• Scrap Settlement: If your recyclable value exceeds service charges, scrap payouts are disbursed directly via verified UPI or bank transfer.\n• Verified Records: We never claim a payment succeeded without database confirmation.`,
+        ? `Payments aur Refunds ki jankari:\n• Booking Payment: Razorpay se UPI/Cards/NetBanking ke through safely pay kar sakte hain.\n• Cancellation & Refund: Agar aap agent arrival se pehle cancel karte hain, toh 100% automated refund trigger hota hai aur 3-5 business days me original account me aa jata hai.\n• Doorstep Weighing: Calibrated digital scale se exact weight hone ke baad payment settle hota hai.`
+        : `Payments & Refunds at Junk It Out:\n• Booking Payments: Processed securely via Razorpay checkout supporting UPI, Credit/Debit Cards, NetBanking, and Customer Wallet balance.\n• Cancellation & Refunds: If you cancel before the agent arrives, a 100% automated refund is initiated and credited to your original payment method within 3–5 business days.\n• Scrap Settlement: If your recyclable value exceeds service charges, scrap payouts are disbursed directly via verified UPI or bank transfer.\n• Verified Records: We never claim a payment succeeded without database confirmation.`,
       suggestedQuestions: ['Where is my pickup agent?', 'Raise a dispute / complaint', 'Current scrap rates'],
     };
   }
 
-  // 3. Order Tracking
+  // 6. Order Tracking
   if (
-    (q.includes('order') ||
-      q.includes('track') ||
-      q.includes('status') ||
-      q.includes('agent') ||
-      q.includes('where is') ||
-      q.includes('arrive') ||
-      q.includes('kahan hai') ||
-      q.includes('order status') ||
-      (isKannada && (q.includes('ಆರ್ಡರ್') || q.includes('ಸ್ಥಿತಿ') || q.includes('ಏಜೆಂಟ್'))))
+    q.includes('order') ||
+    q.includes('track') ||
+    q.includes('status') ||
+    q.includes('where is') ||
+    q.includes('arrive') ||
+    q.includes('kahan hai') ||
+    q.includes('order status') ||
+    (isKannada && (q.includes('ಆರ್ಡರ್') || q.includes('ಸ್ಥಿತಿ') || q.includes('ಏಜೆಂಟ್')))
   ) {
     if (!context.customerId) {
       if (isKannada) {
@@ -486,7 +867,7 @@ export async function generateFallbackSupportResponse(
     };
   }
 
-  // 3. Pricing / Rates
+  // 7. Pricing / Rates
   if (
     q.includes('price') ||
     q.includes('pricing') ||
@@ -495,6 +876,7 @@ export async function generateFallbackSupportResponse(
     q.includes('per kg') ||
     q.includes('offer') ||
     q.includes('7 kg') ||
+    q.includes('7kg') ||
     q.includes('99') ||
     q.includes('charge') ||
     q.includes('cost') ||
@@ -519,7 +901,7 @@ export async function generateFallbackSupportResponse(
     if (isHinglish) {
       return {
         text: `Junk It Out ke live scrap rates (direct database se):\n${materialSummary}\n\n✨ Special Pricing Rule: Agar kisi individual material ka weight 7 kg se jyada hai, toh us material par special ₹99 offer price apply hota hai!\n🎉 Service Charge: Normal ₹50 doorstep collection charge abhi FREE (₹0) hai!`,
-        suggestedQuestions: ['E-waste collect karte ho?', 'Pickup kaise book karein?', 'Minimum quantity kitni hai?'],
+        suggestedQuestions: ['E-waste collect karte ho?', 'Pickup kaise book karein?', 'Minimum weight kitna hai?'],
       };
     }
 
@@ -529,7 +911,7 @@ export async function generateFallbackSupportResponse(
     };
   }
 
-  // 4. Accepted & Non-Accepted Materials
+  // 8. Accepted & Non-Accepted Materials
   if (
     q.includes('accept') ||
     q.includes('material') ||
@@ -568,8 +950,20 @@ export async function generateFallbackSupportResponse(
     };
   }
 
-  // 5. Service Areas & Locations (Strictly ONLY TWO Places: BTM Layout and JP Nagar)
+  // 9. Booking, Scheduling, Timings & Service Areas (Exclusively BTM Layout & JP Nagar)
   if (
+    q.includes('book') ||
+    q.includes('booking') ||
+    q.includes('schedule') ||
+    q.includes('scheduling') ||
+    q.includes('timing') ||
+    q.includes('timings') ||
+    q.includes('hour') ||
+    q.includes('hours') ||
+    q.includes('operating') ||
+    q.includes('operational') ||
+    q.includes('doorstep process') ||
+    q.includes('how does pickup work') ||
     q.includes('area') ||
     q.includes('location') ||
     q.includes('supported') ||
@@ -580,7 +974,7 @@ export async function generateFallbackSupportResponse(
     q.includes('jp nagar') ||
     q.includes('place') ||
     q.includes('two places') ||
-    (isKannada && (q.includes('ಪ್ರದೇಶ') || q.includes('ಎಲ್ಲಿ') || q.includes('ಸ್ಥಳ')))
+    (isKannada && (q.includes('ಪ್ರದೇಶ') || q.includes('ಎಲ್ಲಿ') || q.includes('ಸ್ಥಳ') || q.includes('ಬುಕಿಂಗ್') || q.includes('ಸಮಯ')))
   ) {
     if (isKannada) {
       return {
@@ -602,61 +996,63 @@ export async function generateFallbackSupportResponse(
     };
   }
 
-  // 6. Complaints & Escalations
-  if (
-    q.includes('complaint') ||
-    q.includes('dispute') ||
-    q.includes('escalate') ||
-    q.includes('human') ||
-    q.includes('representative') ||
-    q.includes('problem') ||
-    q.includes('help me') ||
-    q.includes('shikayat') ||
-    (isKannada && (q.includes('ದೂರು') || q.includes('ಸಮಸ್ಯೆ')))
-  ) {
-    return {
-      text: isKannada
-        ? `ನಾವು ನಿಮಗೆ ಸಹಾಯ ಮಾಡಲು ಸಿದ್ಧರಿದ್ದೇವೆ. ದಯವಿಟ್ಟು ನಿಮ್ಮ ಸಮಸ್ಯೆಯ ವಿವರಗಳನ್ನು (ಉದಾ: ತೂಕ ವಿವಾದ, ಏಜೆಂಟ್ ವಿಳಂಬ, ಅಥವಾ ಪಾವತಿ ತೊಂದರೆ) ಇಲ್ಲಿ ಟೈಪ್ ಮಾಡಿ. ನಾನು ತಕ್ಷಣವೇ ಸಿಸ್ಟಮ್‌ನಲ್ಲಿ ದೂರು ದಾಖಲಿಸಿ ರೆಫರೆನ್ಸ್ ಸಂಖ್ಯೆಯನ್ನು ನೀಡುತ್ತೇನೆ.`
-        : isHinglish
-        ? `Main aapki turant madad kar sakta hoon. Kripya apni issue ki details (jaise weight dispute, agent delay, ya payment issue) share karein. Main database me formal support complaint generate karke aapko reference number de dunga.`
-        : `I am here to help you resolve any issue immediately. Please briefly describe your issue (e.g. weight dispute, agent delay, payment problem), and I will log an official support complaint and give you an active reference ticket number for our human operations team.`,
-      suggestedQuestions: ['Log a weight dispute', 'Log a payment issue', 'Contact details & timings'],
-    };
-  }
-
-  // 8. General Greetings / Default Fallback
+  // 11. General Greetings & Approved Public Knowledge
   const publicKnowledge = await retrievePublicKnowledge(userQuery);
   if (publicKnowledge) {
     return {
-      text: `Here is the relevant information currently published by Junk It Out:\n\n${publicKnowledge}\n\nIf this does not answer your question, I can help raise a support ticket for the operations team.`,
+      text: `Here is the relevant information currently published by Junk It Out:\n\n${publicKnowledge}\n\nIf this does not answer your question, I can help raise a support ticket for our operations team.`,
       suggestedQuestions: ['Contact human support', 'How do I book a pickup?', 'What materials do you accept?'],
     };
   }
 
+  // 12. Check if query is a greeting
+  const isGreeting =
+    /^(hi|hello|hey|namaste|namaskara|good morning|good afternoon|good evening)\b/i.test(q);
+  if (isGreeting) {
+    return {
+      text: isKannada
+        ? `ನಮಸ್ಕಾರ! ನಾನು Junk It Out ನ ಅಧಿಕೃತ AI ಗ್ರಾಹಕ ಬೆಂಬಲ ಸಹಾಯಕ. ನಾನು ತ್ಯಾಜ್ಯ ಸಂಗ್ರಹಣೆ ದರಗಳು, ಬುಕಿಂಗ್, ಆರ್ಡರ್ ಟ್ರ್ಯಾಕಿಂಗ್, ವಾಲೆಟ್ ಮತ್ತು ದೂರುಗಳಿಗೆ ಸಂಬಂಧಿಸಿದ ಪ್ರಶ್ನೆಗಳಿಗೆ 24/7 ಸಹಾಯ ಮಾಡಬಲ್ಲೆ. ಇಂದು ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?`
+        : isHinglish
+        ? `Namaste! Main Junk It Out ka AI customer support agent hoon. Main live scrap pricing, doorstep pickup booking, order tracking, wallet aur support complaints me aapki 24/7 help kar sakta hoon. Aaj main aapki kya madad kar sakta hoon?`
+        : `Hello! I am your 24/7 Junk It Out Customer Support Assistant. I can help you with live scrap material rates, doorstep pickup bookings, real-time order tracking, wallet transactions, Razorpay payments, and support ticket escalations. How can I assist you today?`,
+      suggestedQuestions: [
+        'What materials do you accept & what are the rates?',
+        'How do I book a doorstep pickup?',
+        'Where is my pickup agent?',
+        'Explain the ₹99 offer and waived service charge',
+      ],
+    };
+  }
+
+  // 13. Unknown / Unresolved Question Handling
+  // Avoid inventing policies, rates, or coverage outside approved knowledge
+  await logUnresolvedQuestion(userQuery, context, 'NO_APPROVED_KNOWLEDGE_MATCH');
+
   return {
     text: isKannada
-      ? `ನಮಸ್ಕಾರ! ನಾನು Junk It Out ನ ಅಧಿಕೃತ AI ಗ್ರಾಹಕ ಬೆಂಬಲ ಸಹಾಯಕ. ನಾನು ತ್ಯಾಜ್ಯ ಸಂಗ್ರಹಣೆ ದರಗಳು, ಬುಕಿಂಗ್, ಆರ್ಡರ್ ಟ್ರ್ಯಾಕಿಂಗ್, ಮತ್ತು ದೂರುಗಳಿಗೆ ಸಂಬಂಧಿಸಿದ ಪ್ರಶ್ನೆಗಳಿಗೆ 24/7 ಸಹಾಯ ಮಾಡಬಲ್ಲೆ. ಇಂದು ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?`
+      ? `ಕ್ಷಮಿಸಿ, ನನ್ನ ಬಳಿ ಈ ಪ್ರಶ್ನೆಗೆ ಅಧಿಕೃತ Junk It Out ಮಾಹಿತಿ ಲಭ್ಯವಿಲ್ಲ. ತಪ್ಪು ಮಾಹಿತಿ ನೀಡುವುದನ್ನು ತಪ್ಪಿಸಲು, ಈ ಪ್ರಶ್ನೆಯನ್ನು ನಮ್ಮ ಆಪರೇಷನ್ಸ್ ಡೆಸ್ಕ್‌ಗೆ ದಾಖಲಿಸಿದ್ದೇನೆ. ನೀವು ಮಾನವ ಬೆಂಬಲ ಅಧಿಕಾರಿಯೊಂದಿಗೆ ಮಾತನಾಡಲು ಬಯಸುವಿರಾ?`
       : isHinglish
-      ? `Namaste! Main Junk It Out ka AI customer support agent hoon. Main live scrap pricing, doorstep pickup booking, order tracking aur support complaints me aapki 24/7 help kar sakta hoon. Aaj main aapki kya madad kar sakta hoon?`
-      : `Hello! I am your 24/7 Junk It Out Customer Support Assistant. I can help you with live scrap material rates, doorstep pickup bookings, real-time order tracking, Razorpay payment queries, and support ticket escalations. How can I assist you today?`,
+      ? `Maaf kijiye, mere paas is sawal ke liye Junk It Out ki verified policy jankari nahi hai. Galat information se bachne ke liye maine ye sawal support team ke liye record kar liya hai. Kya aap human support se baat karna chahte hain?`
+      : `I do not have verified policy or service details regarding that specific inquiry. To ensure you receive strictly accurate information, I have logged this question for our operations desk. Would you like me to connect you with a human support representative or register a support ticket?`,
     suggestedQuestions: [
-      'What materials do you accept & what are the rates?',
-      'How do I book a doorstep pickup?',
-      'Where is my pickup agent?',
-      'Explain the ₹99 offer and waived service charge',
+      'Connect with human support',
+      'What materials do you accept?',
+      'Check scrap prices',
+      'Supported service areas',
     ],
   };
 }
 
 /**
- * 7. OPENAI TOOLS DEFINITIONS
+ * 10. OPENAI TOOLS DEFINITIONS
  */
 const SUPPORT_TOOLS = [
   {
     type: 'function',
     function: {
       name: 'get_live_materials_and_pricing',
-      description: 'Retrieve all live accepted waste materials, current rates per kg, min/max weights, and special pricing rules from the database.',
+      description:
+        'Retrieve all live accepted waste materials, current rates per kg, min/max weights, and special pricing rules from the database.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -664,7 +1060,8 @@ const SUPPORT_TOOLS = [
     type: 'function',
     function: {
       name: 'get_service_areas',
-      description: 'Get active service areas in Bengaluru (exclusively BTM Layout and JP Nagar), ETA, operational hours and supported locations.',
+      description:
+        'Get active service areas in Bengaluru (exclusively BTM Layout and JP Nagar), ETA, operational hours and supported locations.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -672,11 +1069,15 @@ const SUPPORT_TOOLS = [
     type: 'function',
     function: {
       name: 'get_customer_orders',
-      description: 'Retrieve real-time orders, status, arrival ETA, and payment status for the currently authenticated customer.',
+      description:
+        'Retrieve real-time orders, status, arrival ETA, and payment status for the currently authenticated customer.',
       parameters: {
         type: 'object',
         properties: {
-          queryOrderNumber: { type: 'string', description: 'Optional specific order number to look up' },
+          queryOrderNumber: {
+            type: 'string',
+            description: 'Optional specific order number to look up',
+          },
         },
       },
     },
@@ -684,8 +1085,36 @@ const SUPPORT_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'get_customer_wallet',
+      description:
+        'Retrieve the authenticated customer wallet balance and recent ledger transactions.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_subscription_plans',
+      description:
+        'Retrieve verified subscription plans (Quarterly, Six Months, Annual) and check if customer has active membership.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_customer_disputes',
+      description:
+        'Retrieve the authenticated customer dispute and complaint tickets with their live status.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'calculate_pickup_estimate',
-      description: 'Calculate exact pricing and summary for specified materials and weights using the authoritative pricing engine.',
+      description:
+        'Calculate exact pricing and summary for specified materials and weights using the authoritative pricing engine.',
       parameters: {
         type: 'object',
         properties: {
@@ -709,13 +1138,20 @@ const SUPPORT_TOOLS = [
     type: 'function',
     function: {
       name: 'create_support_complaint',
-      description: 'Register an official support complaint in the database and return a verified ticket reference number.',
+      description:
+        'Register an official support complaint in the database and return a verified ticket reference number.',
       parameters: {
         type: 'object',
         properties: {
           category: {
             type: 'string',
-            enum: ['WEIGHT_DISPUTE', 'AGENT_BEHAVIOR', 'PAYMENT_ISSUE', 'GENERAL_SUPPORT', 'DELAYED_PICKUP'],
+            enum: [
+              'WEIGHT_DISPUTE',
+              'AGENT_BEHAVIOR',
+              'PAYMENT_ISSUE',
+              'GENERAL_SUPPORT',
+              'DELAYED_PICKUP',
+            ],
           },
           description: { type: 'string', description: 'Clear description of the customer issue' },
           orderNumber: { type: 'string', description: 'Optional related order number' },
@@ -727,7 +1163,7 @@ const SUPPORT_TOOLS = [
 ];
 
 /**
- * 8. MAIN SUPPORT CHAT ORCHESTRATOR
+ * 11. MAIN SUPPORT CHAT ORCHESTRATOR
  */
 export async function handleSupportChat(
   userMessage: string,
@@ -760,14 +1196,16 @@ Rules you MUST ALWAYS follow:
 4. Pricing Rules:
    - Doorstep Service charge is WAIVED (FREE / ₹0). The original ₹50 is not collected.
    - Special Material Pricing: If the quantity of any individual material exceeds 7 kg, the special flat price is ₹99 for that material.
-5. Security & Isolation:
-   - When checking orders, ONLY retrieve the authenticated customer's own orders.
-   - If the user asks about an order but is not logged in, politely prompt them to log in.
-   - Never reveal agent personal phone numbers after an order is completed, and never disclose vehicle registration numbers.
-6. Escalation:
-   - If the customer is facing a weight dispute, payment delay, or agent issue, offer to create an official complaint using the 'create_support_complaint' tool.
-   - Always return the real ticket reference number returned by the tool.
-7. Tone: Courteous, concise, helpful, and transparent. Avoid boilerplate or robotic greetings.${knowledgeContext}`;
+5. Wallets & Subscriptions:
+   - Customers have a digital wallet used for doorstep pickups; topups are processed via Razorpay.
+   - Subscription plans: Quarterly (₹299/3mo), Six Months (₹399/6mo), Annual (₹599/12mo).
+6. Disputes & Refunds:
+   - Disputes follow a 5-stage lifecycle: OPEN → UNDER_REVIEW → AWAITING_CUSTOMER → RESOLVED / REJECTED.
+   - Weight disputes: Customers can request immediate on-spot re-weighing on calibrated digital scale.
+   - Refunds: 100% automated refund on pre-arrival cancellation via Razorpay (3–5 business days).
+7. Escalation:
+   - If the customer asks for a human, representative, or is facing a dispute, offer to create an official complaint using the 'create_support_complaint' tool.
+8. Tone: Courteous, concise, helpful, and transparent. Avoid boilerplate or robotic greetings.${knowledgeContext}`;
 
   const messages: any[] = [
     { role: 'system', content: systemPrompt },
@@ -811,6 +1249,7 @@ Rules you MUST ALWAYS follow:
     // Handle tool calls if requested by OpenAI
     if (choice.tool_calls && Array.isArray(choice.tool_calls) && choice.tool_calls.length > 0) {
       messages.push(choice);
+      let escalationReferenceId: string | undefined = undefined;
 
       for (const tc of choice.tool_calls) {
         const fnName = tc.function.name;
@@ -826,10 +1265,19 @@ Rules you MUST ALWAYS follow:
           toolResult = await getLiveServiceAreas();
         } else if (fnName === 'get_customer_orders') {
           toolResult = await getAuthenticatedCustomerOrders(context, args.queryOrderNumber);
+        } else if (fnName === 'get_customer_wallet') {
+          toolResult = await getAuthenticatedCustomerWallet(context);
+        } else if (fnName === 'get_subscription_plans') {
+          toolResult = await getSubscriptionPlans(context);
+        } else if (fnName === 'get_customer_disputes') {
+          toolResult = await getAuthenticatedCustomerDisputes(context);
         } else if (fnName === 'calculate_pickup_estimate') {
           toolResult = await calculateLiveEstimate(args.items || []);
         } else if (fnName === 'create_support_complaint') {
           toolResult = await createLiveSupportComplaint(context, args);
+          if (toolResult.success && toolResult.referenceNumber) {
+            escalationReferenceId = toolResult.referenceNumber;
+          }
         } else {
           toolResult = { error: 'Unknown tool' };
         }
@@ -871,6 +1319,7 @@ Rules you MUST ALWAYS follow:
             'Book a doorstep pickup',
             'Where is my pickup agent?',
           ],
+          referenceId: escalationReferenceId,
         };
       }
     }
@@ -884,7 +1333,10 @@ Rules you MUST ALWAYS follow:
       ],
     };
   } catch (err: any) {
-    console.warn('[SUPPORT_AGENT_EXCEPTION] Falling back to intelligent local engine:', err?.message || err);
+    console.warn(
+      '[SUPPORT_AGENT_EXCEPTION] Falling back to intelligent local engine:',
+      err?.message || err
+    );
     return generateFallbackSupportResponse(userMessage, context);
   }
 }
